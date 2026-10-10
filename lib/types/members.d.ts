@@ -53,6 +53,8 @@ export interface MemberLlmSelectionRequest {
     model?: string;
     /** Plugin-level member model default. */
     defaultModel?: string;
+    /** Configured member LLM provider, paired with `defaultModel` (issue #189). */
+    defaultProvider?: string;
     /** Explicit reasoning effort; "default" selects the target model's default effort. */
     reasoningEffort?: string;
     /** Configured fallback route. */
@@ -61,6 +63,45 @@ export interface MemberLlmSelectionRequest {
         model: string;
     };
 }
+/** A composed member route plus where each half came from. */
+export interface MemberRouteResolution {
+    readonly provider: {
+        readonly value: string;
+        readonly source: 'request' | 'config' | 'captain';
+    };
+    readonly model: {
+        readonly value: string;
+        readonly source: 'request' | 'config' | 'captain';
+    };
+    /**
+     * Whether the provider half was *derived* rather than named. Only a
+     * model-only plugin default may have its owner looked up in the provider
+     * catalogs; a provider or model the caller named is never re-pointed.
+     */
+    readonly derivedProvider: boolean;
+}
+/**
+ * Compose one member route from request, plugin configuration and the captain
+ * session, without performing any I/O. This is the single place where the
+ * precedence between the captain's route and a configured member default is
+ * decided, so a configured model can never be silently paired with whichever
+ * provider the captain happens to sit on (issue #189).
+ *
+ * Precedence: explicit request > plugin configuration > captain session. Model
+ * ids are used verbatim: a `/` inside a model id is part of that id and is
+ * never treated as a provider separator.
+ *
+ * `derivedProvider` is true only for a bare configured `memberModel` with no
+ * provider anywhere, which is the one shape whose owner must come from the
+ * provider catalogs.
+ * @param request - the captain-supplied and plugin-configured route halves.
+ * @param captain - the captain's current session route.
+ * @returns the composed route, or `undefined` when a half cannot be determined.
+ */
+export declare function composeMemberRoute(request: Pick<MemberLlmSelectionRequest, 'provider' | 'model' | 'defaultModel' | 'defaultProvider'>, captain: {
+    readonly provider: string;
+    readonly model: string;
+}): MemberRouteResolution | undefined;
 /** Process-local bridge between spawn admission and synchronous child setup. */
 export interface MemberSelectionRuntime {
     /** Trusted fresh-child admission, before the durable member id is written. */
@@ -98,6 +139,36 @@ interface FailedMemberAttempt {
     readonly memberId: string;
     readonly task?: Pick<TeamTask, 'id' | 'attempt' | 'attemptId'>;
 }
+/** How a final member turn failure relates to the durable record. */
+export type MemberFailureDisposition = 
+/** A live observed attempt was failed and its task marked failed. */
+'failed_attempt'
+/** The work had already settled; only a durable captain note was added. */
+ | 'noted_settled'
+/** No record: stale generation, superseded attempt, retired member, or no team. */
+ | 'ignored';
+/**
+ * Classify a final member turn failure against the durable record. Pure, so the
+ * policy is testable without a lock or a Harness.
+ *
+ * A failure may only mutate the attempt the plugin actually observed. When that
+ * attempt is gone — the member moved on to newer work, the task was
+ * reassigned to a newer attempt, or the member generation was replaced — the
+ * late error carries no authority and stays silent. When the failure belongs to
+ * the current generation but its work already settled, the task and member are
+ * left exactly as they are and only a durable captain note is added: otherwise
+ * an operator cannot tell a clean run from one whose member's last turn died
+ * (429, auth failure, crash) after the delivery landed (issue #205).
+ * @param observed - the live member/task capability captured at the error event.
+ * @param current - the current durable member record and open task, if any.
+ * @returns the disposition for this failure.
+ */
+export declare function classifyMemberFailure(observed: FailedMemberAttempt, current: {
+    readonly member?: Pick<TeamMember, 'id' | 'status'> | undefined;
+    readonly task?: Pick<TeamTask, 'id' | 'attempt' | 'attemptId'> | undefined;
+    /** The durable record of the task the observation referred to, settled or not. */
+    readonly observedRecord?: Pick<TeamTask, 'id' | 'status' | 'subject'> | undefined;
+}): MemberFailureDisposition;
 /** Record a final turn failure, never an intermediate request retry. */
 export declare function failMemberOpenAttempt(ctx: Context, stateRoot: string, teamId: string, memberName: string, failure: {
     readonly code: string;
@@ -111,6 +182,15 @@ export declare function failMemberOpenAttempt(ctx: Context, stateRoot: string, t
  * An explicit effort overrides either policy; the sentinel "default" also
  * selects the target model's default. The final effort is validated against
  * the target model before a child is created.
+ *
+ * A configured `memberModel` is a route preference, not a blind model-id
+ * override: it is paired with `memberLlmProvider` (or its own `provider/model`
+ * form) when configured, and when only a bare model id is configured it is
+ * adopted by the captain's provider only if that provider actually advertises
+ * it. Otherwise the catalog decides: exactly one advertising provider wins,
+ * none or several produce an actionable error listing them (issue #189). A
+ * provider the caller *named* — explicitly or via configuration — is never
+ * silently switched away from.
  */
 export declare function resolveMemberLlmSelection(ctx: Context, captain: Agent, request: MemberLlmSelectionRequest, signal?: AbortSignal): Promise<MemberLlmSelection>;
 /**

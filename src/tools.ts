@@ -52,6 +52,7 @@ import {
   describeQualityLoop,
   sanitizeReviewAcceptance,
   sanitizeReviewObjective,
+  isValidFindingLine,
   normalizeBlankOptionalTaskFields,
   taskKindOf,
 } from './state.ts'
@@ -85,6 +86,8 @@ export interface ToolsConfig {
   memberProvider: string
   /** Optional member model override. */
   memberModel?: string
+  /** Optional member LLM provider, paired with `memberModel` (issue #189). */
+  memberLlmProvider?: string
   /** Prompt injected into member personas and assignments. */
   executionPrompt?: string
   /** Plugin fallback route. */
@@ -1046,8 +1049,8 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
     parameters: {
       name: { type: 'string', required: true, description: 'Unique member name inside the team.' },
       role: { type: 'string', description: 'Role of the member (e.g. researcher, engineer, reviewer).' },
-      provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model.' },
-      model: { type: 'string', description: 'Optional model override. Omit for the captain\'s current model (or the configured memberModel default).' },
+      provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model. Omit to use the configured member route (memberLlmProvider/memberModel) or the captain\'s current route.' },
+      model: { type: 'string', description: 'Optional model override (used verbatim, including any "/" in the id). Omit for the configured memberModel default (paired with memberLlmProvider when set) or the captain\'s current model.' },
       reasoning_effort: { type: 'string', description: 'Optional reasoning effort override: one of the target model\'s supported effort ids, or "default" to force its default. When omitted, the captain\'s effort is inherited only for the same provider/model; a changed route uses the target default.' },
       executionPrompt: { type: 'string', description: 'Optional member-specific execution prompt. It remains editable while staged.' },
     },
@@ -1095,6 +1098,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           provider: args.provider,
           model: args.model,
           defaultModel: config.memberModel,
+          defaultProvider: config.memberLlmProvider,
           reasoningEffort: args.reasoning_effort,
           fallback: config.fallback,
         }, exec.signal)
@@ -2285,6 +2289,7 @@ async function initializeProfileTeam(input: {
       provider: template.provider,
       model: template.model,
       defaultModel: input.config.memberModel,
+      defaultProvider: input.config.memberLlmProvider,
       reasoningEffort: template.reasoningEffort,
       fallback: template.fallback ?? profile.fallback ?? input.config.fallback,
     }, input.exec.signal))
@@ -2367,7 +2372,12 @@ function parseFindings(value: unknown): ReviewFinding[] | undefined {
       // A blank optional file must be omitted, not persisted: durable-state
       // validation requires non-empty optional strings (issue #105 class).
       ...typeof raw['file'] === 'string' && raw['file'].trim() !== '' ? { file: raw['file'] } : {},
-      ...typeof raw['line'] === 'number' ? { line: raw['line'] } : {},
+      // Only a contract-valid line is persisted. A model that materializes
+      // "no line number" as -1 (or sends a non-integer) must not write a record
+      // the durable validator rejects on the next read, which used to brick the
+      // entire team (issue #188). The predicate is shared with
+      // `isReviewFinding`, so the two sides cannot drift apart again.
+      ...isValidFindingLine(raw['line']) ? { line: raw['line'] } : {},
       ...typeof raw['resolved'] === 'boolean' ? { resolved: raw['resolved'] } : {},
     }
   })
