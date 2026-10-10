@@ -57,8 +57,19 @@ import {
   taskKindOf,
 } from './state.ts'
 import { appendTaskEvidence } from './quality-gates.ts'
+import {
+  artifactDrift,
+  bindReviewToRevision,
+  deliveryArtifactPaths,
+  deliveryScopePatterns,
+  isQualityKind,
+  verdictScopePatterns,
+} from './quality-gates.ts'
+import type { DeliveryAudit } from './quality-gates.ts'
+import { auditTeamWorkspace } from './workspace-audit.ts'
+import { readArtifactScope, snapshotWorkspacePaths, workspacePathExists } from './artifacts.ts'
 import type { ContractAmendmentInput } from './state.ts'
-import type { AcceptanceResult, CommandResult, ReviewFinding, ReviewVerdict, TaskKind } from './types.ts'
+import type { AcceptanceResult, ArtifactDigest, ArtifactSnapshot, CommandResult, ReviewFinding, ReviewVerdict, TaskKind } from './types.ts'
 import {
   deliverToMember,
   installRetiredMemberGuard,
@@ -160,6 +171,38 @@ function stateRootOf(workspace: string, config: ToolsConfig): string {
 /** Process-local lock key scoped by workspace state root and team id. */
 function teamLockKey(stateRoot: string, teamId: string): string {
   return `team:${stateRoot}:${teamId}`
+}
+
+/**
+ * Bind a closing verdict to the revision it judged, using the snapshot taken
+ * when its attempt started (if any) to notice that the workspace changed while
+ * the gate was being formed. A verdict that ran over a moving workspace binds
+ * the drift explicitly instead of claiming the current bytes.
+ */
+function bindClosingVerdict(workspace: string, team: TeamState, task: TeamTask): void {
+  if (task.status !== 'completed') return
+  const kind = taskKindOf(task)
+  if (kind !== 'review' && kind !== 'requirements' && kind !== 'verification') return
+  if ((kind === 'review' || kind === 'requirements') && task.verdict !== 'pass') return
+  const scope = verdictScopePatterns(team, task)
+  if (scope.length === 0) return
+  const read = readArtifactScope(workspace, scope)
+  const duringDrift = task.verdictStartSnapshot === undefined
+    ? []
+    : artifactDrift(task.verdictStartSnapshot.artifacts, read.artifacts)
+  const bound = bindReviewToRevision(team, task, {
+    artifacts: read.artifacts,
+    gaps: read.gaps,
+    scope,
+    duringDrift,
+  })
+  task.reviewedTaskId = bound.reviewedTaskId
+  task.reviewedAttempt = bound.reviewedAttempt
+  task.reviewedArtifacts = bound.reviewedArtifacts
+  task.reviewedGaps = bound.reviewedGaps
+  task.reviewedScope = bound.reviewedScope
+  task.reviewedDuringDrift = bound.reviewedDuringDrift
+  task.verdictStartSnapshot = undefined
 }
 
 /** Process-local lock key enforcing one active team per captain session. */
@@ -1769,22 +1812,30 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         if (input.changedPaths !== undefined) task.changedPaths = input.changedPaths
         if (acceptanceResults !== undefined) task.acceptanceResults = acceptanceResults
         if (commandsRun !== undefined) task.commandsRun = commandsRun
+        // A passing gate is evidence about a revision: record which one, so a
+        // later edit cannot leave the team advertising an unreviewed revision.
+        bindClosingVerdict(workspace, fresh, task)
         task.updatedAt = Date.now()
         const priorDependencies = new Map(fresh.tasks.map(item => [item.id, [...item.dependencies]]))
-        const followUp = (task.status === 'failed' && (task.verdict === 'needs_revision' || task.verdict === 'reject'))
-          ? applyQualityFollowUp(fresh, task)
+        const followUp = (task.status === 'failed' && isQualityKind(taskKindOf(task)))
+          ? applyQualityFollowUp(
+            fresh,
+            task,
+            (paths) => snapshotWorkspacePaths(workspace, paths),
+            (path) => workspacePathExists(workspace, path),
+          )
           : undefined
         let followUpSummary: string | undefined
         if ((followUp?.created.length ?? 0) > 0) {
           const rewired = fresh.tasks.filter(item => priorDependencies.has(item.id) && JSON.stringify(priorDependencies.get(item.id)) !== JSON.stringify(item.dependencies))
-          followUpSummary = `Automatic quality follow-up for ${task.id}: ${followUp!.created.map(item => `${item.id} (${item.kind}, owner=${item.assignee ?? 'unassigned'}, deps=${item.dependencies.join(',') || 'none'})`).join('; ')}.${rewired.length ? ` Updated dependencies: ${rewired.map(item => `${item.id} -> ${item.dependencies.join(',')}`).join('; ')}.` : ''} Use these tasks; do not create duplicate repair/review work.`
+          followUpSummary = `Automatic quality follow-up for ${task.id}: ${followUp!.created.map(item => `${item.id} (${item.kind}, owner=${item.assignee ?? 'unassigned'}, deps=${item.dependencies.join(',') || 'none'})`).join('; ')}.${rewired.length ? ` Updated dependencies: ${rewired.map(item => `${item.id} -> ${item.dependencies.join(',')}`).join('; ')}.` : ''} Use these tasks; do not create duplicate repair/review work.${followUp!.excludedFindings === undefined ? '' : ` Findings on default-excluded paths were not turned into a contract and stay with the user: ${followUp!.excludedFindings.join(', ')}.`}`
           followUpMessage = createMessage(CAPTAIN_KEY, CAPTAIN_KEY, followUpSummary)
         }
         if (followUp?.escalated === true) {
           await appendMailbox(stateRoot, fresh.id, CAPTAIN_KEY, createMessage(
             CAPTAIN_KEY,
             CAPTAIN_KEY,
-            `Quality-gate loop escalated after ${task.id} (${task.kind ?? 'review'} verdict=${task.verdict}). Automatic repair/review stopped.`,
+            `Quality-gate loop escalated after ${task.id} (${task.kind ?? 'review'} verdict=${task.verdict}). Automatic repair/review stopped.${followUp.reason === undefined ? '' : ` Reason: ${followUp.reason}.`}${followUp.excludedFindings === undefined ? '' : ` Findings left for the user (default-excluded paths, not a member's to edit): ${followUp.excludedFindings.join(', ')}.`}`,
           ))
         }
         await writeTeam(stateRoot, fresh)
@@ -2064,6 +2115,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         () => requireFreshParticipant(stateRoot, located.id, caller.id),
       )
       const activity = memberActivity(ctx, team.members.map((member) => member.id))
+      const audit = auditTeamWorkspace(workspace, team)
       const members = team.members
         .filter((member) => member.status !== 'removed')
         .map((member) => ({
@@ -2089,6 +2141,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         ...task.round === undefined ? {} : { round: task.round },
         ...task.verdict === undefined ? {} : { verdict: task.verdict },
         ...task.supplementalEvidence === undefined ? {} : { supplemental_evidence: JSON.stringify(task.supplementalEvidence) },
+        ...task.findingSourceTaskIds === undefined ? {} : { fixes: task.findingSourceTaskIds.join(',') },
         findings_open: (task.findings ?? []).filter((finding) => finding.resolved !== true).length,
         ...task.profileSeedId === undefined ? {} : { seed_id: task.profileSeedId },
         ...task.output !== undefined ? { output: task.output } : {},
@@ -2132,9 +2185,13 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         status: row.status,
         ...row.evidence === undefined ? {} : { evidence: row.evidence },
       }))
-      const deliveryCheck = canDeclareDelivery(team)
-      const delivery = { ok: deliveryCheck.ok, blockers: [...deliveryCheck.blockers] }
-      const loop = describeQualityLoop(team)
+      const deliveryCheck = canDeclareDelivery(team, audit)
+      const delivery = {
+        ok: deliveryCheck.ok,
+        blockers: [...deliveryCheck.blockers],
+        warnings: [...deliveryCheck.warnings],
+      }
+      const loop = describeQualityLoop(team, audit)
       const result = {
         team_id: team.id,
         team_name: team.name,
@@ -2449,8 +2506,13 @@ function parseCommandResults(value: unknown): CommandResult[] | undefined {
   })
 }
 
-export function applyQualityFollowUp(team: TeamState, closed: TeamTask): { created: TeamTask[]; escalated: boolean } {
-  const planned = planQualityFollowUp(team, closed)
+export function applyQualityFollowUp(
+  team: TeamState,
+  closed: TeamTask,
+  snapshotPaths?: (paths: readonly string[]) => ArtifactSnapshot,
+  pathExists?: (path: string) => boolean,
+): { created: TeamTask[]; escalated: boolean; reason?: string; excludedFindings?: string[] } {
+  const planned = planQualityFollowUp(team, closed, pathExists === undefined ? {} : { pathExists })
   if (planned.escalated === true) team.escalated = true
   const created: TeamTask[] = []
   const existing = [...team.tasks]
@@ -2465,6 +2527,12 @@ export function applyQualityFollowUp(team: TeamState, closed: TeamTask): { creat
       if (team.tasks.some((item) => item.id === dependency)) return dependency
       return idBySubject.get(dependency) ?? dependency
     })
+    // Record the workspace the generated work order was derived from, so a
+    // later round that changes a cited file can mark it stale instead of
+    // letting a member read a frozen snapshot as authoritative (issue #174).
+    const contractSnapshot = draft.contractPaths === undefined || draft.contractPaths.length === 0 || snapshotPaths === undefined
+      ? undefined
+      : snapshotPaths(draft.contractPaths)
     const next: TeamTask = {
       id,
       subject: draft.subject ?? `${draft.kind}-round-${draft.round ?? 1}`,
@@ -2475,6 +2543,7 @@ export function applyQualityFollowUp(team: TeamState, closed: TeamTask): { creat
       createdAt: now,
       updatedAt: now,
       kind: draft.kind,
+      ...draft.description === undefined ? {} : { description: draft.description },
       ...draft.round === undefined ? {} : { round: draft.round },
       ...draft.objective === undefined ? {} : { objective: draft.objective },
       ...draft.inScope === undefined ? {} : { inScope: draft.inScope },
@@ -2483,7 +2552,9 @@ export function applyQualityFollowUp(team: TeamState, closed: TeamTask): { creat
       ...draft.verify === undefined ? {} : { verify: draft.verify },
       ...draft.sourceTaskId === undefined ? {} : { sourceTaskId: draft.sourceTaskId },
       ...draft.sourceFindingIds === undefined ? {} : { sourceFindingIds: draft.sourceFindingIds },
+      ...draft.findingSourceTaskIds === undefined ? {} : { findingSourceTaskIds: draft.findingSourceTaskIds },
       ...draft.reviewedTaskId === undefined ? {} : { reviewedTaskId: idBySubject.get(draft.reviewedTaskId) ?? draft.reviewedTaskId },
+      ...contractSnapshot === undefined ? {} : { contractSnapshot },
     }
     team.tasks.push(next)
     created.push(next)
@@ -2503,7 +2574,12 @@ export function applyQualityFollowUp(team: TeamState, closed: TeamTask): { creat
       task.updatedAt = now
     }
   }
-  return { created, escalated: planned.escalated === true }
+  return {
+    created,
+    escalated: planned.escalated === true,
+    ...planned.reason === undefined ? {} : { reason: planned.reason },
+    ...planned.excludedFindings === undefined ? {} : { excludedFindings: planned.excludedFindings },
+  }
 }
 
 /** Build the `memberRuntime` config handed to member helpers. */
@@ -2533,7 +2609,7 @@ function renderStatus(value: JsonValue): string {
       activity: string
       spawn_error?: string
     }[]
-    tasks: { id: string; subject: string; status: string; assignee: string; dependencies: string[]; attempt: number; attempt_id: string; reassigning: boolean; seed_id?: string; output?: string; kind?: string; round?: number; verdict?: string; findings_open?: number; supplemental_evidence?: string }[]
+    tasks: { id: string; subject: string; status: string; assignee: string; dependencies: string[]; attempt: number; attempt_id: string; reassigning: boolean; seed_id?: string; output?: string; kind?: string; round?: number; verdict?: string; findings_open?: number; supplemental_evidence?: string; fixes?: string }[]
     captain_inbox: { from: string; content: string }[]
     member_inbox?: { from: string; content: string }[]
     member_inboxes: Record<string, { count: number; latest: string }>
@@ -2545,7 +2621,8 @@ function renderStatus(value: JsonValue): string {
     loop_summary?: string
     deliverable?: boolean
     coverage?: { goal_item: string; status: string; task_ids: string[] }[]
-    delivery?: { ok: boolean; blockers: string[] }
+    delivery?: { ok: boolean; blockers: string[]; warnings?: string[] }
+    warnings?: string[]
   }
   const flags = [
     team.halted ? 'halted' : undefined,
@@ -2577,7 +2654,8 @@ function renderStatus(value: JsonValue): string {
       const kind = task.kind ? ` ${task.kind}` : ''
       const round = task.round === undefined ? '' : ` r${task.round}`
       const verdict = task.verdict === undefined ? '' : ` verdict ${task.verdict}`
-      return `  - ${task.id} [${task.status}]${kind}${round}${verdict} attempt ${task.attempt}${handoff}${seed} ${task.subject} → ${task.assignee || 'unassigned'}${deps}${output}${evidence}`
+      const fixes = task.fixes === undefined ? '' : ` fixes ${task.fixes}`
+      return `  - ${task.id} [${task.status}]${kind}${round}${verdict}${fixes} attempt ${task.attempt}${handoff}${seed} ${task.subject} → ${task.assignee || 'unassigned'}${deps}${output}${evidence}`
     }),
     ...team.coverage === undefined || team.coverage.length === 0 ? [] : [
       'Coverage:',
@@ -2585,6 +2663,10 @@ function renderStatus(value: JsonValue): string {
     ],
     ...team.delivery === undefined ? [] : [
       `Delivery: ${team.delivery.ok ? 'ok' : `blocked (${team.delivery.blockers.join('; ')})`}`,
+    ],
+    ...(team.delivery?.warnings ?? []).length === 0 ? [] : [
+      'Gate warnings (delivery is not blocked, but these recorded verdicts or generated work orders no longer describe the current bytes):',
+      ...(team.delivery?.warnings ?? []).map((warning) => `  - ${warning}`),
     ],
     `Captain inbox (${team.captain_inbox.length}):`,
     ...team.captain_inbox.map((message) => `  - [${message.from}] ${message.content}`),
