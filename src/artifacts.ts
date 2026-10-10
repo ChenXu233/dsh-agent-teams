@@ -296,6 +296,18 @@ export function digestWorkspacePaths(workspace: string, paths: readonly string[]
   return readArtifactScope(workspace, paths).artifacts
 }
 
+/**
+ * Does this workspace-relative path currently exist as a file or directory?
+ * Uses the same containment rules as the digest reader: a symlink that leaves
+ * the workspace is not "an existing workspace path".
+ */
+export function workspacePathExists(workspace: string, path: string): boolean {
+  const normalized = normalizeWorkspacePath(path)
+  if (normalized === undefined) return false
+  const outcome = inspectPath(workspaceRootOf(workspace), workspace, normalized)
+  return outcome.kind === 'file' || outcome.kind === 'directory'
+}
+
 /** Expand scope patterns to the concrete files they currently cover. */
 export function expandScopePaths(workspace: string, patterns: readonly string[]): string[] {
   return readArtifactScope(workspace, patterns)

@@ -102,7 +102,7 @@ export declare function stagedPlanFeedbackContext(teamName: string): string;
  * @param config - resolved tool config.
  */
 export declare function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): AgentTeamsRuntime;
-export declare function applyQualityFollowUp(team: TeamState, closed: TeamTask, snapshotPaths?: (paths: readonly string[]) => ArtifactSnapshot): {
+export declare function applyQualityFollowUp(team: TeamState, closed: TeamTask, snapshotPaths?: (paths: readonly string[]) => ArtifactSnapshot, pathExists?: (path: string) => boolean): {
     created: TeamTask[];
     escalated: boolean;
     reason?: string;

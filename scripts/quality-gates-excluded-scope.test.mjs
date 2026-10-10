@@ -124,3 +124,40 @@ test('#183: the completion gate itself still refuses default-excluded paths (unc
   assert.equal(classifyChangedPath('.env.example', ['.env.example'], []), 'out_of_scope')
   assert.equal(classifyChangedPath('src/app/config.ts', ['src/app/'], []), 'in_scope')
 })
+
+test('#183: a prose path that is not a real file cannot rescue an excluded finding', () => {
+  // Real run (deepseek-flash, 2026-10-10): a blocker finding named
+  // src/secrets/redactor.js and its requiredFix said "never pass value to any
+  // console/stream write". `console/stream` is not a workspace path, but it
+  // made the finding look actionable, so the excluded finding produced a
+  // repair whose acceptance demanded an edit the gate forbids.
+  const team = teamWithSource()
+  const review = failedReview({
+    findings: [finding({
+      file: 'src/secrets/redactor.js',
+      requiredFix: "Remove the console.log from src/secrets/redactor.js and never pass `value` to any console/stream write.",
+    })],
+  })
+  team.tasks.push(review)
+  const planned = planQualityFollowUp(team, review, { pathExists: () => false })
+  assert.equal(planned.created.length, 0, `impossible repair was generated: ${JSON.stringify(planned.created)}`)
+  assert.equal(planned.escalated, true)
+  assert.match(String(planned.reason ?? ''), /excluded|secrets/iu)
+  assert.deepEqual(planned.excludedFindings, ['F1'])
+})
+
+test('#183: a real legal target keeps the finding actionable, and a missing own file is not discarded', () => {
+  const team = teamWithSource()
+  const review = failedReview({
+    findings: [
+      finding({ id: 'F1', file: 'src/app/config.js', requiredFix: 'route logging through src/app/config.js' }),
+      finding({ id: 'F2', file: 'src/app/new-logger.js', requiredFix: 'create src/app/new-logger.js' }),
+    ],
+  })
+  team.tasks.push(review)
+  const planned = planQualityFollowUp(team, review, { pathExists: (path) => path === 'src/app/config.js' })
+  const repair = planned.created.find((item) => item.kind === 'repair')
+  assert.ok(repair, 'a legal finding produced no repair round')
+  assert.deepEqual(repair.inScope, ['src/app/config.js', 'src/app/new-logger.js'])
+  assert.equal(planned.escalated, undefined)
+})

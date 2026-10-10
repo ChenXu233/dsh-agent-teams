@@ -12,10 +12,10 @@
 
 | Issue | 是否复现 | 是否修复 | 原 case 重跑 | 真实模型路径 |
 | --- | --- | --- | --- | --- |
-| #161 review pass 不绑定它审过的 revision | 是（baseline 真实盘改写后仍 `Delivery: ok`） | 是 | 12/12 通过 | 是（同一输入 baseline `Delivery: ok` vs candidate `Delivery: blocked`） |
-| #174 自动生成的 repair 工单冻结在生成时刻 | 是（旧 API 无任何过期标记） | 是 | 18/18 通过 | 是（repair 轮写入真实 `contractSnapshot`） |
-| #175 findings 因果链缺失 + verification 不自动修复 | 是（baseline 失败 verification 只留 `failed without a follow-up repair`） | 是 | 7/7 通过 | 是（candidate 自动生成 `repair + verification` 轮，baseline 只有 2 个任务） |
-| #183 默认排除路径派生 repair 合同不可满足 | 是 | 是 | 5/5 通过 | 规则层覆盖（见 §7 未覆盖范围） |
+| #161 review pass 不绑定它审过的 revision | 是（baseline 真实盘改写后仍 `Delivery: ok`） | 是 | 12/12 通过 | 是（同一输入 baseline `Delivery: ok` vs candidate `Delivery: blocked`；面板 UI 已用 Ego 实测） |
+| #174 自动生成的 repair 工单冻结在生成时刻 | 是（旧 API 无任何过期标记） | 是 | 18/18 通过 | 是（status 与派工 prompt 都点名 stale 的 cited path，见 §9.2） |
+| #175 findings 因果链缺失 + verification 不自动修复 | 是（baseline 失败 verification 只留 `failed without a follow-up repair`，循环停死） | 是 | 7/7 通过 | 是（同一输入 candidate 自动 repair + 复验 + review 全部完成，`Delivery: ok` 且无假 blocker，见 §9.3） |
+| #183 默认排除路径派生 repair 合同不可满足 | 是（baseline repair 合同不可满足、成员报 blocker、永不 escalation） | 是 | 7/7 通过 | 是（candidate 不生成 repair、escalation 带原因） |
 
 测试与验收产物：
 
@@ -103,16 +103,63 @@ pnpm typecheck                                                                ->
 
 ## 7. 未覆盖范围与已知限制
 
-1. **#183 没有真实模型路径**。规则层（派生 scope 与门禁一致性、全排除 finding 的 escalation）由纯函数 + 真实临时磁盘 case 覆盖；未构造“真实 reviewer 在 `src/secrets/…` 上开 finding”的模型运行。门禁谓词唯一化（`isDefaultExcludedPath` 同源）是这部分的关键保证，但真实模型下的 finding 生成路径未跑。
+1. **#183 已补真实模型路径**（§9.1）：真实 reviewer 在 `src/secrets/redactor.js` 开出 blocker finding，baseline 生成不可满足合同且成员实测报 blocker、永不 escalation；candidate 不生成 repair、带原因 escalation。仍**未**覆盖：finding 只指向 `.env.example`（本次真实 finding 落在 `secrets/` 段，`.env*` 规则仅有规则层 case）。
 2. **#175 字面建议未照做**：把失败 gate 写进 `dependencies` 会让 repair 因 `unsatisfiedDependencies`（只认 `completed`）永久不可 claim。改为 `findingSourceTaskIds` 专用因果边 + 四种闭环识别；`planQualityFollowUp` 的 verification 分支依赖“失败任务自身证据”派生 acceptance。
 3. **pre-fix 历史记录**（没有 `reviewedArtifacts`）：只能靠 `changedPaths` 的 mtime 判定“晚于 verdict 的写入”，以及“changedPath 已消失且无 digest 可确认”这类保守判定；无法区分“review 通过时文件就已缺失”。两处都会走 blocker，随后被后续 sound verdict 覆盖为 warning。
 4. **mtime 规则有 1 ms 容差**（mtime 亚毫秒精度 vs 任务戳整毫秒）。同一毫秒内的写入不判漂移；内容 digest 判定无此问题。
 5. **hard link 无法识别**：workspace 内指向外部 inode 的硬链接与普通文件不可区分（symlink 已处理）。
 6. **大 scope 会被 block 而不是静默通过**：`inScope` 写成目录（如 `src/`）且文件数超过 200 时，verdict 只绑定前 200 个并带 `reviewedGaps`，当前 audit 也会带 gap → delivery 被 block，需 captain 收窄 inScope 或重审。这是按主管要求「cap 不能静默」的取舍。
-7. **失败的 repair 会让其后 re-check 永久 pending**（S-B2 真实运行观察到：`t3 repair failed` → `t4 verification r2` 依赖永不满足）。交付面如实报 `t3 failed without a follow-up repair` + `t4 (verification) is not completed`，captain 可用 `agent_teams_amend_task`/重派介入；这是既有循环语义，本组未改（不属四个 issue 范围），已在报告中记录为后续观察项。
-8. 客户端面板改动仅验证到「构建产物包含 `data-verdict-stale`」+「服务端 payload 带 `verdictStale`」；未在浏览器中截图确认视觉样式（运行中的 3081 GUI 加载的是主管 worktree 的插件产物，非本分支）。
+7. **失败的 repair 会让其后 re-check 永久 pending**（S-B2 与 #183 baseline 真实运行观察到：`repair failed` → 后续 re-check/review 依赖永不满足；#183 baseline 甚至连 escalation 都没有）。交付面如实报 `… failed without a follow-up repair`，captain 可用 `agent_teams_amend_task`/重派介入；这是既有循环语义，本组未改（不属四个 issue 范围），保留为后续观察项。
+8. 客户端面板已在**本分支自己的实例**（隔离 profile，127.0.0.1:3093，Ego Lite TaskSpace 13 / page p3）实测：`data-verdict-stale="true"` 命中 2 个元素、DAG 节点边框为 `dashed` 警告色、tooltip 含 sha256 变化说明（§9.4）。未在主管的 3081 GUI 上复核（该实例加载的是主管 worktree 的产物）。
 
 ## 8. 产物与提交
 
 - 源码/构建产物本地提交见 `result.json` 的 `commit` 字段；未推送、未发布、未关闭 issue、未在 GitHub 评论、未合并回 main（由主管独立核验后合并）。
 - 大量日志保留在 `/private/tmp/agentteams-issues-20261010/quality/`（`evidence/`、`ws/`、`dsh-home*/`、`plugin-baseline/`），未写入仓库。
+
+## 9. 补充验收（主管复核后追加，commit `pending`）
+
+### 9.1 #183 真实模型路径（baseline vs candidate，同输入）
+
+工作区含真实缺陷 `src/secrets/redactor.js`（`console.log` 直写明文）与 `.env.example`；review 任务 objective 要求逐行审查并「在 finding 里写明确切文件」。两侧 prompt/工作区/宿主闭包完全相同。
+
+- **baseline**：真实 reviewer 开出 `F1`（blocker，`file=src/secrets/redactor.js`）→ 插件自动生成 `t3 repair`，`inScope ['src/secrets/redactor.js','console/stream']`，acceptance 要求删除该文件第 7 行 → 真实 repair 成员回复逐字：
+  `BLOCKED — unsatisfiable repair contract (DSH issue #183) … src/secrets/redactor.js -> classifyChangedPath(...) = out_of_scope (isDefaultExcludedPath: any path with a 'secre…`
+  → `t3 failed`、`t4 pending` 永久、`escalated: None`（不 escalation）。
+- **candidate**（干净工作区）：真实 reviewer 开出 `F1`（blocker）+ `F2`（low），均 `file=src/secrets/redactor.js` → **只创建了 `t1 implementation` + `t2 review`，没有 repair 轮**；`escalated: True`，captain 邮箱逐字：
+  `Quality-gate loop escalated after t2 (review verdict=needs_revision). Automatic repair/review stopped. Reason: every finding of t2 cites only default-excluded paths (src/secrets/redactor.js, src/secrets/redactor.js); the completion gate classifies them out_of_scope, so no honest repair contract exists — a human must decide. Findings left for the user (default-excluded paths, not a member's to edit): F1, F2.`
+  status 逐字：`Delivery: blocked (team requires escalation resolution; …)` / `Loop: escalated … Genuinely unresolved gates: t2 (review); …`。
+- 机械同输入对照（`evidence/i183-contract-proof.mjs`，分别 import 两个 build 的 `lib/quality-gates.js`）：
+  - baseline generator → `created: [repair(inScope ['src/secrets/redactor.js','console/stream']), review]`、`escalated: false`；`classifyChangedPath('src/secrets/redactor.js', …) = out_of_scope`；`evaluateQualityCompletion(...) = {ok:false, error:"repair cannot complete: src/secrets/redactor.js is out_of_scope"}`。
+  - candidate generator → `created: []`、`escalated: true`、`reason` + `excludedFindings: ['F1']`。
+- 这次真实运行还暴露并修掉了一个我原先漏掉的点：requiredFix 里的散文片段 `console/stream` 不是真实文件，却会让“全部路径都被默认排除”的 finding 看起来可执行。现在 `planQualityFollowUp(team, closed, { pathExists })` 只把**存在**的路径（或 finding 自己的 `file`）计为可执行目标，工具层用 `workspacePathExists` 提供该判定；新增两条 case 固定该行为。
+
+### 9.2 #174 真实变更后 status/派工输出点名 stale 路径（candidate，真实模型）
+
+自动 `t5 repair` 生成时快照 `lib/sum.js` sha256 `16336470…`；在 `t5` 仍为 **pending**（engineer 正忙于 `t2 bench`）时，对同一路径写入真实变更 → `8a8d304c…`：
+
+- status 输出（captain 逐字）：`Gate warnings (delivery is not blocked, but these recorded verdicts or generated work orders no longer describe the current bytes):` + `t5 work order was generated before: lib/sum.js changed (sha256 16336470 -> 8a8d304c). Its auto-generated acceptance/inScope describe the workspace as it was then: locate the cited code by content anchor, and amend the contract if the target is gone.`
+- 派工 prompt（repair 成员会话逐字）：`Before you edit anything: this auto-generated work order was derived from a workspace that has since changed.` + 同一行 `t5 work order was generated before: lib/sum.js changed (sha256 16336470 -> 8a8d304c)`。
+
+### 9.3 #175 真正闭环（可满足合同，同输入 baseline vs candidate）
+
+工作区（预先存在测试）：`test/format.test.js`（impl 的 verify，初始失败但可修）+ `test/contract.test.js`（verify 的 verify，因 `lib/sum.js` 真实缺陷 `a - b` 失败）+ engineer 的长 bench 任务（制造观察窗口）。impl 的 `inScope ["lib/","test/"]`，repair 派生 scope 允许所需路径。
+
+- **candidate**：`t3 verification failed` → 自动 `t5 repair` + `t6 verification`（`t5` 带真实 `contractSnapshot`，并记录 `findingSourceTaskIds: ['t3']`）→ `t5 completed`、`t6 completed`、pre-planned `t4 review` 被重接后 `completed` → 最终逐字 `Delivery: ok` / `Loop: deliverable — All required work and quality gates passed. The captain may report delivery.`，且 `t3 failed without a follow-up repair` 出现 **0 次**（原报告的假 blocker 不再出现）。
+- **baseline（同输入）**：`t3 verification failed` 后**无任何**后续任务，`t4 review` 永久 pending，`escalated: None`，逐字 `Delivery: blocked (t3 failed without a follow-up repair; t4 (review) is not completed)` / `Loop: running — Work remains…`。
+
+### 9.4 面板 UI 实测（Ego Lite，TaskSpace 13，本分支自己的实例）
+
+在自己的隔离实例（`127.0.0.1:3093`，加载本分支构建）上打开 S-A 会话的「团队协作」面板：
+
+- DOM：`[data-verdict-stale="true"]` 命中 2 个元素（任务 chip `t2`、DAG 节点 `t2 · review-round-1`）。
+- 视觉：DAG 节点 `border-style: dashed`、边框为警告色（与 `t1 impl` 的实线绿框形成对比），pass 不再呈现为“全绿”。
+- tooltip 逐字含：`t2 · review-round-1 · review · r1 · pass · ⚠ t2 (review) verdict covers a revision that no longer exists: lib/sum.js changed (sha256 53f09f70 -> af01ed6d) — re-review the current bytes; do not report this revision as verified · deepseek-account/deepseek-flash`。
+- 截图：`/private/tmp/agentteams-issues-20261010/quality/evidence/panel-stale-verdict.png`。
+
+### 9.5 复核后仍保留的未覆盖项
+
+- finding 只指向 `.env.example` 的真实模型 run 未跑（规则层 case 已覆盖 `.env*`）。
+- 失败的 repair 之后 re-check 永久 pending（§7.7）未改。
+- pre-fix 历史记录、mtime 1 ms 容差、hard link 三项限制不变。
+- 主管 3081 GUI 未复核（本分支只用自建实例与自建 profile 验证）。

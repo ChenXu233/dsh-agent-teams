@@ -688,10 +688,24 @@ export function findingDerivedPaths(finding: ReviewFinding): string[] {
  * member. A finding that names no path at all is NOT excluded: it simply falls
  * back to the judged task's own scope, exactly as before.
  */
-export function excludedFindingsOf(findings: readonly ReviewFinding[]): ReviewFinding[] {
+export function excludedFindingsOf(
+  findings: readonly ReviewFinding[],
+  pathExists?: (path: string) => boolean,
+): ReviewFinding[] {
   return findings.filter((finding) => {
     const paths = findingDerivedPaths(finding)
-    return paths.length > 0 && paths.every((path) => isDefaultExcludedPath(path))
+    if (paths.length === 0) return false
+    const own = normalizeWorkspacePath(finding.file ?? '')
+    return paths.every((path) => {
+      if (isDefaultExcludedPath(path)) return true
+      // A path extracted from prose that does not exist is not something the
+      // workspace can act on (real run: "console/stream write" became a
+      // repair scope while the finding's actual target was excluded). The
+      // finding's own `file` always counts, so "create this new file" stays
+      // actionable.
+      if (pathExists === undefined || path === own) return false
+      return !pathExists(path)
+    })
   })
 }
 
@@ -905,7 +919,19 @@ function generatedRepairDescription(
   return lines.join(' ')
 }
 
-export function planQualityFollowUp(team: TeamState, closed: TeamTask): PlanQualityFollowUpResult {
+export interface PlanQualityFollowUpOptions {
+  /**
+   * Whether a derived path exists in the workspace. Used only to classify a
+   * finding as excluded-only; without it every derived path counts.
+   */
+  pathExists?: (path: string) => boolean
+}
+
+export function planQualityFollowUp(
+  team: TeamState,
+  closed: TeamTask,
+  options: PlanQualityFollowUpOptions = {},
+): PlanQualityFollowUpResult {
   const empty = { created: [] as PlannedFollowUpTask[], tasks: [] as PlannedFollowUpTask[] }
   const escalate = (reason: string): PlanQualityFollowUpResult => ({ ...empty, escalated: true, status: 'escalated', reason })
   const kind = taskKindOf(closed)
@@ -943,7 +969,7 @@ export function planQualityFollowUp(team: TeamState, closed: TeamTask): PlanQual
   if (sourceId === undefined) return empty
   const source = team.tasks.find((item) => item.id === sourceId)
   const findings = unresolvedFindings(closed)
-  const excluded = excludedFindingsOf(findings)
+  const excluded = excludedFindingsOf(findings, options.pathExists)
   const actionable = findings.filter((finding) => !excluded.includes(finding))
   if (findings.length > 0 && actionable.length === 0) {
     return {

@@ -66,7 +66,7 @@ import {
 } from './quality-gates.ts'
 import type { DeliveryAudit } from './quality-gates.ts'
 import { auditTeamWorkspace } from './workspace-audit.ts'
-import { readArtifactScope, snapshotWorkspacePaths } from './artifacts.ts'
+import { readArtifactScope, snapshotWorkspacePaths, workspacePathExists } from './artifacts.ts'
 import type { ContractAmendmentInput } from './state.ts'
 import type { AcceptanceResult, ArtifactDigest, ArtifactSnapshot, CommandResult, ReviewFinding, ReviewVerdict, TaskKind } from './types.ts'
 import {
@@ -1793,7 +1793,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         task.updatedAt = Date.now()
         const priorDependencies = new Map(fresh.tasks.map(item => [item.id, [...item.dependencies]]))
         const followUp = (task.status === 'failed' && isQualityKind(taskKindOf(task)))
-          ? applyQualityFollowUp(fresh, task, (paths) => snapshotWorkspacePaths(workspace, paths))
+          ? applyQualityFollowUp(
+            fresh,
+            task,
+            (paths) => snapshotWorkspacePaths(workspace, paths),
+            (path) => workspacePathExists(workspace, path),
+          )
           : undefined
         let followUpSummary: string | undefined
         if ((followUp?.created.length ?? 0) > 0) {
@@ -2474,8 +2479,9 @@ export function applyQualityFollowUp(
   team: TeamState,
   closed: TeamTask,
   snapshotPaths?: (paths: readonly string[]) => ArtifactSnapshot,
+  pathExists?: (path: string) => boolean,
 ): { created: TeamTask[]; escalated: boolean; reason?: string; excludedFindings?: string[] } {
-  const planned = planQualityFollowUp(team, closed)
+  const planned = planQualityFollowUp(team, closed, pathExists === undefined ? {} : { pathExists })
   if (planned.escalated === true) team.escalated = true
   const created: TeamTask[] = []
   const existing = [...team.tasks]
@@ -2628,7 +2634,7 @@ function renderStatus(value: JsonValue): string {
       `Delivery: ${team.delivery.ok ? 'ok' : `blocked (${team.delivery.blockers.join('; ')})`}`,
     ],
     ...(team.delivery?.warnings ?? []).length === 0 ? [] : [
-      'Gate warnings (delivery is not blocked, but these verdicts no longer describe the current bytes):',
+      'Gate warnings (delivery is not blocked, but these recorded verdicts or generated work orders no longer describe the current bytes):',
       ...(team.delivery?.warnings ?? []).map((warning) => `  - ${warning}`),
     ],
     `Captain inbox (${team.captain_inbox.length}):`,

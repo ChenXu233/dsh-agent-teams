@@ -213,7 +213,7 @@ export declare function findingDerivedPaths(finding: ReviewFinding): string[];
  * member. A finding that names no path at all is NOT excluded: it simply falls
  * back to the judged task's own scope, exactly as before.
  */
-export declare function excludedFindingsOf(findings: readonly ReviewFinding[]): ReviewFinding[];
+export declare function excludedFindingsOf(findings: readonly ReviewFinding[], pathExists?: (path: string) => boolean): ReviewFinding[];
 /** Captain-only amendment payload: replacement values for contract fields. */
 export interface ContractAmendmentInput {
     objective?: string;
@@ -245,7 +245,14 @@ export interface AmendTaskContractResult {
 export declare function amendTaskContract(team: TeamState, task: TeamTask, input: ContractAmendmentInput, by: string, reason: string): AmendTaskContractResult;
 /** Remove drifting line anchors from generated contract text. */
 export declare function stripLineAnchors(text: string): string;
-export declare function planQualityFollowUp(team: TeamState, closed: TeamTask): PlanQualityFollowUpResult;
+export interface PlanQualityFollowUpOptions {
+    /**
+     * Whether a derived path exists in the workspace. Used only to classify a
+     * finding as excluded-only; without it every derived path counts.
+     */
+    pathExists?: (path: string) => boolean;
+}
+export declare function planQualityFollowUp(team: TeamState, closed: TeamTask, options?: PlanQualityFollowUpOptions): PlanQualityFollowUpResult;
 export declare function buildCoverageMatrix(goalItems: readonly string[], tasks: readonly TeamTask[]): CoverageRow[];
 /** Kinds whose completion is a verdict about a revision. */
 export declare function isVerdictKind(kind: TaskKind | undefined): boolean;

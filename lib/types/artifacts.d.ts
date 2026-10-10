@@ -48,6 +48,12 @@ export declare function readArtifactScope(workspace: string, patterns: readonly 
  * Illegal and unreadable paths are reported, never silently dropped.
  */
 export declare function digestWorkspacePaths(workspace: string, paths: readonly string[]): ArtifactDigest[];
+/**
+ * Does this workspace-relative path currently exist as a file or directory?
+ * Uses the same containment rules as the digest reader: a symlink that leaves
+ * the workspace is not "an existing workspace path".
+ */
+export declare function workspacePathExists(workspace: string, path: string): boolean;
 /** Expand scope patterns to the concrete files they currently cover. */
 export declare function expandScopePaths(workspace: string, patterns: readonly string[]): string[];
 /**
