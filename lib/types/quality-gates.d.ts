@@ -262,6 +262,20 @@ export declare function isVerdictKind(kind: TaskKind | undefined): boolean;
  * "Cannot be read" is reported as its own reason: a permission error is not a
  * match, and a partial read is not proof of an unchanged file.
  */
+/** One reason an artifact set no longer describes the workspace. */
+export interface ArtifactDriftDetail {
+    /** The implicated path, when the reason is about one concrete file. */
+    path?: string;
+    message: string;
+}
+/**
+ * Compare recorded bytes against the bytes on disk now, keeping the path each
+ * reason belongs to. "Cannot be read" is reported as its own reason: a
+ * permission error is not a match, and a partial read is not proof of an
+ * unchanged file.
+ */
+export declare function artifactDriftDetails(recorded: readonly ArtifactDigest[] | undefined, current: readonly ArtifactDigest[] | undefined): ArtifactDriftDetail[];
+/** Message-only view of {@link artifactDriftDetails}. */
 export declare function artifactDrift(recorded: readonly ArtifactDigest[] | undefined, current: readonly ArtifactDigest[] | undefined): string[];
 /** A partially enumerated scope is incomplete evidence, never a silent pass. */
 export declare function gapDrift(gaps: readonly ArtifactScopeGap[] | undefined): string[];
