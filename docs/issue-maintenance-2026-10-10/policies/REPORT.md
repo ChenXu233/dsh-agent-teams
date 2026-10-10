@@ -43,9 +43,18 @@
 
 不变量（与 issue 一致）：captain-only deny 永远生效且无法被 allow 重新打开；四个协调工具始终可用；allow 策略自动注入协调工具；生效 deny = 策略 deny ∪ captain deny；未配置策略的团队/成员保持原有工具集与记录结构。
 
+### 第二轮 review 修正（独立 review 后）
+
+1. **relaxable 集排除 owner 显式声明的 deny 名字**：新增 `memberSpawnRelaxableDeny(policy, policySelected)`。策略成员的可放宽集 = `BUILTIN_DENY_TOOLS` 减去 owner 在策略 `deny` 里显式写出的名字；因此 owner 写 `deny:['send_message']`（同时是 depth 内置项）或 `deny:['agent_teams_create']`（同时是 captain 内置项）时，宿主拒绝该名字**不会**被静默删除，spawn 直接失败。没有任何策略的 legacy 成员仍走原内置兼容路径（#163/#164 保留）。若成员选的策略 id 在当前部署里已不存在，可放宽集为空（严格失败）。纯函数边界测试覆盖 overlap 与 legacy 兼容：`scripts/tool-policies.test.mjs` 第 9、10 项。
+2. **公开配置字段声明**：`Config.profiles.members` 的 Schemastery 声明补上 `tool_policy: z.string()`（此前只在实际 profile 运行路径生效，声明缺失）。
+3. **真实 Loader/ctx.tools 失败路径 case**（`phase-invalid`，candidate 独有）：
+   - 未知策略 id：真实宿主里 `agent_teams_add_member({tool_policy:"does-not-exist"})` 返回 `Error: unknown tool policy "does-not-exist" (configured: broken, deny-web, researcher)`；`team.json` 中**没有** `bad-policy`/`bad-policy-2` 记录；同一拒绝也用真实 `ctx.tools.execute` 对 captain agent 复现了一次。
+   - 非法 owner 工具名（策略 `broken: {deny:[definitely_not_a_tool]}`）：成员记录被写入（选择本身合法），子会话启动被宿主拒绝：`spawnError = tools.restrict() names unknown global tool "definitely_not_a_tool"; known global tools: …`；成员 id 保持空串、0 次模型请求、宿主进程里没有对应子 agent，也就是**没有可恢复孤儿**；同队无策略成员照常完成真实工作（`worker.txt`）。
+   - 证据：`/private/tmp/agentteams-issues-20261010/policies/runs/candidate/phase-invalid.json`（sanitized 摘要已入库 `acceptance-summary.json`）。
+
 ### 主管 review 三点的处理
 
-1. **lenient 过滤器语义**：`startMemberWithLenientFilter(start, filter, relaxableDeny = BUILTIN_DENY_TOOLS)`。只有内置 `CAPTAIN_TOOL_NAMES` + depth 名字（#163/#164 兼容路径）可被宿主 “unknown global tool” 报告删除；owner 策略声明的名字与任何 allow 名字一律不删，直接抛错；协调工具因此不可能被删掉。
+1. **lenient 过滤器语义**：`startMemberWithLenientFilter(start, filter, relaxableDeny)` 只在 `relaxableDeny` 内可删，且只删 `deny` 项、永不删 `allow`。没有策略的 legacy 成员沿用默认 `BUILTIN_DENY_TOOLS`（#163/#164 兼容路径）；策略成员的实际可放宽集由 `memberSpawnRelaxableDeny(policy, true)` 给出 = `BUILTIN_DENY_TOOLS` **减去 owner 在策略 `deny` 中显式写出的名字**，策略 id 已不存在时为空集。因此 owner 显式声明的名字（包括与内置项重名的 `send_message`/`subagent`/`agent_teams_*`）与任何 allow 名字都不会被静默删除，协调工具不可能被删掉——第一轮实现默认对整个 `BUILTIN_DENY_TOOLS` 放宽，独立 review 指出该 overlap 漏洞后已修正（见下）。
    - 说明（诚实边界）：本 composiiton 里插件可读到的 registry view（captain 作用域 14 个名字）**不覆盖** agent-preset 平面（真实请求 40 个名字），因此无法在“持久化成员之前”用一个可靠的名单判定 owner 名字是否拼错。本实现保证的是：宿主拒绝该名字时子会话**不会**以另一个过滤器静默启动——成员保持未 spawn 状态，`spawnError` 记录宿主原文，不产生孤儿子会话，也不产生“声明 A 实际 B”的漂移。若要真正的持久化前名字校验，需要宿主提供可枚举子会话继承面的公开接口（现无）。
 2. **持久字段校验**：见上表 `src/state.ts`；错误类型不会被静默接受，legacy 记录仍可读。
 3. **原型安全**：策略表用 `Object.create(null)`，查表用 `Object.hasOwn`；`constructor` / `toString` / `__proto__` 都按普通 id 处理，未知 id 精确报错并列出已配置 id。
@@ -58,6 +67,7 @@
 toolPolicies:
   researcher: { allow: [read, glob, grep] }
   deny-web:   { deny: [web_search, web_fetch] }
+  broken:     { deny: [definitely_not_a_tool] }   # 仅用于失败路径 case
 ```
 
 | 观察点 | baseline | candidate |
@@ -85,6 +95,8 @@ profile 路径（candidate 独有，baseline 无此配置键）：第二个 capt
 
 - `late-researcher`：8 工具（4 协调工具 + `read`/`glob`/`grep`），强制 `write` `UNKNOWN_TOOL`，模型用 `read` 与协调工具完成任务；`team.json` 记录策略 id 与解析过滤器；
 - `base-worker`（无策略）：30 工具，模型自己用 `write` 写出 `base-worker.txt`，强制 `write` 也成功落盘。
+
+第二轮修正后，candidate 的四条真实 leg（phase1/phase2/profile/addmember）在同一最终 lib 上全部重跑，结论与上表一致（researcher 8 工具且强制 write/bash 被拒、implementer 30 工具并真实落盘、冷恢复无漂移、profile 成员 28/8 工具、add_member 路径 8/30 工具）。
 
 ## 4. 运行环境与命令
 
@@ -117,25 +129,30 @@ profile 路径（candidate 独有，baseline 无此配置键）：第二个 capt
 
 | 产物 | SHA-256 |
 | --- | --- |
-| `lib/index.js` | `8cee164dfc338142f15dbc55ee3d06a1ed78724c677108b65ba77ae9e16cc0c7` |
+| `lib/index.js` | `51260b1980b3a6541db943ee4f3a5e61010fe187b4f574227c256db0700ff878` |
 | `lib/harness-compat.js` | `2e998ab7de99cf8805669de0907f0ff0de82f57856cfe241760e22ea7c4e4576` |
-| `lib/tool-policies.js` | `def417433a172b5ff68b2b810fd54a6748ec86bcaa700209b11d2d5d17543a2b` |
-| `lib/tools.js` | `b2be261507f69bbebfa04935ec61c63cb1752c6483160b6e0e81191fc5fcb8c1` |
-| `lib/members.js` | `717f25f56e1e9d54b5e0e60e439d915913841d1e2496b80f8ce3733d3c6cab01` |
+| `lib/tool-policies.js` | `436dea914b4219140c76db823e78c9c92e528c03be7000b5b89c82280ebaa74e` |
+| `lib/tools.js` | `80047d14b3c5c83068f93ebb1df2b26151a800dbb872abf235fc86c90361c0d1` |
+| `lib/members.js` | `250fc929799801ee065a1470541d498a571bad26bad52927d21548b4b5fc5f0f` |
 | `lib/state.js` | `dc4cafbeefaf4689256ed6a5c5efc940e866a86762270bc3bc6d6053eb25869b` |
 | `lib/profiles.js` | `84c7795f92c5719177d9db03cce01042e076eda8a2c546c809f47a52c6bc0ae4` |
-| 验收 harness `drive.mjs` | `7d788216d336ba9c529a2f7fda12044fa966fad95f3ecbf2d79d6a9ec4d85fbb` |
+| `lib/types/tool-policies.d.ts` | `be3106b2af691e0b98d50a039ad52808547f1dc9a653798085dd078be88a15e6` |
+| 验收 harness `drive.mjs` | `8ddc5a87b2af4760df32639cc36f16be71eaa356a7141aac1aa92a3b7b51bea2` |
 | 观测插件 `probe.mjs` | `034afee34d8ce825447fe1d12680d0cba8aa34a9e6e1cade090c7ac152d0235e` |
 | baseline patch | `d4aa9d5e952e0ea7d5ca82f1365930f3d6d7a48d14345aca167527fdc71ba1c9` |
-| candidate patch | `98ec5584eae7f6f3d063090ed7b7731fbfdc83ade45908ee3288bf0a4ea863e1` |
+| candidate patch | `b1d119fd3c38968f215f743c948e332f651ecd08cb395395c71c98e4c4895d70` |
 | `runs/baseline/phase1.json` | `4c3ba58f8a8fc8593dd345ca0182e01f5362963997ff7a82e3439e3716414a04` |
 | `runs/baseline/phase2.json` | `60abce53177a425b93008621be793edc09de5a761859d2a055e296b2857c50b1` |
-| `runs/candidate/phase1.json` | `139abef8da13556f5a3d68309a594c72bb0ba228d855e6e1927854e59c912b2c` |
-| `runs/candidate/phase2.json` | `7c07c6ac77e5381385cccd8a8c3063600e4b5322fc773ad766b0c8b1ed639426` |
-| `runs/candidate/phase-profile.json` | `2b88b173f1272bb6576f63b9deb612ccd8227f62788aaa6815ce50007ef8ab54` |
-| `runs/candidate/phase-addmember.json` | `d3b4f638f0035b30de451313266c8ce8a48a92a3f28f82d906874cacc65cd3f3` |
+| `runs/candidate/phase1.json` | `3601f2196f42cdcfdf22b1129935ddd184037b495254eb068e95729beafb72fb` |
+| `runs/candidate/phase2.json` | `6fef81bbb98db9c5db9681e53a1cfb8dd1d4497a03e8e558053ad1e14b833537` |
+| `runs/candidate/phase-profile.json` | `479afb5efe66349761c9e9551670a589cf9e8ff1f20373e2538d48d20b32c8cd` |
+| `runs/candidate/phase-addmember.json` | `4ae81737c528fb26f8e9e4c379e07051e7b72fa4f6cd786c623a7daf38b9abac` |
+| `runs/candidate/phase-invalid.json` | `22d9a1aadffd8abf2f9ce5e664269d29c9fc87c89bf8b4930126281e10e3a321` |
+| 打包产物 `nanmicoder-dsh-agent-teams-0.1.22.tgz` | `f710abe2b09127637322e8baf6599d38439ef161a17bb6fb8c4bf725ca7277f8` |
 
-大量日志保留在 `/private/tmp/agentteams-issues-20261010/policies/`，未写入仓库。
+打包核对：`pnpm build` → `node scripts/git-artifacts.mjs`（`Git artifacts match source and build settings`）→ `npm pack`，解包后逐文件比对，`lib/index.js`、`lib/harness-compat.js`、`lib/tool-policies.js`、`lib/tools.js`、`lib/members.js`、`lib/state.js`、`lib/profiles.js`、`lib/types/tool-policies.d.ts` 的 sha256 与仓库内 `lib/` 完全一致；tarball 共 115 个文件。
+
+大量日志保留在 `/private/tmp/agentteams-issues-20261010/policies/`，未写入仓库；仓库内只保留本报告与 `acceptance-summary.json`（sanitized 摘要）。
 
 ## 6. 未覆盖范围与已知限制
 

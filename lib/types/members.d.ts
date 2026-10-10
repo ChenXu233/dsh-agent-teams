@@ -156,8 +156,11 @@ export declare function memberWelcome(team: TeamState, memberName: string): stri
  *   policy, or the legacy captain-only filter when the member has none). The
  *   caller resolves it so `spawnMember` forwards exactly one immutable filter
  *   to `startContinuable`.
+ * @param relaxableDeny - deny names the lenient retry may drop for this
+ *   member; the caller narrows it for a policy member so a name the owner
+ *   declared is never silently removed.
  */
-export declare function spawnMember(ctx: Context, config: MemberRuntimeConfig, selections: MemberSelectionRuntime, llmSelection: MemberLlmSelection, captain: Agent, team: TeamState, member: TeamMember, stateDir: string, signal: AbortSignal, initialPrompt?: string, resolvedFilter?: MemberToolFilter): Promise<void>;
+export declare function spawnMember(ctx: Context, config: MemberRuntimeConfig, selections: MemberSelectionRuntime, llmSelection: MemberLlmSelection, captain: Agent, team: TeamState, member: TeamMember, stateDir: string, signal: AbortSignal, initialPrompt?: string, resolvedFilter?: MemberToolFilter, relaxableDeny?: readonly string[]): Promise<void>;
 /**
  * Deliver one message to a member as its next FIFO turn. Best effort: a
  * failure (member gone or not continuable) is logged and reported as `false`

@@ -6,7 +6,9 @@ import { join } from 'node:path'
 import {
   BUILTIN_DENY_TOOLS,
   dedupeToolNames,
+  memberSpawnRelaxableDeny,
   normalizeToolPolicy,
+  optionalToolPolicy,
   parseToolPolicies,
   requireToolPolicy,
   resolveMemberToolFilter,
@@ -135,6 +137,62 @@ test('the spawn retry relaxes only the built-in deny entries', async () => {
     startMemberWithLenientFilter(async () => { throw rejection(['subagent']) }, { deny: [...CAPTAIN_TOOL_NAMES, 'subagent'] }, []),
     /unknown global tool/u,
   )
+})
+
+test('an owner-declared deny name is never relaxable, even when it overlaps a built-in', () => {
+  // `send_message` and `subagent` are built-in depth entries; `agent_teams_*`
+  // are built-in captain-only entries. A policy that names one of them must not
+  // inherit the #163/#164 relaxation for that exact name.
+  const policy = normalizeToolPolicy('strict-send', { deny: ['send_message', 'web_search'] })
+  const relaxable = memberSpawnRelaxableDeny(policy)
+  assert.ok(!relaxable.includes('send_message'), 'the owner-declared built-in name stays strict')
+  assert.ok(relaxable.includes('subagent'), 'built-in names the owner did not declare stay relaxable')
+  assert.ok(CAPTAIN_TOOL_NAMES.every(name => relaxable.includes(name)))
+  assert.ok(!relaxable.includes('web_search'), 'owner-only names were never relaxable')
+
+  const captainOverlap = memberSpawnRelaxableDeny(normalizeToolPolicy('strict-captain', { deny: ['agent_teams_create'] }))
+  assert.ok(!captainOverlap.includes('agent_teams_create'), 'an owner-declared captain-only name stays strict too')
+
+  // A member without a policy keeps the legacy built-in recovery path, and a
+  // selected policy id this deployment no longer declares relaxes nothing.
+  assert.deepEqual(memberSpawnRelaxableDeny(undefined), [...BUILTIN_DENY_TOOLS])
+  assert.deepEqual(memberSpawnRelaxableDeny(undefined, true), [], 'a selected id with no configured policy relaxes nothing')
+
+  const policies = parseToolPolicies({ 'strict-send': { deny: ['send_message'] } })
+  assert.deepEqual(optionalToolPolicy(policies, 'strict-send'), { deny: ['send_message'] })
+  assert.equal(optionalToolPolicy(policies, 'not-configured'), undefined)
+  assert.equal(optionalToolPolicy(policies, 'toString'), undefined)
+})
+
+test('a relaxed spawn never drops an owner-declared overlap name', async () => {
+  const rejection = names => new Error(
+    `tools.restrict() names unknown global tool${names.length > 1 ? 's' : ''} ${names.map(name => `"${name}"`).join(', ')}; known global tools: x`,
+  )
+  const filter = resolveMemberToolFilter(normalizeToolPolicy('strict-send', { deny: ['send_message'] }), { maxDepth: 0 })
+  // The host rejects only the owner-declared overlap name: the spawn must fail
+  // instead of silently applying a filter the owner did not declare.
+  await assert.rejects(
+    startMemberWithLenientFilter(
+      async () => { throw rejection(['send_message']) },
+      filter,
+      memberSpawnRelaxableDeny(normalizeToolPolicy('strict-send', { deny: ['send_message'] })),
+    ),
+    /unknown global tool/u,
+  )
+  // A rejection naming only an undeclared built-in entry is still recovered.
+  const attempts = []
+  const started = await startMemberWithLenientFilter(
+    async current => {
+      attempts.push([...current.deny])
+      if (attempts.length === 1) throw rejection(['subagent'])
+      return 'started'
+    },
+    filter,
+    memberSpawnRelaxableDeny(normalizeToolPolicy('strict-send', { deny: ['send_message'] })),
+  )
+  assert.equal(started, 'started')
+  assert.ok(!attempts[1].includes('subagent'))
+  assert.ok(attempts[1].includes('send_message'), 'the owner-declared name is still denied on the retry')
 })
 
 test('policy ids are data, never prototype members', () => {

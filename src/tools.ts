@@ -57,7 +57,7 @@ import {
 } from './state.ts'
 import { appendTaskEvidence } from './quality-gates.ts'
 import { restrictableToolNames } from './harness-compat.ts'
-import { requireToolPolicy, resolveMemberToolFilter, type MemberToolFilter, type MemberToolPolicy } from './tool-policies.ts'
+import { memberSpawnRelaxableDeny, optionalToolPolicy, requireToolPolicy, resolveMemberToolFilter, type MemberToolFilter, type MemberToolPolicy } from './tool-policies.ts'
 import type { ContractAmendmentInput } from './state.ts'
 import type { AcceptanceResult, CommandResult, ReviewFinding, ReviewVerdict, TaskKind } from './types.ts'
 import {
@@ -290,6 +290,23 @@ function memberToolSelection(
   }
 }
 
+/**
+ * Deny names the lenient spawn retry may drop for one member.
+ *
+ * A member without a policy keeps the built-in #163/#164 recovery path. A
+ * policy member may only relax built-in entries the owner did not declare
+ * itself (`memberSpawnRelaxableDeny`), and a selected policy id this
+ * deployment no longer declares relaxes nothing: the member then fails loud
+ * instead of spawning under a different filter.
+ * @param config - resolved plugin config.
+ * @param member - the member being spawned.
+ * @returns the relaxable deny names, or undefined for the legacy default.
+ */
+function memberRelaxableDeny(config: ToolsConfig, member: TeamMember): readonly string[] | undefined {
+  if (member.toolPolicy === undefined) return undefined
+  return memberSpawnRelaxableDeny(optionalToolPolicy(config.toolPolicies, member.toolPolicy), true)
+}
+
 /** Validate references and cycles before a staged graph can be saved or run. */
 function validateStagedGraph(team: TeamState, requireRunnable: boolean): void {
   const members = team.members.filter((member) => member.status !== 'removed')
@@ -500,7 +517,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         const selection = await resolveMemberLlmSelection(ctx, captain, {
           provider: member.provider, model: member.model, reasoningEffort: member.reasoningEffort, fallback: member.fallback,
         }, signal)
-        await spawnMember(ctx, memberRuntime(config), memberSelections, selection, captain, team, member, config.stateDir, signal, text, member.toolFilter)
+        await spawnMember(ctx, memberRuntime(config), memberSelections, selection, captain, team, member, config.stateDir, signal, text, member.toolFilter, memberRelaxableDeny(config, member))
         orphan = { ...member }
         delete member.spawnError
         await writeTeam(root, team)

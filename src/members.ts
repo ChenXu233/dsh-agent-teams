@@ -596,6 +596,9 @@ Do not start work until the scheduler or captain assigns a task in this turn.`
  *   policy, or the legacy captain-only filter when the member has none). The
  *   caller resolves it so `spawnMember` forwards exactly one immutable filter
  *   to `startContinuable`.
+ * @param relaxableDeny - deny names the lenient retry may drop for this
+ *   member; the caller narrows it for a policy member so a name the owner
+ *   declared is never silently removed.
  */
 export async function spawnMember(
   ctx: Context,
@@ -609,6 +612,7 @@ export async function spawnMember(
   signal: AbortSignal,
   initialPrompt?: string,
   resolvedFilter?: MemberToolFilter,
+  relaxableDeny?: readonly string[],
 ): Promise<void> {
   // Fail loud at the first use: provider registration is a sibling plugin's
   // effect and may settle after this plugin mounts. Capability checks here
@@ -668,6 +672,7 @@ export async function spawnMember(
         })
       },
       requestedFilter,
+      relaxableDeny,
     )
   ))
   member.id = start.childId

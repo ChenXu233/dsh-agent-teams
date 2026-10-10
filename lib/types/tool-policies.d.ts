@@ -72,6 +72,33 @@ export declare function normalizeToolPolicy(id: string, policy: MemberToolPolicy
  */
 export declare function parseToolPolicies(raw: Record<string, MemberToolPolicy> | undefined | null): Record<string, MemberToolPolicy>;
 /**
+ * The policy behind one selected id, or `undefined` when this deployment no
+ * longer declares it (a config change after the member was created). Used on
+ * paths that must not fail a durable record merely because the owner edited
+ * configuration; selection itself uses {@link requireToolPolicy}.
+ * @param policies - normalized configured policies.
+ * @param id - the selected policy id.
+ * @returns the declared policy, or undefined.
+ */
+export declare function optionalToolPolicy(policies: Record<string, MemberToolPolicy>, id: string): MemberToolPolicy | undefined;
+/**
+ * The deny names one spawn may relax for a member that selected a policy.
+ *
+ * The built-in captain/depth entries keep the #163/#164 recovery path, but a
+ * name the owner explicitly declared in the policy's own `deny` list is never
+ * relaxable — even when it is also a built-in entry (`send_message` and
+ * `subagent` are depth entries, and every captain-only name is a built-in
+ * deny). Dropping such a name would spawn the member under a different policy
+ * than the owner declared, which is contract drift rather than recovery.
+ * @param policy - the member's selected policy, or undefined when the member
+ *   selected none (or the id is no longer configured).
+ * @param policySelected - whether the member selected a policy at all. A
+ *   selected id whose policy is no longer configured relaxes nothing, so the
+ *   member fails loud instead of spawning under an unknown filter.
+ * @returns the deny names the lenient retry may drop.
+ */
+export declare function memberSpawnRelaxableDeny(policy: MemberToolPolicy | undefined, policySelected?: boolean): readonly string[];
+/**
  * The policy behind one selected id. A model-facing selection may only name a
  * policy the deployment owner declared, so an unknown id is an error raised
  * before any member is persisted.
