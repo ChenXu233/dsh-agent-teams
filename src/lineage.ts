@@ -161,9 +161,12 @@ export interface LeadScopedTeam {
 /** Whether one identity leads (or inherits the lead of) a team's recorded captain. */
 export function teamLeadMatch(team: LeadScopedTeam, lead: LeadIdentity): boolean {
   const members = team.members ?? []
-  // A listed member is never a lead: a member session is a subagent child of
-  // its captain, so its parent chain contains the captain id too.
-  if (members.some(member => member.id === lead.sessionId && member.status !== 'removed')) return false
+  // A listed member is never a lead, retired or not: a member session is a
+  // subagent child of its captain, so its parent chain contains the captain id
+  // too, and membership revocation must never hand that session lead authority.
+  // Member participation itself stays governed by the removed filter in the
+  // team lookups.
+  if (members.some(member => member.id === lead.sessionId)) return false
   if (team.captainSessionId === lead.sessionId) return true
   if (!lead.inheritsLead) return false
   // Descending from a member (a fork of one) is not lead identity either.
@@ -177,7 +180,7 @@ export function teamLeadMatch(team: LeadScopedTeam, lead: LeadIdentity): boolean
  * chain, and a member's fork does not match either.
  */
 export function sessionLeadsTeam(ctx: Context, team: LeadScopedTeam, sessionId: string): boolean {
-  if (team.members?.some(member => member.id === sessionId && member.status !== 'removed') === true) return false
+  if (team.members?.some(member => member.id === sessionId) === true) return false
   if (team.captainSessionId === sessionId) return true
   const session = liveSession(ctx, sessionId)
   return session !== undefined && teamLeadMatch(team, leadIdentityOf(ctx, session))
@@ -185,7 +188,7 @@ export function sessionLeadsTeam(ctx: Context, team: LeadScopedTeam, sessionId: 
 
 /** Durable {@link sessionLeadsTeam}: resolves the caller's chain through stored headers. */
 export async function sessionLeadsTeamAsync(ctx: Context, team: LeadScopedTeam, sessionId: string): Promise<boolean> {
-  if (team.members?.some(member => member.id === sessionId && member.status !== 'removed') === true) return false
+  if (team.members?.some(member => member.id === sessionId) === true) return false
   if (team.captainSessionId === sessionId) return true
   const session = liveSession(ctx, sessionId)
   return session !== undefined && teamLeadMatch(team, await leadIdentityOfAsync(ctx, session))
