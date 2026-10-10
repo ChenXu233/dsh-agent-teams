@@ -11,9 +11,9 @@
  * plugin mounts. This tool is the reviewable, non-destructive recovery path:
  *
  *  - read-only unless `--apply` is passed;
- *  - the stored source generation is never modified: it is copied to a
- *    timestamped backup beside it before anything is published, and an existing
- *    backup is never overwritten;
+ *  - the stored source generation is never modified: it is copied to a backup
+ *    beside it (exclusive create, so an existing backup is never overwritten)
+ *    before anything is published, and its hash is compared before/after;
  *  - a generation the installed catalog already migrates is left untouched;
  *  - only source kinds outside the released vocabulary are normalized to the
  *    released plugin wrapper (`{ kind: 'plugin', plugin: 'dsh-agent-teams' }`,
@@ -30,16 +30,17 @@
  *
  * Usage:
  *   node scripts/legacy-session-source-repair.mjs --session-dir <dir> [--apply]
- *     [--no-backup] [--kinds agent-teams-command]
+ *     [--kinds agent-teams-command]
  *
  * Exit codes: 0 success (dry runs report `"applied": false`), 1 refusal or
  * failure (nothing published).
  */
-import { copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { constants as fsConstants, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { constants, zstdCompressSync, zstdDecompressSync } from 'node:zlib'
+import { createHash } from 'node:crypto'
+import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from 'node:zlib'
 
 /**
  * Resolve one Harness package through the installed host cohort. The format
@@ -57,6 +58,11 @@ function harnessImport(name) {
 const DEFAULT_KINDS = ['agent-teams-command']
 const BACKUP_SUFFIX = '.pre-160-repair.bak'
 
+/** Lowercase hex SHA-256 of one file's exact bytes. */
+function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
 function fail(message) {
   console.error(`legacy session source repair: ${message}`)
   process.exitCode = 1
@@ -64,11 +70,10 @@ function fail(message) {
 }
 
 function parseArguments(argv) {
-  const options = { apply: false, backup: true, kinds: DEFAULT_KINDS.slice(), sessionDir: undefined }
+  const options = { apply: false, kinds: DEFAULT_KINDS.slice(), sessionDir: undefined }
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index]
     if (flag === '--apply') options.apply = true
-    else if (flag === '--no-backup') options.backup = false
     else if (flag === '--session-dir') options.sessionDir = argv[++index]
     else if (flag === '--kinds') options.kinds = String(argv[++index] ?? '').split(',').map(value => value.trim()).filter(Boolean)
     else return fail(`unknown argument ${flag}`)
@@ -122,9 +127,13 @@ function zstdFrameLength(buffer, start) {
     const blockHeader = buffer.readUIntLE(cursor, 3)
     cursor += 3
     const last = blockHeader & 1
-    const type = (blockHeader >> 1) & 3
-    if (type === 3) throw new Error(`corrupt Zstandard session log: reserved block type at byte ${cursor}`)
-    cursor += blockHeader >> 3
+    const blockType = (blockHeader >> 1) & 3
+    const blockSize = blockHeader >> 3
+    if (blockType === 3) throw new Error(`corrupt Zstandard session log: reserved block type at byte ${cursor}`)
+    // RFC 8878 §3.1.1.2.2/3: Block_Size counts the block's *content*; an RLE
+    // block stores that content as a single repeated byte, so its payload is
+    // one byte regardless of Block_Size.
+    cursor += blockType === 1 ? 1 : blockSize
     if (last === 1) break
   }
   if (checksum === 1) cursor += 4
@@ -186,7 +195,7 @@ function normalizeSources(value, kinds, counter, depth = 0) {
 
 /** Write the current-generation artifact with the store's checksummed frame container. */
 function encodeFrames(headerLine, rowLines) {
-  const frame = text => zstdCompressSync(Buffer.from(text, 'utf8'), { params: { [constants.ZSTD_c_checksumFlag]: 1 } })
+  const frame = text => zstdCompressSync(Buffer.from(text, 'utf8'), { params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 } })
   const frames = [frame(`${headerLine}\n`)]
   for (let index = 0; index < rowLines.length; index += 500) {
     frames.push(frame(`${rowLines.slice(index, index + 500).join('\n')}\n`))
@@ -270,18 +279,18 @@ async function repair(options) {
   }
   if (!options.apply) return report
 
+  const sourcePath = join(sessionDir, source.name)
+  const sourceHashBefore = sha256(sourcePath)
   const backupPath = join(sessionDir, `${source.name}${BACKUP_SUFFIX}`)
-  if (options.backup) {
-    // Exclusive copy: an existing backup is never overwritten, and a racing
-    // second run fails here instead of silently replacing it.
-    try {
-      copyFileSync(join(sessionDir, source.name), backupPath, constants.COPYFILE_EXCL)
-    } catch (error) {
-      if (error?.code === 'EEXIST') return fail(`${backupPath} already exists; refusing to overwrite a backup`)
-      throw error
-    }
-    report.backup = `${source.name}${BACKUP_SUFFIX}`
+  // Exclusive copy (`COPYFILE_EXCL`): an existing backup is never overwritten,
+  // and a racing second run fails here instead of silently replacing it.
+  try {
+    copyFileSync(sourcePath, backupPath, fsConstants.COPYFILE_EXCL)
+  } catch (error) {
+    if (error?.code === 'EEXIST') return fail(`${backupPath} already exists; refusing to overwrite a backup`)
+    throw error
   }
+  report.backup = `${source.name}${BACKUP_SUFFIX}`
 
   const encoded = encodeFrames(JSON.stringify(currentHeader), currentRows.map(row => JSON.stringify(row)))
   // Read the exact bytes back before publishing: a repair that cannot be read
@@ -301,7 +310,13 @@ async function repair(options) {
   // final name — a half-written current generation can never be visible to the
   // host, and an existing one is never replaced.
   const temporaryPath = join(sessionDir, `${publishedName}.tmp-${process.pid}`)
-  writeFileSync(temporaryPath, encoded)
+  // Exclusive create: residue from a crashed run is never overwritten.
+  try {
+    writeFileSync(temporaryPath, encoded, { flag: 'wx' })
+  } catch (error) {
+    if (error?.code === 'EEXIST') return fail(`${temporaryPath} exists from an earlier interrupted run; remove it and retry`)
+    throw error
+  }
   try {
     linkSync(temporaryPath, publishedPath)
   } catch (error) {
@@ -312,7 +327,8 @@ async function repair(options) {
   rmSync(temporaryPath, { force: true })
   report.applied = true
   report.publishedBytes = encoded.byteLength
-  report.sourceUnchanged = readFileSync(join(sessionDir, source.name)).equals(readFileSync(backupPath ?? join(sessionDir, source.name)))
+  report.sourceUnchanged = sha256(sourcePath) === sourceHashBefore
+  report.backupUnchanged = sha256(backupPath) === sourceHashBefore
   return report
 }
 

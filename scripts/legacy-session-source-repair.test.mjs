@@ -17,7 +17,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { constants, zstdCompressSync } from 'node:zlib'
+import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from 'node:zlib'
 import { decodeStoredFrames } from './legacy-session-source-repair.mjs'
 import test from 'node:test'
 
@@ -36,7 +36,7 @@ const { releasedV2SessionFormatCodec } = await harnessImport('@deepseek-ai/dsh-s
 const { releasedV3SessionFormatCodec } = await harnessImport('@deepseek-ai/dsh-session-format-v2-to-v3')
 
 const sha256 = path => createHash('sha256').update(readFileSync(path)).digest('hex')
-const frame = text => zstdCompressSync(Buffer.from(text, 'utf8'), { params: { [constants.ZSTD_c_checksumFlag]: 1 } })
+const frame = text => zstdCompressSync(Buffer.from(text, 'utf8'), { params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 } })
 
 function writeLegacySession(dir, kind, extraSource = {}) {
   const header = releasedV2SessionFormatCodec.encodeHeader({ version: 2, id: 'session-160-repair', createdAt: 1, isSeeded: false, delegationDepth: 0 }, 0)
@@ -166,4 +166,36 @@ test('a generation the installed catalog already migrates is a no-op', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('an existing backup is never overwritten and blocks the repair', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agent-teams-160-'))
+  try {
+    const source = writeLegacySession(dir, 'agent-teams-command')
+    const sourceHash = sha256(source)
+    const staleBackup = join(dir, 'session.v2.jsonl.zstd.pre-160-repair.bak')
+    writeFileSync(staleBackup, Buffer.from('stale backup bytes that must survive'))
+    const staleHash = sha256(staleBackup)
+
+    assert.throws(() => run(['--session-dir', dir, '--apply']), /Command failed/)
+    assert.equal(sha256(source), sourceHash, 'the source generation must stay untouched')
+    assert.equal(sha256(staleBackup), staleHash, 'the existing backup must not be replaced')
+    assert.deepEqual(readdirSync(dir).sort(), ['session.v2.jsonl.zstd', 'session.v2.jsonl.zstd.pre-160-repair.bak'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the frame reader follows RFC 8878 block sizes, including RLE blocks', () => {
+  // Valid RLE frame from RFC 8878 §3.1.1.2.3: Block_Size 5 stores one byte
+  // repeated five times, so the payload is a single byte.
+  const rle = Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 5, (5 << 3) | 3, 0, 0, 0x61])
+  assert.equal(zstdDecompressSync(rle).toString('utf8'), 'aaaaa')
+  assert.equal(decodeStoredFrames(rle), 'aaaaa')
+
+  const concatenated = Buffer.concat([frame('one\n'), rle, frame('three\n')])
+  assert.equal(decodeStoredFrames(concatenated), 'one\naaaaathree\n')
+
+  const truncated = Buffer.concat([frame('one\n'), rle.subarray(0, rle.length - 2)])
+  assert.throws(() => decodeStoredFrames(truncated), /truncated final frame|truncated block/)
 })
