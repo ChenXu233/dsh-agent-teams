@@ -9,7 +9,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
-import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm';
+import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm';
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session';
 import { type MemberToolFilter } from './tool-policies.ts';
 type Setup = (childCtx: Context, child: Agent) => () => void;
@@ -20,6 +20,41 @@ declare module '@deepseek-ai/dsh-llm' {
         };
     }
 }
+/** Package identity a released plugin-wrapper source names on older hosts. */
+export declare const AGENT_TEAMS_PLUGIN_NAME = "@nanmicoder/dsh-agent-teams";
+/**
+ * First stored format generation whose migration edges admit producer-owned
+ * source kinds. The released v2→v3 payload audit validates every message source
+ * against a closed list of released kinds, so a stored format older than this
+ * must carry a released source or the whole session becomes unreadable once a
+ * newer host opens it (#160).
+ */
+export declare const RELEASED_SOURCE_VOCABULARY_VERSION = 3;
+/** Source kinds this plugin mints on a host whose stored format admits them. */
+export type AgentTeamsSource = {
+    readonly kind: 'agent-teams';
+} | {
+    readonly kind: 'agent-teams-command';
+    readonly goal?: string;
+    readonly profile?: string;
+};
+/** Stored session format generation of the running host; 0 when it exposes none. */
+export declare function hostSessionFormatVersion(): number;
+/**
+ * Source for one AgentTeams-authored message on the running host.
+ *
+ * Current hosts mint producer-owned kinds: the Harness documents message
+ * sources as a merge-extensible vocabulary without a catch-all, so this plugin
+ * declares its own. Hosts that still store a pre-v3 generation are a different
+ * contract — their released v2→v3 migration rejects any source outside the
+ * released vocabulary, which is exactly how a plugin kind written on an older
+ * supported host poisons its session log for every later host. On those hosts
+ * the released plugin wrapper is used instead; the goal and profile already
+ * travel in the message text.
+ * @param modern - the producer-owned source to use where the host admits it.
+ * @returns a source accepted by the running host and by its migration chain.
+ */
+export declare function agentTeamsSource(modern: AgentTeamsSource): MessageSource;
 /**
  * 0.1.6 moved startup admission to serial agent/created. Older created events
  * have no source and precede session-start; ignore those until the old hook.

@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import * as dshSession from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import { BUILTIN_DENY_TOOLS, resolveMemberToolFilter, type MemberToolFilter } from './tool-policies.ts'
@@ -54,6 +55,51 @@ declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'agent-teams': { readonly kind: 'agent-teams' }
   }
+}
+
+/** Package identity a released plugin-wrapper source names on older hosts. */
+export const AGENT_TEAMS_PLUGIN_NAME = '@nanmicoder/dsh-agent-teams'
+
+/**
+ * First stored format generation whose migration edges admit producer-owned
+ * source kinds. The released v2→v3 payload audit validates every message source
+ * against a closed list of released kinds, so a stored format older than this
+ * must carry a released source or the whole session becomes unreadable once a
+ * newer host opens it (#160).
+ */
+export const RELEASED_SOURCE_VOCABULARY_VERSION = 3
+
+/** Source kinds this plugin mints on a host whose stored format admits them. */
+export type AgentTeamsSource =
+  | { readonly kind: 'agent-teams' }
+  | { readonly kind: 'agent-teams-command'; readonly goal?: string; readonly profile?: string }
+
+/** Stored session format generation of the running host; 0 when it exposes none. */
+export function hostSessionFormatVersion(): number {
+  const version = (dshSession as unknown as { SESSION_FORMAT_VERSION?: number }).SESSION_FORMAT_VERSION
+  return typeof version === 'number' && Number.isSafeInteger(version) && version >= 0 ? version : 0
+}
+
+/**
+ * Source for one AgentTeams-authored message on the running host.
+ *
+ * Current hosts mint producer-owned kinds: the Harness documents message
+ * sources as a merge-extensible vocabulary without a catch-all, so this plugin
+ * declares its own. Hosts that still store a pre-v3 generation are a different
+ * contract — their released v2→v3 migration rejects any source outside the
+ * released vocabulary, which is exactly how a plugin kind written on an older
+ * supported host poisons its session log for every later host. On those hosts
+ * the released plugin wrapper is used instead; the goal and profile already
+ * travel in the message text.
+ * @param modern - the producer-owned source to use where the host admits it.
+ * @returns a source accepted by the running host and by its migration chain.
+ */
+export function agentTeamsSource(modern: AgentTeamsSource): MessageSource {
+  if (hostSessionFormatVersion() >= RELEASED_SOURCE_VOCABULARY_VERSION) return modern
+  // Released-format hosts persist plugin-authored messages as this wrapper; the
+  // current vocabulary retired it, so the cast stays confined to this branch
+  // and `modern` is the only shape a current host ever sees.
+  return { kind: 'plugin', plugin: AGENT_TEAMS_PLUGIN_NAME } as unknown as MessageSource
 }
 
 /**
@@ -148,7 +194,7 @@ export async function queueMemberPrompt(
   content: ContentBlock[], signal: AbortSignal,
 ): Promise<MessageId> {
   const host = boundary(runtime)
-  const source: MessageSource = { kind: 'agent-teams' }
+  const source = agentTeamsSource({ kind: 'agent-teams' })
   if (typeof host.followup === 'function') {
     return host.followup.call(runtime, parent, childId, content, { source, signal })
   }
@@ -165,7 +211,7 @@ export async function steerMemberPrompt(
   content: ContentBlock[], signal: AbortSignal, live?: Agent,
 ): Promise<MessageId> {
   const host = boundary(runtime)
-  const source: MessageSource = { kind: 'agent-teams' }
+  const source = agentTeamsSource({ kind: 'agent-teams' })
   const deliver = host[hostPromptDeliver]
   if (typeof deliver === 'function') return deliver.call(runtime, parent, childId, content, source, signal, 'steer')
   if (typeof host.sendMessage === 'function') return host.sendMessage.call(runtime, parent, childId, content, { signal })
