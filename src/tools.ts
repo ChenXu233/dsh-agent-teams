@@ -739,11 +739,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         properties: {
           team_id: { type: 'string', required: true },
           team_name: { type: 'string', required: true },
+          captain_session_id: { type: 'string', required: true },
           state_dir: { type: 'string', required: true },
           phase: { type: 'string', required: true },
           profile: { type: 'string' },
           task_planning: { type: 'string' },
-          members: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { member_name: { type: 'string', required: true }, member_id: { type: 'string', required: true }, provider: { type: 'string', required: true }, model: { type: 'string', required: true }, reasoning_effort: { type: 'string' }, status: { type: 'string', required: true } } } },
+          members: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { member_name: { type: 'string', required: true }, member_id: { type: 'string', required: true }, member_role: { type: 'string' }, provider: { type: 'string', required: true }, model: { type: 'string', required: true }, reasoning_effort: { type: 'string' }, status: { type: 'string', required: true } } } },
           tasks: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { task_id: { type: 'string', required: true }, seed_id: { type: 'string', required: true }, subject: { type: 'string', required: true }, status: { type: 'string', required: true }, kind: { type: 'string' }, assignee: { type: 'string' }, dependencies: { type: 'array', items: { type: 'string' }, required: true } } } },
         },
       },
@@ -754,6 +755,23 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           : `Team "${value.team_name}" created (id ${value.team_id}) under ${value.state_dir}. You are the captain.`)
           + (value.tasks === undefined ? '' : '\n' + value.tasks.map(task => `${task.task_id} [${task.seed_id}]: ${task.subject}; assignee=${task.assignee ?? 'unassigned'}; dependencies=${task.dependencies.join(',')}`).join('\n')),
       }],
+      // The conversation card folds this durable result, and the card cannot
+      // reproduce the host's key cleaning for every name (issue #203). Publish
+      // the canonical identity instead of letting a client re-derive it.
+      presentationMeta: (_args, value) => ({
+        team_id: value.team_id,
+        team_name: value.team_name,
+        captain_session_id: value.captain_session_id,
+        phase: value.phase,
+        ...value.members === undefined ? {} : {
+          members: value.members.map(member => ({
+            id: member.member_id,
+            name: member.member_name,
+            role: member.member_role ?? '',
+            status: member.status,
+          })),
+        },
+      }),
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
@@ -856,6 +874,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         return {
           team_id: snapshot.id,
           team_name: snapshot.name,
+          captain_session_id: snapshot.captainSessionId,
           state_dir: join(stateRoot, snapshot.id),
           phase: snapshot.phase ?? 'running',
         }
@@ -863,6 +882,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       return {
         team_id: snapshot.id,
         team_name: snapshot.name,
+        captain_session_id: snapshot.captainSessionId,
         state_dir: join(stateRoot, snapshot.id),
         phase: snapshot.phase ?? 'running',
         ...snapshot.profile === undefined ? {} : { profile: snapshot.profile.name },
@@ -870,6 +890,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         members: snapshot.members.map((member) => ({
           member_name: member.name,
           member_id: member.id,
+          ...member.role === undefined ? {} : { member_role: member.role },
           provider: member.provider ?? '',
           model: member.model ?? '',
           ...member.reasoningEffort === undefined ? {} : { reasoning_effort: member.reasoningEffort },
