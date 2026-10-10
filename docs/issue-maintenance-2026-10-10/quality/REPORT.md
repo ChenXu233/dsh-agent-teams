@@ -117,7 +117,7 @@ pnpm typecheck                                                                ->
 - 源码/构建产物本地提交见 `result.json` 的 `commit` 字段；未推送、未发布、未关闭 issue、未在 GitHub 评论、未合并回 main（由主管独立核验后合并）。
 - 大量日志保留在 `/private/tmp/agentteams-issues-20261010/quality/`（`evidence/`、`ws/`、`dsh-home*/`、`plugin-baseline/`），未写入仓库。
 
-## 9. 补充验收（主管复核后追加，commit `pending`）
+## 9. 补充验收（主管复核后追加，commit `ff17686`）
 
 ### 9.1 #183 真实模型路径（baseline vs candidate，同输入）
 
