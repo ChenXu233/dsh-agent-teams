@@ -104,16 +104,28 @@ LAB_BASE=http://127.0.0.1:3111 node drivers/issue-103-live.mjs <work-root> basel
 - 源代次**永不修改**：先用 `COPYFILE_EXCL` 生成字节相同备份（已存在则拒绝），再做任何发布；
 - 只把白名单外的 `source.kind` 规范化为发布版 wrapper；**该 wrapper 的来源审计只接受 `kind` 与 `plugin` 两个成员**，所以历史 source 上的额外元数据（如 `goal`）**不会**进入新代次——工具会在报告里列出被规范化的字段名（`normalizedDroppedSourceFields`），它们仍完整保留在未改动的源代次与备份中。消息内容、事件顺序与其它行值逐字保留；
 - 迁移与校验使用**已安装的官方 catalog**（`createSessionFormatCatalogWithChildren([])`），编码使用官方 current encoder；产物先写临时文件、从字节回读校验，再用 `link()` **不可覆盖**发布（`EEXIST` 即拒绝），不会让半截 v4 被宿主优先读到；
-- 多帧 zstd 容器按 **RFC 8878 帧长**逐帧测量（Node 的 zstd API 只解第一帧，且按 magic 搜索会被压缩载荷误命中）；该读取器已在**真实 store 产物**上验证：`repro/validate-frame-reader.mjs` 读取 38 份真实 `session.v*.jsonl.zstd` 共 1814 行，0 失败。
+- 多帧 zstd 容器按 **RFC 8878 帧长**逐帧测量（Node 的 zstd API 只解第一帧，且按 magic 搜索会被压缩载荷误命中）；block 载荷长度按 block type 决定（RLE 块载荷恒为 1 字节，见 RFC 8878 §3.1.1.2.2/3），读取器已在**真实 store 产物**上验证：`repro/validate-frame-reader.mjs` 读取 38 份真实 `session.v*.jsonl.zstd` 共 1814 行，0 失败。
+
+独立 review 后的两处收紧（提交 `d64bc21`，红→绿证据见下）：
+
+1. **备份独占性**：`COPYFILE_EXCL` 之前错误地从 `node:zlib` 的 `constants` 取（实际为 `undefined`），导致已存在的旧 backup 会被覆盖。现改为 `node:fs` 的 `fsConstants.COPYFILE_EXCL`；回归测试在"尚无当前代次"的目录预置不同字节的旧 backup，`--apply` 必须拒绝，且旧 backup 与源代次逐字节不变。红证据（旧脚本，`baseline/160-tool-prescript-red.log`）：`an existing backup is never overwritten and blocks the repair` → `AssertionError: Missing expected exception`。
+2. **RLE block 载荷长度**：`zstdFrameLength` 之前无条件按 `Block_Size` 前进，使合法 RLE 帧被误判截断。现按 block type 取载荷长度（RLE = 1 字节）。回归测试覆盖：合法 RLE 帧（`Buffer.from([0x28,0xb5,0x2f,0xfd,0x20,5,(5<<3)|3,0,0,0x61])` → `aaaaa`）、raw+RLE+compressed 拼接日志、以及截断尾部必须抛错。红证据：旧脚本上该测试 → `Error: corrupt Zstandard session log: truncated final frame`。
+3. 临时当前代次文件改为 `wx` 独占创建（中断残留不会被覆盖）；移除 `--no-backup`（每次都保留独占备份），`sourceUnchanged`/`backupUnchanged` 改为发布前后真实 SHA-256 比对，而不再是"同一个文件读两次"的恒等式。
+
+注意：恢复工具位于 `scripts/legacy-session-source-repair.mjs`，而 `package.json#files` 未包含该文件，因此**不在 npm 发布产物内**（`pnpm pack` 校验为 0 命中）；它是仓库内的维护/恢复工具。
 
 真实宿主端到端验证（源字节保留 + 发布 + 宿主可读）：
 
 ```
-未修复会话 session-160-refused：      host 读取 FAIL（stored log 被拒）
-同一 v2 产物复制为 session-160-repaired 后 --apply：
+未修复会话 session-160-refused：
+  SessionQueryError: failed to observe session "session-160-refused":
+  cannot safely transform unclassified message source; source v2 artifact remains unchanged
+同一 v2 产物（独立会话 id）--apply（修复后工具）：
   normalizedSources=1, normalizedDroppedSourceFields=["goal"], events=6,
-  applied=true, sourceUnchanged=true, backup=session.v2.jsonl.zstd.pre-160-repair.bak
+  applied=true, sourceUnchanged=true, backupUnchanged=true,
+  backup=session.v2.jsonl.zstd.pre-160-repair.bak
   source 与 backup sha256 完全一致：6e1341a86017d783943d4ab7bf5107823f0d6183b5ace32f9562843eaa0bacca
+同一目录预置旧 backup 的字节（"stale"）后再次 --apply：exit 1，旧 backup 与源代次均未改变
 修复后 host 读取：ok=true，消息文本保留，归属显示为 plugin:dsh-agent-teams
 ```
 
@@ -195,13 +207,17 @@ LAB_BASE=http://127.0.0.1:3111 node drivers/issue-103-live.mjs <work-root> basel
 
 ## 6. 交付物与复核入口
 
-- 提交：`38a84b9f3133ccd12ce2740a865cb7850239bdad`（分支 `codex/issues-20261010-sessions`，未合回 main、未推送、未发布）
+- 提交：`38a84b9f3133ccd12ce2740a865cb7850239bdad`（主体修复）、`5b21ccd`（报告）、`d64bc21`（#160 恢复工具 review 收紧）
+  （分支 `codex/issues-20261010-sessions`，未合回 main、未推送、未发布）
 - 打包哈希：`pnpm pack` → `/private/tmp/agentteams-issues-20261010/sessions/pack/nanmicoder-dsh-agent-teams-0.1.22.tgz`
   sha256 `10a48c2374ff9d30137b9dd7cca096d08bda8bd9139356cb4f23a9e817379372`
+  （工具与测试不在 `files` 清单内，故本次脚本修复不改变 tarball 哈希）
 - 构建产物：`lib/index.js` sha256 `095e9ffb118946d86aa13bb8dbb272662013d0e7c0ec3604745cfba4d4c928f5`；
   `lib/lineage.js` sha256 `a47c50b5a242976c3b74bcecbcfee6baae7046a4fb63c0ab7e87c1240d03d05a`
-- 恢复工具：`scripts/legacy-session-source-repair.mjs` sha256 `0202281e451852d3f0f73376e5dafafa0765916140e8951ee79d8e7d118b3eb5`
-- 全量回归日志：`/private/tmp/agentteams-issues-20261010/sessions/logs/candidate-verify-final2.log`（0 失败）
+- 恢复工具：`scripts/legacy-session-source-repair.mjs` sha256 `ca8d4170a47bf09e5c110cffa745caa3535621a31ba7fb9e1b3106223f115a46`；
+  回归 `scripts/legacy-session-source-repair.test.mjs` sha256 `ea31ce69e32241f18a33ffe78400e2b2561ccc76345eb2b0f70d97c48a6df52e`
+- 全量回归日志：`logs/candidate-verify-final3.log`（含 `verify:legacy-session-repair`，0 失败）；`logs/candidate-verify-final2.log` 为收紧前一轮
+- 红→绿证据：`baseline/160-tool-prescript-red.log`（旧脚本上两条新回归均失败：backup 覆盖未拒绝、合法 RLE 帧被判截断）
 - 结果/进度：`/private/tmp/agentteams-issues-20261010/sessions/result.json`、`progress.json`
 
 复核用实验台（全部在本人 key 目录内，未改动主管/其他组工作区）：
