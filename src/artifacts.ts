@@ -176,6 +176,34 @@ function walkDirectory(input: {
   gap: (reason: string) => void
   full: () => boolean
 }): void {
+  // The prefix itself must be inside the workspace before it is enumerated:
+  // `escape/` may be a symlink to an outside directory, and readdir would
+  // happily list host names through it. Nested prefixes come from
+  // non-symlink directory entries of an already-verified parent.
+  if (input.prefix !== '') {
+    if (input.workspaceRoot === undefined) {
+      input.gap(`${input.pattern}: the workspace root cannot be resolved, so it is not enumerated`)
+      return
+    }
+    let inside: boolean | undefined
+    try {
+      inside = insideRoot(input.workspaceRoot, realpathSync(join(input.workspace, input.prefix)))
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') {
+        input.gap(`${input.pattern}: ${input.prefix} does not exist, so the scope could not be enumerated`)
+        return
+      }
+      inside = undefined
+    }
+    if (inside === undefined) {
+      input.gap(`${input.pattern}: ${input.prefix} cannot be resolved (broken or cyclic link); refusing to enumerate it`)
+      return
+    }
+    if (!inside) {
+      input.gap(`${input.pattern}: ${input.prefix} resolves outside the workspace; refusing to enumerate it`)
+      return
+    }
+  }
   const queue = input.prefix === '' ? [''] : [input.prefix]
   while (queue.length > 0) {
     const current = queue.shift() as string

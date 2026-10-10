@@ -163,3 +163,37 @@ pnpm typecheck                                                                ->
 - 失败的 repair 之后 re-check 永久 pending（§7.7）未改。
 - pre-fix 历史记录、mtime 1 ms 容差、hard link 三项限制不变。
 - 主管 3081 GUI 未复核（本分支只用自建实例与自建 profile 验证）。
+
+## 10. 独立复核后的三处内容绑定修正（新 commit）
+
+独立 review 在内容绑定代码里发现三处真实缺陷。三处都用**真实临时目录/真实字节**的永久 case 固定，并先在 `1d0048c` 的 `lib/` 上跑成红色（`git archive 1d0048c lib` + 当前 case 文件，`node --test`），修正后转绿。
+
+### 10.1 未绑定（无 artifact identity）的 verdict 不能充当 superseding evidence
+
+`verdictAuditNotes` 之前把 `sound` 定义为「没有 drift 的 verdict」，而 pre-fix 历史记录（没有 `reviewedArtifacts`）本来就没有 drift 可算 → 它会进入 `sound`，被 `supersedes` 选中并输出「superseded by t7, which binds the current bytes」，把旧的有效 review 的 drift blocker 降级为 warning，Delivery 变 ok。
+
+修正：新增 `bindsRecordedRevision` —— 只有**记录过 artifact、scope 完整（无 `reviewedGaps`）、评审期间未漂移（无 `reviewedDuringDrift`）、attempt 未变、且当前字节与记录一致**的 verdict 才能作为 superseding evidence。
+
+- case：`#161 review: an unbound legacy pass cannot supersede a real drift blocker`（真实 A/B 文件；旧 pass 绑定 A+B，B 被真实改写，随后插入一个更晚、同 lineage、无 artifact 记录的 pass）。
+- 红色证据（pre-fix）：`an unbound pass cleared a real drift blocker: {"ok":true,...}`；绿色（修正后）：`ok=false` 且 blocker 点名 `lib/b.js`，且不出现 `superseded by t7`。
+
+### 10.2 supersession 必须覆盖真正漂移的路径，不能只靠 lineage/时间
+
+之前旧 pass 覆盖 A+B、B 改动、新 pass 只审 A，也会把 B 的 drift 降为 warning。现在 `supersedes` 之外还要求 `coversDrift`：**每一个带路径的 drift 路径都必须在新 verdict 记录的 artifact 集合内**；不带路径的结构性问题（scope 缺口、评审期间漂移、目标被重新 attempt）只有在「同一 target 当前 attempt 的、sound 的、同 lineage 的」verdict 下才能清除。
+
+- case：`#161 review: a narrower new pass cannot clear drift on a path it never reviewed`（真实 A/B；窄审 A 的新 pass → 仍 blocked 且点名 `lib/b.js`；正向对照：覆盖 A+B 的新 pass → `ok=true` 且旧 pass 报 `superseded by t9`）。
+- 红色证据（pre-fix）：`a narrower review cleared unreviewed drift: {"ok":true,...}`。
+
+### 10.3 目录前缀的 containment 必须在枚举之前检查
+
+`readArtifactScope` 的「显式目录」分支（含尾斜杠的 pattern，如 `escape/`）直接调用 `walkDirectory`，绕过了 `inspectPath` 里的 realpath containment：当 `escape` 是指向工作区外目录的 symlink 时，`readdirSync` 会把**外部目录的名字与结构**枚举进来（单个文件读取随后会被拒，但名字已泄漏、`nested/` 已被遍历）。
+
+修正：`walkDirectory` 在枚举前先用 `realpathSync` + `insideRoot` 校验前缀自身；不存在记 gap（`does not exist`），不可解析记 gap（broken/cyclic），越界记 gap（`resolves outside the workspace`），一律不枚举。嵌套前缀来自已校验父目录的非 symlink 条目，构造上仍在工作区内。
+
+- case：`#174/#161: a directory pattern that is a symlink out of the workspace is never enumerated`（真实临时目录 + 真实 symlink + 外部目录里的真实文件；同时覆盖 `escape/`、`escape`、`escape/nested/` 与 `snapshotWorkspacePaths`）。
+- 红色证据（pre-fix）：`enumerated outside names: [{"path":"escape/host-only-secret.js",...},{"path":"escape/nested/deeper.js",...}]`；绿色（修正后）：`artifacts=[]` + `gaps` 含 `… resolves outside the workspace; refusing to enumerate it`。
+
+### 10.4 本轮的验证状态
+
+- 四个 case 文件：161 14/14、174 19/19、175 7/7、183 7/7，全部 EXIT=0；`pnpm typecheck` EXIT=0；`pnpm verify` EXIT=0（`evidence/pnpm-verify-final3.log`）。
+- 修正未触及 #161/#174/#175/#183 的功能路径，只收紧绑定与枚举的安全边界；上一节 §9 的真实模型与浏览器验收结果不受影响（它们跑在收紧前的构建上，行为在这些路径上一致：run 中没有任何 unbound verdict 被当作 superseding evidence，也没有使用越界目录 pattern）。

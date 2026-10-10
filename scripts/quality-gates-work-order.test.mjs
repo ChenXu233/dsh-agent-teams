@@ -453,3 +453,37 @@ test('#161: an unreadable current artifact makes the production audit incomplete
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('#174/#161: a directory pattern that is a symlink out of the workspace is never enumerated', {
+  skip: artifacts === undefined
+    ? 'artifacts module missing in this build'
+    : process.platform === 'win32' ? 'symlink probe' : false,
+}, () => {
+  const root = workspace()
+  const outside = mkdtempSync(join(tmpdir(), 'issue174-outside-'))
+  try {
+    writeFileSync(join(outside, 'host-only-secret.js'), 'export const leaked = true\n')
+    mkdirSync(join(outside, 'nested'), { recursive: true })
+    writeFileSync(join(outside, 'nested', 'deeper.js'), 'export const deeper = true\n')
+    symlinkSync(outside, join(root, 'escape'))
+    // Trailing-slash directory patterns go straight to the walker, so the
+    // prefix itself must be verified before readdir.
+    const readSlash = artifacts.readArtifactScope(root, ['escape/'])
+    assert.deepEqual(readSlash.artifacts, [], `enumerated outside names: ${JSON.stringify(readSlash.artifacts)}`)
+    assert.equal(readSlash.gaps.length, 1, `no gap reported: ${JSON.stringify(readSlash.gaps)}`)
+    assert.match(readSlash.gaps[0].reason, /outside the workspace|resolves outside/iu)
+    const readPlain = artifacts.readArtifactScope(root, ['escape'])
+    assert.equal(readPlain.artifacts[0].unreadable, true)
+    // A nested pattern through the same symlink is refused too.
+    const readNested = artifacts.readArtifactScope(root, ['escape/nested/'])
+    assert.deepEqual(readNested.artifacts, [])
+    assert.ok(readNested.gaps.length > 0)
+    // And the same pattern used as a work-order scope records no external bytes.
+    const snapshot = artifacts.snapshotWorkspacePaths(root, ['escape/'])
+    assert.deepEqual(snapshot.artifacts, [])
+    assert.ok((snapshot.gaps ?? []).length > 0)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(outside, { recursive: true, force: true })
+  }
+})

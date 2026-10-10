@@ -399,3 +399,115 @@ test('#161: an unreadable reviewed file cannot be claimed as unchanged', () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+/* ------------------------------------------------------------------------- *
+ * Independent-review findings on the content binding itself. Each case uses a
+ * real temporary workspace with real bytes: A = lib/a.js, B = lib/b.js.
+ * ------------------------------------------------------------------------- */
+
+function abWorkspace() {
+  const root = mkdtempSync(join(tmpdir(), 'issue161-ab-'))
+  mkdirSync(join(root, 'lib'), { recursive: true })
+  writeFileSync(join(root, 'lib', 'a.js'), 'export const a = 1\n')
+  writeFileSync(join(root, 'lib', 'b.js'), 'export const b = 1\n')
+  return root
+}
+
+/** Digest helper for an explicit root (the shared one is bound to REVIEWED_PATHS). */
+function readArtifacts2(root, paths) {
+  return readArtifacts(root, paths)
+}
+
+function abTeam(reviewOverrides) {
+  const state = team()
+  state.tasks = [
+    {
+      ...state.tasks[0],
+      createdAt: 0, inScope: ['lib/'], changedPaths: ['lib/a.js', 'lib/b.js'],
+    },
+    {
+      ...state.tasks[1],
+      id: 't2', round: 1, createdAt: 100, dependencies: ['t1'],
+      reviewedTaskId: 't1', reviewedAttempt: 1,
+      ...reviewOverrides,
+    },
+  ]
+  return state
+}
+
+test('#161 review: an unbound legacy pass cannot supersede a real drift blocker', async () => {
+  const root = abWorkspace()
+  try {
+    const first = readArtifacts2(root, ['lib/a.js', 'lib/b.js'])
+    const state = abTeam({
+      reviewedAttempt: 1,
+      reviewedArtifacts: first,
+      reviewedScope: ['lib/a.js', 'lib/b.js'],
+    })
+    await pause(10)
+    writeFileSync(join(root, 'lib', 'b.js'), 'export const b = 2\n')
+    // A newer, completed pass in the same lineage that recorded NO artifact
+    // identity (the shape of every pre-fix record).
+    const legacy = {
+      ...state.tasks[1],
+      id: 't7', round: 5, createdAt: 900, updatedAt: Date.now(),
+      reviewedTaskId: 't1', reviewedAttempt: 1,
+      reviewedArtifacts: undefined, reviewedScope: undefined, reviewedGaps: undefined,
+    }
+    const withLegacy = { ...state, taskSeq: 7, tasks: [...state.tasks, legacy] }
+    const delivery = canDeclareDelivery(withLegacy, { artifacts: readArtifacts2(root, ['lib/a.js', 'lib/b.js']) })
+    assert.equal(delivery.ok, false, `an unbound pass cleared a real drift blocker: ${JSON.stringify(delivery)}`)
+    assert.ok(
+      delivery.blockers.some((item) => item.includes('lib/b.js')),
+      `the drifted path is not named: ${JSON.stringify(delivery.blockers)}`,
+    )
+    assert.ok(!delivery.warnings.some((item) => /superseded by t7/u.test(item)), 't7 was treated as superseding evidence')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('#161 review: a narrower new pass cannot clear drift on a path it never reviewed', async () => {
+  const root = abWorkspace()
+  try {
+    const state = abTeam({
+      reviewedAttempt: 1,
+      reviewedArtifacts: readArtifacts2(root, ['lib/a.js', 'lib/b.js']),
+      reviewedScope: ['lib/a.js', 'lib/b.js'],
+    })
+    await pause(10)
+    writeFileSync(join(root, 'lib', 'b.js'), 'export const b = 2\n')
+    // A later sound pass that reviewed only A.
+    const narrower = {
+      ...state.tasks[1],
+      id: 't8', round: 4, createdAt: 800, updatedAt: Date.now(),
+      reviewedTaskId: 't1', reviewedAttempt: 1,
+      reviewedArtifacts: readArtifacts2(root, ['lib/a.js']),
+      reviewedScope: ['lib/a.js'],
+    }
+    const audit = { artifacts: readArtifacts2(root, ['lib/a.js', 'lib/b.js']) }
+    const narrowed = { ...state, taskSeq: 8, tasks: [...state.tasks, narrower] }
+    const blocked = canDeclareDelivery(narrowed, audit)
+    assert.equal(blocked.ok, false, `a narrower review cleared unreviewed drift: ${JSON.stringify(blocked)}`)
+    assert.ok(
+      blocked.blockers.some((item) => item.includes('lib/b.js')),
+      `the unreviewed drifted path is not named: ${JSON.stringify(blocked.blockers)}`,
+    )
+
+    // Positive control: a later pass that binds both paths does clear it.
+    const full = {
+      ...narrower,
+      id: 't9', round: 6, createdAt: 950,
+      reviewedArtifacts: readArtifacts2(root, ['lib/a.js', 'lib/b.js']),
+      reviewedScope: ['lib/a.js', 'lib/b.js'],
+    }
+    const cleared = canDeclareDelivery({ ...state, taskSeq: 9, tasks: [...state.tasks, full] }, audit)
+    assert.equal(cleared.ok, true, `a full re-review failed to clear the drift: ${JSON.stringify(cleared)}`)
+    assert.ok(
+      cleared.warnings.some((item) => item.includes('t2') && /superseded by t9/u.test(item)),
+      `the superseded pass was not reported: ${JSON.stringify(cleared.warnings)}`,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
