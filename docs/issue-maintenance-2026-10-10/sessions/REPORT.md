@@ -112,7 +112,16 @@ LAB_BASE=http://127.0.0.1:3111 node drivers/issue-103-live.mjs <work-root> basel
 2. **RLE block 载荷长度**：`zstdFrameLength` 之前无条件按 `Block_Size` 前进，使合法 RLE 帧被误判截断。现按 block type 取载荷长度（RLE = 1 字节）。回归测试覆盖：合法 RLE 帧（`Buffer.from([0x28,0xb5,0x2f,0xfd,0x20,5,(5<<3)|3,0,0,0x61])` → `aaaaa`）、raw+RLE+compressed 拼接日志、以及截断尾部必须抛错。红证据：旧脚本上该测试 → `Error: corrupt Zstandard session log: truncated final frame`。
 3. 临时当前代次文件改为 `wx` 独占创建（中断残留不会被覆盖）；移除 `--no-backup`（每次都保留独占备份），`sourceUnchanged`/`backupUnchanged` 改为发布前后真实 SHA-256 比对，而不再是"同一个文件读两次"的恒等式。
 
-注意：恢复工具位于 `scripts/legacy-session-source-repair.mjs`，而 `package.json#files` 未包含该文件，因此**不在 npm 发布产物内**（`pnpm pack` 校验为 0 命中）；它是仓库内的维护/恢复工具。
+**发布与调用**：恢复工具 `scripts/legacy-session-source-repair.mjs` 已加入 `package.json#files`，`pnpm pack` 产物内含该入口（内容 sha256 与仓库一致 `ca8d4170…`），并已在"从安装布局调用"下实测：
+
+```
+# 仓库内
+node scripts/legacy-session-source-repair.mjs --session-dir <session-dir> [--apply]
+# 安装后（profile 或工程 node_modules）
+node node_modules/@nanmicoder/dsh-agent-teams/scripts/legacy-session-source-repair.mjs --session-dir <session-dir> [--apply]
+```
+
+要求该位置能解析到 Harness 依赖闭包（至少 `@deepseek-ai/dsh-session`），即 checkout 的 node_modules 或已安装 profile 的 node_modules。
 
 真实宿主端到端验证（源字节保留 + 发布 + 宿主可读）：
 
@@ -169,7 +178,13 @@ LAB_BASE=http://127.0.0.1:3111 node drivers/issue-103-live.mjs <work-root> basel
 | 跨 workspace | 另一 workspace 的会话 `status` 被拒（该 workspace 的 `.agent-teams` 无此队）✓ |
 | 持久归属 | 全部操作后 `captainSessionId` 与初始一致（`unchanged: true`）✓ |
 
-同宿主两次运行里 `pnpm verify`（含 lifecycle/capabilities/member-failure/quality-gates/harness-contract 等全套）通过：`0` 失败（`logs/candidate-verify-final2.log`，末尾 `Git artifacts match source and build settings.`）。
+### 3.5 永久纯函数身份合同回归（新增，接口不变）
+
+`scripts/lineage-identity.test.mjs`（接入 `pnpm verify:lineage-identity`，也在 `pnpm verify` 内）以**普通值**直接调用 `teamLeadMatch` / `isTopLevelSession`（不 mock Context/Agents/Registry/LLM），固定"权限只收不放"的方向：原 captain、任意层级 top-level fork 后代、普通 member/subagent、**已 removed 的 member 及其后代**、member 自己的 fork、无关 lineage、以及无 roster 行的精确 id 合同、`isTopLevelSession` 的三类头部。
+
+写这组用例时发现一处合同缺口并做了最小收紧（`src/lineage.ts`，仅此一处判断）：此前"本会话 id 命中成员行"只排除**非 removed** 行，因此一个被移除成员的行若以 `inheritsLead` 为真的身份出现会经祖先链拿到队长身份。现任何列在成员行里的会话 id 都不再是 lead（不论状态），成员**参与权**仍由 team 查询里的 removed 过滤控制。该收紧不改变已验收的 #176 流程：收紧后重新完整跑了一遍真实宿主 fork matrix（warm/cold/多层/成员投递/成员无越权/跨 workspace/归属不变）全部通过（`candidate/issue-176-matrix-final.json` 摘要见 `docs/issue-maintenance-2026-10-10/sessions/evidence.json`）。
+
+同宿主 `pnpm verify` 全套（含 lifecycle/capabilities/member-failure/quality-gates/harness-contract/lineage-identity/legacy-session-repair）通过：`0` 失败（`logs/candidate-verify-final4.log`，末尾 `Git artifacts match source and build settings.`）。
 
 ---
 
@@ -207,6 +222,7 @@ LAB_BASE=http://127.0.0.1:3111 node drivers/issue-103-live.mjs <work-root> basel
 
 ## 6. 交付物与复核入口
 
+- 可审阅小结：`docs/issue-maintenance-2026-10-10/sessions/evidence.json`（真实 matrix 结论 + 纯函数合同用例 + 恢复工具调用方式；不含大日志与凭据）
 - 提交：`38a84b9f3133ccd12ce2740a865cb7850239bdad`（主体修复）、`5b21ccd`（报告）、`d64bc21`（#160 恢复工具 review 收紧）
   （分支 `codex/issues-20261010-sessions`，未合回 main、未推送、未发布）
 - 打包哈希：`pnpm pack` → `/private/tmp/agentteams-issues-20261010/sessions/pack/nanmicoder-dsh-agent-teams-0.1.22.tgz`
