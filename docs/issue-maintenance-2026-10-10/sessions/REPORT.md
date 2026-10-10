@@ -190,3 +190,42 @@ LAB_BASE=http://127.0.0.1:3111 node drivers/issue-103-live.mjs <work-root> basel
    - fork 的跨 workspace 场景未能构造（`fork` 继承源会话 cwd），仅验证了不同 workspace 会话看不到该队。
    - `agent_teams_add_member` 在冷 fork 下会 resume 记录 captain 再派发；若该 resume 失败，成员 spawn 由调度器的"记录 captain 未驻留"分支记录为未生成（不会伪造成功）。
 4. **模型/路由**：全部真实请求都走 `deepseek-account/deepseek-flash`（`/max`），没有使用 mock、scripted LLM、fixture 回答或 API-key 路由；纯函数调用与真实磁盘写入仅作为补充证据。
+
+---
+
+## 6. 交付物与复核入口
+
+- 提交：`38a84b9f3133ccd12ce2740a865cb7850239bdad`（分支 `codex/issues-20261010-sessions`，未合回 main、未推送、未发布）
+- 打包哈希：`pnpm pack` → `/private/tmp/agentteams-issues-20261010/sessions/pack/nanmicoder-dsh-agent-teams-0.1.22.tgz`
+  sha256 `10a48c2374ff9d30137b9dd7cca096d08bda8bd9139356cb4f23a9e817379372`
+- 构建产物：`lib/index.js` sha256 `095e9ffb118946d86aa13bb8dbb272662013d0e7c0ec3604745cfba4d4c928f5`；
+  `lib/lineage.js` sha256 `a47c50b5a242976c3b74bcecbcfee6baae7046a4fb63c0ab7e87c1240d03d05a`
+- 恢复工具：`scripts/legacy-session-source-repair.mjs` sha256 `0202281e451852d3f0f73376e5dafafa0765916140e8951ee79d8e7d118b3eb5`
+- 全量回归日志：`/private/tmp/agentteams-issues-20261010/sessions/logs/candidate-verify-final2.log`（0 失败）
+- 结果/进度：`/private/tmp/agentteams-issues-20261010/sessions/result.json`、`progress.json`
+
+复核用实验台（全部在本人 key 目录内，未改动主管/其他组工作区）：
+
+```sh
+# 1) 运行台（精确宿主 0.2.0-rc.2 + 被测插件链接）
+/private/tmp/agentteams-issues-20261010/sessions/lab/prepare-runtime.sh cand lab-cand 3121
+cd /private/tmp/agentteams-issues-20261010/sessions
+DSH_HOME=$PWD/home DSH_PERMISSION_MODE=danger-full-access DSH_TELEMETRY_DISABLED=1 \
+  node runtime/node_modules/@deepseek-ai/dsh/lib/bin.js --profile lab-cand --no-open --port 3125
+
+# 2) #176 验收矩阵（真实模型；cold 阶段前重启上面的宿主）
+cd drivers
+LAB_BASE=http://127.0.0.1:3121 node issue-176-fork-matrix.mjs <work-root> candidate/issue-176-matrix.json setup candidate <label>
+# 重启宿主后
+LAB_BASE=http://127.0.0.1:3121 node issue-176-fork-matrix.mjs <work-root> candidate/issue-176-matrix.json cold candidate <label>
+
+# 3) #103 真实主路径 / 真实组件交错尝试
+LAB_BASE=http://127.0.0.1:3121 node issue-103-live.mjs <work-root> candidate/issue-103-live.json candidate <label>
+LAB_BASE=http://127.0.0.1:3121 node issue-103-race-live.mjs <work-root> candidate/issue-103-race-live.json candidate <label>
+
+# 4) #160 历史恢复（只在 fixture 目录操作）
+node /Users/nanmi/.codex/worktrees/issue-session-scheduler/dsh-agent-teams/scripts/legacy-session-source-repair.mjs \
+  --session-dir <fixture-session-dir> --apply
+```
+
+`lab-base`/`lab-cand` 是本人隔离 home 内的实验实例（控制面 3111/3121，Web 3115/3125），不是用户 GUI 的替代服务；收尾时已停止。
