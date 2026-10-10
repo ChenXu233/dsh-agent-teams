@@ -15,6 +15,8 @@
 
 同一 session 在真实浏览器里的表现（`evidence/baseline-panel.png`）：
 
+![修复前：卡片 0 名成员，面板同时出现 live 团队与静态假条目](evidence/baseline-panel.png)
+
 | 观察点 | 结果 |
 | --- | --- |
 | 卡片 `data-team-id` | `team`（真实 id 是 `数据团队`） |
@@ -55,7 +57,9 @@
 
 真实浏览器复核（candidate 构建，`evidence/candidate-panel.png`）：`data-team-id="数据团队"`、`2 名成员`（阿明、Léa），面板只有一条 live 条目。
 
-**旧日志重开**（主管复核要求，`evidence/legacy-reopen-fixed.png` + `legacy-reopen-browser.json`）：用新构建重开 4 个修复前记录的会话（`数据团队`、`🚀🎯`、58 字长名、暂存计划），卡片 id 全部等于真实 id，面板 `ghostEntries` 均为空 —— 不再出现伪历史条目。
+![修复后：卡片命中真实团队，面板只有一条 live 条目](evidence/candidate-panel.png)
+
+**旧日志重开**（主管复核要求，结构化结果 `evidence/legacy-reopen-browser.json`）：用新构建重开 4 个修复前记录的会话（`数据团队`、`🚀🎯`、58 字长名、暂存计划），卡片 id 全部等于真实 id，面板 `ghostEntries` 均为空 —— 不再出现伪历史条目。该场景的截图较大，保留在 `/private/tmp/agentteams-issues-20261010/card/evidence/legacy-reopen-fixed.png`（另有 `baseline-card.png`、`candidate-card.png` 同样只在 /tmp）。
 
 ## 5. 真实运行清单
 
@@ -64,7 +68,7 @@
 | 宿主 | `@deepseek-ai/dsh` 0.2.0-rc.2（`node_modules/.bin/dsh --version`） |
 | profile | `/private/tmp/agentteams-issues-20261010/card/dsh-home/profiles/card-203`（bundles: dsh-base, dsh-web-app, @nanmicoder/dsh-agent-teams `link:` 本 worktree；`package.json` 含 name/version） |
 | 凭据 | `credentials.path → /Users/nanmi/.dsh/.credentials.yaml`，复用既有账号；无 apiKeyEnv、无 key 值 |
-| 模型 | 12 次真实请求，全部 `deepseek-account/deepseek-flash`，0 error（`evidence/harness-trace.jsonl`）；本地 guard 插件会拒绝任何其他路由 |
+| 模型 | 12 次真实请求，全部 `deepseek-account/deepseek-flash`，0 error；本地 guard 插件会拒绝任何其他路由 |
 | session | `session-d5eada7e…`(baseline)、`session-5b9c59ae…`(candidate)、`session-4b48c399…`(candidate-long)、`session-c2ca852c…`(legacy-long)、`session-aa175fc6…`(legacy-emoji)、`session-db4ae894…`(legacy-staged) |
 | 工作区 | `/private/tmp/agentteams-issues-20261010/card/workspace/ws-{baseline,candidate,candidate-long,legacy-long,legacy-emoji,legacy-staged}`（真实磁盘） |
 
@@ -76,10 +80,13 @@
 | `pnpm build`（基线） | 0 | 修复前产物 |
 | `pnpm typecheck` | 0 | `tsc -p tsconfig.json && tsc -p tsconfig.client.json` |
 | `pnpm build`（修复后） | 0 | 最终产物 |
-| `pnpm verify`（完整仓库门禁，含 verify.mjs / lifecycle-verify / verify:harness-contract / capabilities / compatibility / git-install / git-artifact 等全部子步骤） | 0 | 2026-10-10T15:20:14Z → 15:20:24Z，日志 `/private/tmp/agentteams-issues-20261010/card/logs/pnpm-verify.log` |
-| `node tools/parser-checks.mjs` | 0 | 10/10 通过（补充检查，非验收替代） |
+| `pnpm verify`（完整仓库门禁，含 verify.mjs / lifecycle-verify / verify:issue-203 / verify:harness-contract / capabilities / compatibility / git-install / git-artifact 等全部子步骤） | 0 | 2026-10-10T15:20:14Z → 15:20:24Z，日志 `/private/tmp/agentteams-issues-20261010/card/logs/pnpm-verify.log` |
+| `pnpm verify:issue-203`（新增永久回归 `scripts/issue-203-card.test.mjs`，直接 import built helper） | 0 | 13/13 通过，已接入 `pnpm verify` 链 |
+| `node tools/parser-checks.mjs` | 0 | 10/10 通过（一次性补充检查；现已固化为上面的仓库回归） |
 
-产物哈希（完整说明见 `evidence/artifacts.json`）：
+永久回归覆盖：客户端 key 与宿主 `sanitizeKey` 的等价性（中文/拉丁变音/日文/空格）、digest 与超长名必然分歧（说明必须用规范 id）、create 参数解析与展示名、metadata 规范身份、运行态与暂存态两种旧文本模板、队名注入相似片段、失败结果不产出卡片、无 meta 无文本时保留推导 key。fixture 取自本报告记录的真实运行值，规范 id 由真实 `sanitizeKey` 当场复算，不做双份硬编码。
+
+机器可读汇总见 `evidence/summary.json`（6 次真实运行、12 次模型请求、折叠矩阵与命令退出码）；产物哈希完整说明见 `evidence/artifacts.json`：
 
 - baseline：`lib/client.js 5f9ade2a…`、`lib/index.js 4d6e07b0…`、`lib/tools.js 615241c4…`、`lib/client/agent-teams-card-definition.js f5632f4e…`
 - candidate：`lib/client.js b9e89aae…`、`lib/index.js 4d6e07b0…`（barrel 未变）、`lib/tools.js 04b0f824…`、`lib/client/agent-teams-card-definition.js e68961bf…`
