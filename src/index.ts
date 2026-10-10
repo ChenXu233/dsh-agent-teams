@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
 import { findTeamByCaptain } from './state.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
+import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
 import { installTeamCapabilities } from './capabilities.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
 
@@ -88,6 +89,16 @@ export interface Config {
   maxMembers?: number
   /** Named multi-role team profiles. */
   profiles?: Record<string, TeamProfileConfig>
+  /**
+   * Reusable per-member tool policies declared by the deployment owner (#59),
+   * keyed by policy id. A member selects one by id (`tool_policy` on
+   * `agent_teams_add_member`, a plan member, or a profile member row); the
+   * Captain model can select an existing policy but never submit raw lists.
+   * `allow` keeps only the named global tools (the four coordination tools are
+   * always added); `deny` removes the named global tools. Captain-only tools
+   * stay denied either way.
+   */
+  toolPolicies?: Record<string, MemberToolPolicy>
   /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
   promptSectionOrder?: number
   /**
@@ -104,6 +115,16 @@ export interface Config {
 const fallbackRouteConfig = z.union([
   z.object({ provider: z.string().required(), model: z.string().required() }),
   z.const(undefined),
+])
+
+// Same Schemastery defaulting trap for a tool policy: an `allow`-only policy
+// would materialize `deny: []` and fail a `.min(1)` on an absent list. Model
+// each accepted combination explicitly, so a policy that declares only one
+// side stays valid while an empty side is still rejected.
+const toolPolicyConfig = z.union([
+  z.object({ allow: z.array(z.string()).min(1).required(), deny: z.const(undefined) }),
+  z.object({ allow: z.const(undefined), deny: z.array(z.string()).min(1).required() }),
+  z.object({ allow: z.array(z.string()).min(1).required(), deny: z.array(z.string()).min(1).required() }),
 ])
 
 export const Config: z<Config> = z.object({
@@ -126,6 +147,8 @@ export const Config: z<Config> = z.object({
       reasoning_effort: z.string(),
       executionPrompt: z.string(),
       fallback: fallbackRouteConfig,
+      // Owner-declared tool-policy id this profile member selects (#59).
+      tool_policy: z.string(),
     })).min(1).required(),
     taskPlanning: z.union([z.const('captain'), z.const('seed')]),
     reviewPolicy: z.object({
@@ -143,6 +166,7 @@ export const Config: z<Config> = z.object({
       dependencies: z.array(z.string()),
     })),
   })).default({}),
+  toolPolicies: z.dict(toolPolicyConfig).default({}),
   memberMaxDepth: z.natural().default(0),
   maxMembers: z.natural().min(1).default(8),
   promptSectionOrder: z.natural().default(117),
@@ -153,7 +177,7 @@ export const Config: z<Config> = z.object({
 export function usageSectionText(toolNames: string, profilesText = ''): string {
   return `AgentTeams captain protocol:
 1. Inspect current team state when needed, using agent_teams_status. Continue existing work without duplicating its roster/tasks. Create only when no current team exists, with the user's goal as description and approval="required"; automatic approval requires an explicit request to run immediately. Staged plans never spawn or schedule work.
-2. Add each needed role once; members inherit your model route unless another is requested/needed. A requested profile goes to create({profile}); it supplies its roster. Seed profiles also supply tasks; captain-planning profiles require your DAG. Do not duplicate either.
+2. Add each needed role once; members inherit your model route unless another is requested/needed. A requested profile goes to create({profile}); it supplies its roster. Seed profiles also supply tasks; captain-planning profiles require your DAG. Do not duplicate either. A member may also select one owner-declared tool policy by id (tool_policy on add_member, a plan member, or a profile member): it is the only way to change which global tools that member sees and may invoke, and you can never pass raw allow/deny lists.
 3. Build the complete smallest useful DAG while staged. For an ordinary research/audit plan, pass the roster and dependency graph together in create({plan:{members,tasks}}) to avoid repeated setup rounds. Every task needs a subject; pass kind and assignee explicitly when the plan specifies them. Titles, descriptions and member roles do not set these fields. Dependencies represent prerequisites. Give every required contributor a task or explicit message. Present the plan and end your turn for review; never approve in that planning turn. Approve only after a later explicit user approval or the Web action.
 4. Respect Web approve/return/discard control messages. On return, ask what to change before editing; after the answer, use one atomic agent_teams_edit_plan batch (edit downstream references before removals), summarize and await review again. Never inspect or edit .agent-teams state files or plugin source code to revise plans. Discard does not authorize a replacement.
 5. The scheduler dispatches ready tasks after approval. Delegate; do not duplicate slow work or send messages merely to start a stage. Handle reports/user work, then yield when waiting is all that remains: reports wake you automatically. Use status after a delivery or user request, never busy-poll or wait for unassigned members.
@@ -176,6 +200,9 @@ export function apply(ctx: Context, config: Config): void {
     memberMaxDepth: config.memberMaxDepth ?? 0,
     maxMembers: config.maxMembers ?? 8,
     profiles: config.profiles ?? {},
+    // Owner configuration is validated once, at mount: an empty or malformed
+    // policy must never reach a member creation path.
+    toolPolicies: parseToolPolicies(config.toolPolicies),
   }
 
   // Provider registration is a sibling plugin's effect (`subagent-spawn` /
@@ -399,6 +426,7 @@ export function apply(ctx: Context, config: Config): void {
               ...typeof payload['executionPrompt'] === 'string' || payload['executionPrompt'] === null
                 ? { executionPrompt: payload['executionPrompt'] as string | null }
                 : {},
+              ...typeof payload['tool_policy'] === 'string' ? { toolPolicy: payload['tool_policy'] } : {},
             }
           } else if (action === 'update_task') {
             if (typeof payload['taskId'] !== 'string' || typeof payload['subject'] !== 'string') {

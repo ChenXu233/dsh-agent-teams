@@ -17,6 +17,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { MemberToolFilter } from './tool-policies.ts'
 import { FINDING_SEVERITIES, REVIEW_VERDICTS, TASK_KINDS, TERMINAL_TASK_STATUSES, type ReviewFinding, type TaskStatus, type TeamMember, type TeamMessage, type TeamProfileSnapshot, type TeamState, type TeamTask } from './types.ts'
 import { hasValidQualityTaskFields, isReviewPolicy, isValidFindingLine, normalizeBlankOptionalTaskFields } from './quality-gates.ts'
 
@@ -720,6 +721,33 @@ function nonemptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== ''
 }
 
+/** Whether a value is an absent or non-blank string (a persisted id/name). */
+function isOptionalNonBlankString(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === 'string' && value.trim() !== '')
+}
+
+/** Whether a value is a non-empty list of non-blank tool names. */
+function isToolNameList(value: unknown): value is string[] {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every(name => typeof name === 'string' && name.trim() !== '')
+}
+
+/**
+ * Validate one persisted effective tool filter (#59). `deny` is part of the
+ * contract and never empty (the captain-only deny list is always included); an
+ * `allow` list, when present, is non-empty for the same reason. A wrong-typed
+ * or empty list is rejected instead of being silently accepted at the durable
+ * boundary — the same class of drift #188 fixed for team records.
+ */
+function isMemberToolFilter(value: unknown): value is MemberToolFilter {
+  if (!isRecord(value)) return false
+  const allow = value['allow']
+  const deny = value['deny']
+  if (allow !== undefined && !isToolNameList(allow)) return false
+  return isToolNameList(deny)
+}
+
 /** Whether a value is a finite timestamp/counter number. */
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -742,6 +770,9 @@ function isTeamMember(value: unknown): value is TeamMember {
     && (value['executionPrompt'] === undefined || typeof value['executionPrompt'] === 'string')
     && (value['fallback'] === undefined || (isRecord(value['fallback']) && typeof value['fallback']['provider'] === 'string' && typeof value['fallback']['model'] === 'string'))
     && (value['fallbackActive'] === undefined || typeof value['fallbackActive'] === 'boolean')
+    // A member without a policy keeps the legacy shape: both fields stay absent.
+    && isOptionalNonBlankString(value['toolPolicy'])
+    && (value['toolFilter'] === undefined || isMemberToolFilter(value['toolFilter']))
     && isFiniteNumber(value['joinedAt'])
     && (value['status'] === 'idle' || value['status'] === 'working' || value['status'] === 'removed')
 }

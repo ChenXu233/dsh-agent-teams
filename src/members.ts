@@ -23,6 +23,7 @@ import { guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter,
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
+import type { MemberToolFilter } from './tool-policies.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 
 /** Persona snapshot of a profile protocol; the full text lives on team.json. */
@@ -853,6 +854,14 @@ Do not start work until the scheduler or captain assigns a task in this turn.`
  * @param member - the member draft whose `id` is filled on success.
  * @param stateDir - configured state directory (for the persona).
  * @param signal - caller cancellation, forwarded to the start.
+ * @param initialPrompt - first turn text; the welcome message when omitted.
+ * @param resolvedFilter - the member's effective tool filter (a selected
+ *   policy, or the legacy captain-only filter when the member has none). The
+ *   caller resolves it so `spawnMember` forwards exactly one immutable filter
+ *   to `startContinuable`.
+ * @param relaxableDeny - deny names the lenient retry may drop for this
+ *   member; the caller narrows it for a policy member so a name the owner
+ *   declared is never silently removed.
  */
 export async function spawnMember(
   ctx: Context,
@@ -865,6 +874,8 @@ export async function spawnMember(
   stateDir: string,
   signal: AbortSignal,
   initialPrompt?: string,
+  resolvedFilter?: MemberToolFilter,
+  relaxableDeny?: readonly string[],
 ): Promise<void> {
   // Fail loud at the first use: provider registration is a sibling plugin's
   // effect and may settle after this plugin mounts. Capability checks here
@@ -886,38 +897,52 @@ export async function spawnMember(
     throw new Error(`agent-teams: provider "${config.provider}" cannot restrict captain-only tools for members`)
   }
   const label = `${MEMBER_LABEL_PREFIX}${team.id}:${member.name}`
+  // The legacy filter of a member without a configured tool policy: the
+  // captain-only deny list plus the depth entries this host registers.
+  const requestedFilter = resolvedFilter ?? memberToolFilter(config.maxDepth, restrictableToolNames(captain))
+  // The lenient retry may drop names this host reports unknown; keep the exact
+  // filter the host accepted so team.json and the child descriptor agree.
+  let acceptedFilter = requestedFilter
   const start = await selections.withPending(captain.id, label, llmSelection, () => (
     startMemberWithLenientFilter(
-      toolFilter => ctx.subagents.startContinuable({
-        provider: config.provider,
-        label,
-        request: {
-          prompt: [{ type: 'text', text: initialPrompt ?? memberWelcome(team, member.name) }],
-          parent: captain,
-          persona: memberPersona(team, member, stateDir, config.executionPrompt),
-          // Depth deny entries name host tools; resolve them against the
-          // running host's registry so a renamed delegation tool cannot abort
-          // the spawn (see memberToolFilter). Depth is still enforced by the
-          // parent-chain guard installed at plugin mount. A filter the host
-          // still rejects is retried without the names it reported.
-          toolFilter,
-          agentOptions: {
-            provider: llmSelection.provider,
-            model: llmSelection.model,
-            ...llmSelection.reasoningEffort === undefined
-              ? {}
-              : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
+      toolFilter => {
+        acceptedFilter = toolFilter
+        return ctx.subagents.startContinuable({
+          provider: config.provider,
+          label,
+          request: {
+            prompt: [{ type: 'text', text: initialPrompt ?? memberWelcome(team, member.name) }],
+            parent: captain,
+            persona: memberPersona(team, member, stateDir, config.executionPrompt),
+            // Depth deny entries name host tools; resolve them against the
+            // running host's registry so a renamed delegation tool cannot abort
+            // the spawn (see memberToolFilter). Depth is still enforced by the
+            // parent-chain guard installed at plugin mount. A filter the host
+            // still rejects is retried without the names it reported.
+            toolFilter,
+            agentOptions: {
+              provider: llmSelection.provider,
+              model: llmSelection.model,
+              ...llmSelection.reasoningEffort === undefined
+                ? {}
+                : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
+            },
+            // Harness request.maxDepth caps the absolute depth of THIS creation;
+            // it is not inherited by later delegations. The guard below enforces
+            // the configured member-relative descendant budget instead.
           },
-          // Harness request.maxDepth caps the absolute depth of THIS creation;
-          // it is not inherited by later delegations. The guard below enforces
-          // the configured member-relative descendant budget instead.
-        },
-        signal,
-      }),
-      memberToolFilter(config.maxDepth, restrictableToolNames(captain)),
+          signal,
+        })
+      },
+      requestedFilter,
+      relaxableDeny,
     )
   ))
   member.id = start.childId
+  // Only a policy member carries a persisted filter snapshot; a member without
+  // a policy keeps the previous record shape and behavior. The descriptor, not
+  // this snapshot, is what reapplies the filter on a cold resume.
+  if (member.toolFilter !== undefined) member.toolFilter = { ...acceptedFilter }
 }
 
 /**

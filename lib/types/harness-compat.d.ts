@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm';
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session';
+import { type MemberToolFilter } from './tool-policies.ts';
 type Setup = (childCtx: Context, child: Agent) => () => void;
 declare module '@deepseek-ai/dsh-llm' {
     interface MessageSourceMap {
@@ -54,29 +55,35 @@ export declare function restrictableToolNames(agent: Agent): ReadonlySet<string>
  * forwarding a name the host dropped aborts every member spawn (#163, #164).
  * Depth enforcement itself does not depend on these names —
  * installMemberDelegationGuard bounds descendant creation by parent chain.
+ *
+ * This is the legacy filter of a member without a configured tool policy; a
+ * selected policy resolves through `resolveMemberToolFilter` instead (#59).
  */
-export declare function memberToolFilter(maxDepth: number | undefined, knownTools: ReadonlySet<string> | undefined): {
-    deny: string[];
-};
+export declare function memberToolFilter(maxDepth: number | undefined, knownTools: ReadonlySet<string> | undefined): MemberToolFilter;
 /**
- * Start one member, dropping any filter name the host reports as unknown and
- * retrying.
+ * Start one member, dropping only the built-in filter names the host reports
+ * as unknown and retrying.
  *
  * Resolving the filter against the registry view ({@link memberToolFilter})
  * only covers hosts that expose one. A rejected filter still leaves the member
  * without a session for the lifetime of the team, so the start must survive the
  * cases that resolution cannot see — no registry view, a name that is known but
  * not restrictable, a composition that mounted differently than expected. The
- * host names the offenders in its rejection, so they are removed and the start
- * retried; the retry only runs while the deny list strictly shrinks, and any
- * failure that is not an unknown-name report propagates untouched.
+ * host names the offenders in its rejection, so the relaxable ones are removed
+ * and the start retried.
+ *
+ * Only `relaxableDeny` names may be dropped, and only from `deny`. The default
+ * is exactly the built-in captain-only and depth entries (#163/#164); a name an
+ * owner-declared tool policy contributed is never removed, because silently
+ * spawning a member with a different filter than the owner declared is contract
+ * drift, not recovery. Dropping a denied name the host does not register
+ * changes nothing; dropping an allowed name would loosen the policy, so `allow`
+ * is never relaxed and the four required coordination tools can never be
+ * removed.
  * @param start - performs one start attempt for the given `toolFilter`.
  * @param filter - the filter to attempt first.
+ * @param relaxableDeny - built-in deny names the retry may drop.
  * @returns the started member.
  */
-export declare function startMemberWithLenientFilter<T>(start: (filter: {
-    deny: string[];
-}) => Promise<T>, filter: {
-    deny: string[];
-}): Promise<T>;
+export declare function startMemberWithLenientFilter<T>(start: (filter: MemberToolFilter) => Promise<T>, filter: MemberToolFilter, relaxableDeny?: readonly string[]): Promise<T>;
 export {};
