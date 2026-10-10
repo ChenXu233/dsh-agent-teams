@@ -5,6 +5,7 @@
 - **Branch:** `codex/issues-20261010-state-routes`
 - **Baseline commit:** `1e1c624fd2e909008aa5228a004706b3e4460670`
 - **Baseline checkout (pristine, reusable for review):** `/private/tmp/agentteams-issues-20261010/state-routes/baseline-checkout`
+- **Evidence root (all temporary artifacts):** `/private/tmp/agentteams-issues-20261010/state-routes/` — every `logs/`, `cases/`, `baseline/` and harness path below is relative to that root, not to this repository.
 - **Host under test:** `@deepseek-ai/dsh` **0.2.0-rc.2** (this repo's `devDependencies`, exact). Baseline and candidate used the **same** CLI binary, the same profiles and the same inputs; only the linked plugin checkout differed.
 - **Model route:** `deepseek-account` / `deepseek-flash` / `reasoningEffort: max` — the existing authenticated desktop account service. No API key was configured, read, copied or printed; the `deepseek-official`/API-key route and all mock providers were excluded.
 - **Real host catalogs observed:** `deepseek-account` → `deepseek-flash`, `deepseek-v4-pro`; `openai-codex` → `gpt-5.3-codex-spark`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-luna`, `gpt-6-sol`. `openai-codex` comes from the pre-existing `llm-pi-ai` providers map in the user's `web` profile (an `apiKeyEnv` reference only). It supplied a genuine second catalog and a genuine captain route; **no generation request was ever sent to it**.
@@ -30,7 +31,7 @@ Script: `cases/issue-188-case.mjs` against `baseline-checkout/lib/*.js`, real on
 | Area | Change |
 | --- | --- |
 | Shared contract | `isValidFindingLine()` in `src/quality-gates.ts` is now the single predicate used by both the write-side parser and `isReviewFinding`, so the two cannot drift again. |
-| Write side | `parseFindings()` in `src/tools.ts` persists `line` only when `isValidFindingLine` accepts it. |
+| Write side | `parseFindings()` in `src/tools.ts` persists `line` only when `isValidFindingLine` accepts it. Proven through the **real tool path** below, not only by unit assertion. |
 | Read side | `normalizeSentinelNumericTaskFields()` treats an out-of-contract **numeric** sentinel as absent for `round` (min 1), `reviewedAttempt` (min 0), `attempt` (min 0) and `findings[].line` (min 0), so already-written files self-heal. It is reached through `normalizeBlankOptionalTaskFields`, which `coerceTeamState` already calls. |
 | Diagnosability | `describeTeamStateDefect()` in `src/state.ts` names the first failing record and field, keeping the existing `invalid AgentTeams state in team "..."` prefix. It runs only on the failure path. |
 
@@ -41,6 +42,29 @@ Deliberately **not** changed: only out-of-range **numbers** are healed. A wrong-
 - Candidate: `cases/issue-188-case-candidate.json` — **38/38 checks passed, exit 0**.
 - Baseline: 20/32, exit 1 — the 12 failures are exactly the repaired behaviours (self-heal, naming, task-scoped diagnostics, exact-file replay).
 - Preserved on candidate: `line: 0`, `line: 1176`, `file`, `resolved: false`, `round: 2`, `reviewedAttempt: 0`, `attempt: 3`.
+
+### Write side through the real tool path
+
+`parseFindings` is module-private, so the write guard cannot be exercised without the tool dispatch. The harness `/private/tmp/agentteams-issues-20261010/state-routes/run-188-write.sh` therefore drives real `agent_teams_update_task` calls through `ctx.tools.execute()` with a real captain Agent and reads the resulting `team.json` back from disk:
+
+| step | baseline | candidate |
+| --- | --- | --- |
+| `update_task` with `line: -1`, `1.5`, `-1176` | persisted all three into `team.json` | persisted **no** `line` key at all |
+| every later tool call | `invalid AgentTeams state in team "..."` | succeeded |
+| `update_task` with `line: 0` and `line: 1176` | unreachable (team already bricked) | persisted verbatim, with `file` and `resolved: false` |
+| `readTeam` on the finished record | threw `invalid AgentTeams state` | read clean |
+
+Logs: `logs/188write-baseline.log`, `logs/188write-candidate.log`.
+
+### Durable regressions (in this repository)
+
+| Issue | File | Candidate | Baseline |
+| --- | --- | --- | --- |
+| #188 | [scripts/issue-188.test.mjs](../../../scripts/issue-188.test.mjs) — real disk read/write | 9/9 pass | 1/9 pass (8 fail) |
+| #189 | [scripts/issue-189.test.mjs](../../../scripts/issue-189.test.mjs) — pure route composition | 9/9 pass | 0/1 fail |
+| #205 | [scripts/issue-205.test.mjs](../../../scripts/issue-205.test.mjs) — pure failure disposition | 6/6 pass | fails |
+
+All three are wired into `pnpm verify:issue-regressions`, which `pnpm verify` runs.
 
 Example candidate diagnostic:
 
@@ -112,34 +136,51 @@ The failing turn is a **host-level turn failure**: a test-only plugin throws a g
 `classifyMemberFailure()` makes the policy explicit and pure:
 
 - `failed_attempt` — the observed attempt is still open: mark the task failed (unchanged behaviour).
-- `noted_settled` — the failure belongs to the current member generation but nothing is open any more: leave task and member exactly as they are and append one durable captain note.
-- `ignored` — stale by contract: a **replaced** member generation (same name, new session id), a superseded attempt, a member that has already moved on to newer work, or no team.
+- `noted_settled` — this member generation owns no open attempt: leave task and member exactly as they are and append one durable captain note. **No member `status` may suppress this.** `syncMemberStatus` writes `working` as soon as a turn runs, while a task completed earlier in that same turn leaves no open attempt behind — that is the reporter's run A, and an earlier revision of this fix wrongly treated `working` as "moved on to newer work" and dropped it.
+- `ignored` — stale by contract: a **replaced** member generation (same name, new session id), or a *concrete* superseded open attempt (a different task, or a newer `attempt`/`attemptId` on the same task). Those are the only silent cases.
 
-**Boundary, stated plainly and verified.** The reporter's run B archived the member as `status: "removed"`, and the group review explicitly asked whether that path stays silent. It does **not**:
+The note only claims settlement when a durable task record proves it; a member that never completed a task gets the plain `No open attempt was owned; no task state was changed.` wording instead.
 
-| scenario (final candidate) | expected | observed |
+### Both real-host shapes
+
+The injector throws only after reading the live durable record and observing the exact run A condition. It was verified in the trace:
+
+```
+{"event":"pre-step","label":"agent-teams:state205wh:policy","turn":2,"step":2,...}   # condition evaluated
+{"event":"run-a-window-observed","turn":2,"step":2}
+{"event":"agent-error-observed","turn":2,"step":1,"error":"... host-level turn failure ..."}
+```
+with `logs/205-candidate-state-working-no-open-task.json` captured live at that moment:
+
+```
+tasks:   [('t1', 'completed')]
+members: [('policy', 'working', 'running')]      <- working, and no open attempt
+```
+
+| shape | baseline | candidate |
 | --- | --- | --- |
-| task settled, member `removed` (the run B shape) | one durable note | 1 inbox line, 6/6 checks |
-| task settled, member `idle` | one durable note | 1 inbox line, 6/6 checks |
-| member moved on to newer work | silent | no note, 3/3 checks |
-| same task reassigned to a newer attempt | silent | no note, 3/3 checks |
-| member record replaced (same name, new session id) | silent | no note, 3/3 checks |
+| task settled earlier, member `idle` | captain inbox stayed at 1 line — **no record** | durable note appended; task and member unchanged |
+| run A: member `working`, no open attempt | durable note appended | durable note appended — **the candidate must not drop this**, and after the fix it does not |
+| replaced generation / superseded attempt | silent | silent (by contract; pinned by `scripts/issue-205.test.mjs`) |
 
-A **replaced** generation and a superseded attempt still stay silent by contract. These assertions only pin the boundary policy (they reuse the withdrawn script's fixtures under `withdrawn/`); the acceptance evidence for #205 remains the real-host run above.
-
----
+Artifacts: `logs/205-baseline-realhost.log` (idle shape), `logs/205-candidate-realhost-final.log` (idle shape), `logs/205-candidate-working-realhost.log` and `logs/205-baseline-working-realhost.log` (run A shape).
 
 ## Commands, exit codes and artifacts
 
 | Step | Command | Exit | Artifact |
 | --- | --- | --- | --- |
 | Baseline build | `pnpm install --frozen-lockfile && pnpm build` in `baseline-checkout` | 0 | `logs/baseline-checkout-build.log` |
-| #188 candidate | `node cases/issue-188-case.mjs <candidate> cases/issue-188-case-candidate.json` | 0 | `cases/issue-188-case-candidate.json` (38/38) |
-| #188 baseline | `node cases/issue-188-case.mjs baseline-checkout baseline/issue-188-case-baseline.json` | 1 | `baseline/issue-188-case-baseline.json` (20/32) |
+| #188 read case (candidate) | `node cases/issue-188-case.mjs <candidate> cases/issue-188-case-candidate.json` | 0 | `cases/issue-188-case-candidate.json` (39/39) |
+| #188 read case (baseline) | `node cases/issue-188-case.mjs baseline-checkout baseline/issue-188-case-baseline.json` | 1 | `baseline/issue-188-case-baseline.json` (20/33) |
+| #188 write side (candidate) | `./run-188-write.sh candidate` | 0 | `logs/188write-candidate.log` |
+| #188 write side (baseline) | `./run-188-write.sh baseline` | 0 | `logs/188write-baseline.log` |
+| Durable issue regressions | `pnpm verify:issue-regressions` | 0 | 24/24 |
 | #189 candidate | `./run-189-real.sh candidate` | 0 | `logs/189real-candidate-final.log` |
 | #189 baseline | `./run-189-real.sh baseline` | 0 | `logs/189real-baseline.log` |
 | #205 candidate | `./run-205.sh candidate r4` | 0 | `logs/205-candidate-realhost-final.log` |
-| #205 baseline | `./run-205.sh baseline r3` | 0 | `logs/205-baseline-realhost.log` |
+| #205 baseline (idle shape) | `./run-205.sh baseline r3` | 0 | `logs/205-baseline-realhost.log` |
+| #205 candidate (run A shape) | `./run-205.sh candidate <fresh-suffix>` | 0 | `logs/205-candidate-working-realhost.log` |
+| #205 baseline (run A shape) | `./run-205.sh baseline <fresh-suffix>` | 0 | `logs/205-baseline-working-realhost.log` |
 | Typecheck | `pnpm typecheck` | 0 | — |
 | Repo verify | `node scripts/verify.mjs` | 0 | all checks passed |
 | Member failure TDD | `node scripts/member-failure-tdd.mjs` | 0 | 10/10 |
@@ -151,18 +192,23 @@ These repository regressions are listed **separately** from the real-model accep
 
 ### Artifact hashes (SHA-256, first 16 hex)
 
-| Artifact | Hash |
+| Artifact (under `/private/tmp/agentteams-issues-20261010/state-routes/`) | Hash |
 | --- | --- |
-| `cases/issue-188-case-candidate.json` | `55dce8c566010560` |
-| `baseline/issue-188-case-baseline.json` | `39aacfd5e54ed3b9` |
+| `cases/issue-188-case-candidate.json` | `a868153bf53c22c9` |
+| `baseline/issue-188-case-baseline.json` | `1bed0214f0ab7d19` |
+| `logs/188write-candidate.log` | `1573759d20531450` |
+| `logs/188write-baseline.log` | `4e0c0c5f923197d9` |
 | `logs/189real-candidate-final.log` | `d03359566e653335` |
 | `logs/189real-baseline.log` | `4419b5682231ae96` |
 | `logs/205-candidate-realhost-final.log` | `b1cb3d10b08f78d9` |
 | `logs/205-baseline-realhost.log` | `5438e2466a57d183` |
-| candidate `lib/state.js` | `f61a62f5da576585` |
-| candidate `lib/members.js` | `c2bbe20a70de7a51` |
-| candidate `lib/tools.js` | `ffb87d42b5234404` |
-| candidate `lib/quality-gates.js` | `de85b304abe4ff37` |
+| `logs/205-candidate-working-realhost.log` | `3d47b13da2b9642d` |
+| `logs/205-baseline-working-realhost.log` | `6905877e080c62cc` |
+
+A small sanitized digest of these results is committed next to this report as
+[`acceptance-summary.json`](acceptance-summary.json), so the outcome stays readable even if the
+temporary directory is lost. The permanent, re-runnable regressions are the three
+`scripts/issue-*.test.mjs` suites wired into `pnpm verify:issue-regressions`.
 
 Bulk logs stay under `/private/tmp/agentteams-issues-20261010/state-routes/logs/`; only this report is added to the repository.
 
