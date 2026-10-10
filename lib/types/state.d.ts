@@ -13,7 +13,7 @@
  * @module dsh-agent-teams/state
  */
 import { type TaskStatus, type TeamMessage, type TeamState, type TeamTask } from './types.ts';
-export { amendTaskContract, buildCoverageMatrix, canDeclareDelivery, classifyChangedPath, collectChangedPaths, defaultQualityDeliveryGraph, describeQualityLoop, evaluateQualityCompletion, hasValidQualityTaskFields, isQualityKind, isTaskRevision, normalizeBlankOptionalTaskFields, pathMatchesScope, planQualityFollowUp, qualityPlanningPrompt, resumeTeamState, sanitizeReviewAcceptance, sanitizeReviewObjective, taskKindOf, validateCreateTask, } from './quality-gates.ts';
+export { amendTaskContract, buildCoverageMatrix, canDeclareDelivery, classifyChangedPath, collectChangedPaths, defaultQualityDeliveryGraph, describeQualityLoop, evaluateQualityCompletion, hasValidQualityTaskFields, isQualityKind, isTaskRevision, isValidFindingLine, normalizeBlankOptionalTaskFields, normalizeSentinelNumericTaskFields, pathMatchesScope, planQualityFollowUp, qualityPlanningPrompt, resumeTeamState, sanitizeReviewAcceptance, sanitizeReviewObjective, taskKindOf, validateCreateTask, } from './quality-gates.ts';
 export type { ContractAmendmentInput } from './quality-gates.ts';
 /** Mailbox key of the captain. */
 export declare const CAPTAIN_KEY = "captain";
@@ -193,6 +193,18 @@ export interface AtomicReplaceOptions {
  * @returns nothing once the file has been replaced by one of the two paths.
  */
 export declare function replaceFileAtomicOrDirect(temporary: string, file: string, content: string, primitives: AtomicReplacePrimitives, options?: AtomicReplaceOptions): Promise<void>;
+/**
+ * Name the first durable defect in a record `coerceTeamState` rejected. Before
+ * this, a rejected `team.json` surfaced only as
+ * `invalid AgentTeams state in team "x"` — no task, no field, no value — while
+ * every AgentTeams tool (read *and* write) failed at once, leaving an operator
+ * to bisect the file by hand (issue #188). The detail is computed only on the
+ * failure path, so the happy path keeps its existing cost.
+ * @param raw - the parsed record as read from disk, before coercion.
+ * @param expectedId - the team id the record was read for.
+ * @returns a `task "t2": findings[0].line -1 must be ...` style detail.
+ */
+export declare function describeTeamStateDefect(raw: unknown, expectedId: string): string;
 export declare function isTeamTask(value: unknown): value is TeamTask;
 /**
  * Remove a team's whole directory (members should be interrupted first).

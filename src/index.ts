@@ -62,8 +62,22 @@ export interface Config {
   stateDir?: string
   /** `ctx.subagents` provider used to spawn members; must support continuable children and personas (default `spawn`). */
   memberProvider?: string
-  /** Optional model override applied to every member. */
+  /**
+   * Optional model override applied to every member. The id is used verbatim.
+   * When the captain's provider does not advertise it, the provider that does
+   * is resolved from the live catalogs (only if exactly one advertises it);
+   * set `memberLlmProvider` to name the owner explicitly instead.
+   */
   memberModel?: string
+  /**
+   * LLM provider route that owns `memberModel`. Set this when the member model
+   * is served by a different provider than the captain's session; without it
+   * the captain's provider is only used if it actually advertises the model,
+   * and an ambiguous or unowned model fails with the provider catalogs instead
+   * of being silently paired with the captain's route (issue #189).
+   * Distinct from `memberProvider`, which is the subagent runtime backend.
+   */
+  memberLlmProvider?: string
   /** Prompt injected into member personas and automatic task assignments. */
   executionPrompt?: string
   /** Plugin-wide fallback route for unavailable member models. */
@@ -96,6 +110,7 @@ export const Config: z<Config> = z.object({
   stateDir: z.string().default('.agent-teams'),
   memberProvider: z.string().default('spawn'),
   memberModel: z.string(),
+  memberLlmProvider: z.string(),
   executionPrompt: z.string(),
   fallback: fallbackRouteConfig,
   profiles: z.dict(z.object({
@@ -155,6 +170,7 @@ export function apply(ctx: Context, config: Config): void {
     stateDir: config.stateDir ?? '.agent-teams',
     memberProvider: config.memberProvider ?? 'spawn',
     memberModel: config.memberModel,
+    memberLlmProvider: config.memberLlmProvider,
     executionPrompt: config.executionPrompt,
     fallback: config.fallback,
     memberMaxDepth: config.memberMaxDepth ?? 0,

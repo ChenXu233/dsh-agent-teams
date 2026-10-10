@@ -20,6 +20,8 @@ export interface ToolsConfig {
     memberProvider: string;
     /** Optional member model override. */
     memberModel?: string;
+    /** Optional member LLM provider, paired with `memberModel` (issue #189). */
+    memberLlmProvider?: string;
     /** Prompt injected into member personas and assignments. */
     executionPrompt?: string;
     /** Plugin fallback route. */

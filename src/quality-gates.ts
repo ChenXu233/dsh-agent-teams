@@ -925,6 +925,15 @@ export function resumeTeamState(team: TeamState, reason: string): ResumeTeamResu
   }
 }
 
+/**
+ * The durable `findings[].line` contract, shared by the write-side parser
+ * (`parseFindings`) and the durable validator (`isReviewFinding`) so the two
+ * cannot drift apart again (issue #188, #105 class).
+ */
+export function isValidFindingLine(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0
+}
+
 export function isReviewFinding(value: unknown): value is ReviewFinding {
   if (!isRecord(value)) return false
   return nonemptyString(value['id'])
@@ -932,7 +941,7 @@ export function isReviewFinding(value: unknown): value is ReviewFinding {
     && nonemptyString(value['problem'])
     && nonemptyString(value['requiredFix'])
     && (value['file'] === undefined || nonemptyString(value['file']))
-    && (value['line'] === undefined || (Number.isSafeInteger(value['line']) && (value['line'] as number) >= 0))
+    && (value['line'] === undefined || isValidFindingLine(value['line']))
     && (value['resolved'] === undefined || typeof value['resolved'] === 'boolean')
 }
 
@@ -999,7 +1008,60 @@ export function normalizeBlankOptionalTaskFields<T extends object>(task: T): T {
     if (kept.length === 0) delete next[key]
     else next[key] = kept
   }
-  return next as T
+  return normalizeSentinelNumericTaskFields(next) as T
+}
+
+/**
+ * Numeric task fields whose durable contract is a bounded range, paired with
+ * their minimum (`Number.isSafeInteger` plus the lower bound). Some models
+ * materialize "no value" as a numeric sentinel (`line: -1`, `round: 0`,
+ * `reviewedAttempt: -1`) that the write side used to persist verbatim and the
+ * durable validator then rejected — bricking the whole team on the next read
+ * (issue #188, #105 class).
+ */
+const SENTINEL_NUMERIC_TASK_FIELDS = [
+  ['round', 1],
+  ['reviewedAttempt', 0],
+  ['attempt', 0],
+] as const satisfies readonly (readonly [string, number])[]
+
+/**
+ * Treat an out-of-contract **numeric** sentinel as absent, including
+ * `findings[].line` (contract: `isValidFindingLine`).
+ *
+ * Only numbers are healed. A value of any other type (`round: "oops"`,
+ * `attempt: {}`, `line: "12"`) is left exactly as written and stays a hard,
+ * named validation failure, so genuine corruption is never silently swallowed
+ * while `-1`-style sentinels — the #188 brick — self-heal. Field order, unknown
+ * fields and every in-range value are preserved.
+ */
+export function normalizeSentinelNumericTaskFields<T extends object>(task: T): T {
+  const next = { ...task } as Record<string, unknown>
+  let changed = false
+  for (const [key, minimum] of SENTINEL_NUMERIC_TASK_FIELDS) {
+    const value = next[key]
+    if (typeof value !== 'number') continue
+    if (Number.isSafeInteger(value) && value >= minimum) continue
+    delete next[key]
+    changed = true
+  }
+  if (Array.isArray(next['findings'])) {
+    let findingsChanged = false
+    const findings = (next['findings'] as unknown[]).map((finding) => {
+      if (!isRecord(finding)) return finding
+      const line = finding['line']
+      if (typeof line !== 'number' || isValidFindingLine(line)) return finding
+      const cleaned = { ...finding }
+      delete cleaned['line']
+      findingsChanged = true
+      return cleaned
+    })
+    if (findingsChanged) {
+      next['findings'] = findings
+      changed = true
+    }
+  }
+  return (changed ? next : task) as T
 }
 
 export function hasValidQualityTaskFields(value: Record<string, unknown>): boolean {

@@ -174,6 +174,12 @@ export declare function planQualityFollowUp(team: TeamState, closed: TeamTask): 
 export declare function buildCoverageMatrix(goalItems: readonly string[], tasks: readonly TeamTask[]): CoverageRow[];
 export declare function canDeclareDelivery(team: TeamState): DeliveryResult;
 export declare function resumeTeamState(team: TeamState, reason: string): ResumeTeamResult;
+/**
+ * The durable `findings[].line` contract, shared by the write-side parser
+ * (`parseFindings`) and the durable validator (`isReviewFinding`) so the two
+ * cannot drift apart again (issue #188, #105 class).
+ */
+export declare function isValidFindingLine(value: unknown): value is number;
 export declare function isReviewFinding(value: unknown): value is ReviewFinding;
 export declare function isAcceptanceResult(value: unknown): value is AcceptanceResult;
 export declare function isCommandResult(value: unknown): value is CommandResult;
@@ -186,6 +192,17 @@ export declare function isTaskRevision(value: unknown): value is TaskRevision;
  * validation stays strict.
  */
 export declare function normalizeBlankOptionalTaskFields<T extends object>(task: T): T;
+/**
+ * Treat an out-of-contract **numeric** sentinel as absent, including
+ * `findings[].line` (contract: `isValidFindingLine`).
+ *
+ * Only numbers are healed. A value of any other type (`round: "oops"`,
+ * `attempt: {}`, `line: "12"`) is left exactly as written and stays a hard,
+ * named validation failure, so genuine corruption is never silently swallowed
+ * while `-1`-style sentinels — the #188 brick — self-heal. Field order, unknown
+ * fields and every in-range value are preserved.
+ */
+export declare function normalizeSentinelNumericTaskFields<T extends object>(task: T): T;
 export declare function hasValidQualityTaskFields(value: Record<string, unknown>): boolean;
 export declare function isTaskKind(value: unknown): value is TaskKind;
 export declare function isReviewVerdict(value: unknown): value is ReviewVerdict;
