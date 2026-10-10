@@ -33,8 +33,9 @@
     "205": {
       "durableRegression": {
         "file": "scripts/issue-205.test.mjs",
-        "candidate": "6/6 pass",
-        "baseline": "fails"
+        "candidate": "11/11 pass",
+        "baseline": "fails",
+        "covers": "run A record policy, silent cases, terminal-status settlement boundary, message wording"
       },
       "realHost": {
         "script": "/private/tmp/agentteams-issues-20261010/state-routes/run-205.sh",
@@ -49,7 +50,13 @@
           "baseline": "durable note appended (the old code recorded this shape too, which is exactly why the earlier candidate must not drop it)"
         }
       },
-      "injectedFailureDisclosure": "host-level turn failure thrown by a test-only plugin inside a real agent/pre-step waterfall listener; explicitly NOT a real account 429"
+      "injectedFailureDisclosure": "host-level turn failure thrown by a test-only plugin inside a real agent/pre-step waterfall listener; explicitly NOT a real account 429",
+      "messageBoundaries": {
+        "completed": "Task tN had already completed; ... work landed.",
+        "failed/cancelled": "Task tN was already closed as <status>; its record was left unchanged.",
+        "pending/claimed/in_progress or no observed task": "plain 'No open attempt was owned; no task state was changed.'",
+        "note": "In the recorded real-host runs the plugin's listener observes no open attempt at error time (observedOpenAttempt: null), so both shapes correctly produce the plain wording. The terminal-status wording is pinned by pure tests in scripts/issue-205.test.mjs."
+      }
     }
   },
   "repositoryRegressions": {

@@ -121,8 +121,8 @@ Real stack: `workspaceRegistry.create()` → `sessionController.create()`/`selec
 Candidate note, verbatim:
 
 ```
-Member "policy" hit an unrecoverable turn failure: … (code UNKNOWN). No open attempt was owned;
-the member's work had already settled and no task state was changed.
+Member "policy" hit an unrecoverable turn failure: … (code UNKNOWN).
+No open attempt was owned; no task state was changed.
 ```
 
 ### Injected failure — explicit disclosure
@@ -139,7 +139,25 @@ The failing turn is a **host-level turn failure**: a test-only plugin throws a g
 - `noted_settled` — this member generation owns no open attempt: leave task and member exactly as they are and append one durable captain note. **No member `status` may suppress this.** `syncMemberStatus` writes `working` as soon as a turn runs, while a task completed earlier in that same turn leaves no open attempt behind — that is the reporter's run A, and an earlier revision of this fix wrongly treated `working` as "moved on to newer work" and dropped it.
 - `ignored` — stale by contract: a **replaced** member generation (same name, new session id), or a *concrete* superseded open attempt (a different task, or a newer `attempt`/`attemptId` on the same task). Those are the only silent cases.
 
-The note only claims settlement when a durable task record proves it; a member that never completed a task gets the plain `No open attempt was owned; no task state was changed.` wording instead.
+The note only describes the observed task when its durable status is **terminal**, and only a `completed` record may claim the work landed:
+
+| durable status of the observed task | wording |
+| --- | --- |
+| `completed` | `Task tN ("…") had already completed; … This member's last turn died after its work landed.` |
+| `failed` / `cancelled` | `Task tN ("…") was already closed as <status>; its record was left unchanged.` — no delivery claim |
+| `pending` / `claimed` / `in_progress` (e.g. unclaimed or reassigned while the error was queued) | plain `No open attempt was owned; no task state was changed.` |
+| no observed task at all (never assigned, or a welcome-turn failure) | plain `No open attempt was owned; no task state was changed.` |
+
+These boundaries are pinned by `scripts/issue-205.test.mjs` (`settledTaskRecord`, `memberFailureMessage`).
+
+In the recorded real-host runs the plugin's listener observes **no** open attempt at error time (`observedOpenAttempt: null` in the trace), so both shapes correctly produce the plain wording:
+
+```
+Member "policy" hit an unrecoverable turn failure: … (code UNKNOWN).
+No open attempt was owned; no task state was changed.
+```
+
+The `completed`/`failed`/`cancelled` wording applies when the listener *did* observe an open attempt that then closed before the team lock was acquired (for example a `reassign_task` moving the task to a newer attempt); that ordering is covered by the pure tests rather than by a dedicated real-host run.
 
 ### Both real-host shapes
 

@@ -11,7 +11,7 @@
 // newer work" silently dropped the reporter's run A failure.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyMemberFailure } from '../lib/members.js'
+import { classifyMemberFailure, memberFailureMessage, settledTaskRecord } from '../lib/members.js'
 
 const observed = (task) => ({ captainSessionId: 'captain', memberId: 'member-1', task })
 const current = (member, task, observedRecord) => ({ member, task, observedRecord })
@@ -100,4 +100,64 @@ test('the exact observed open attempt is the only mutable case', () => {
     ),
     'ignored',
   )
+})
+
+// --- message wording boundaries -------------------------------------------
+//
+// A non-terminal record (pending/claimed/in_progress) must never be described as
+// settled, and a failed/cancelled record must not claim that work landed.
+
+const record = (id, status, subject = 'work') => ({ id, status, subject })
+
+test('only terminal statuses are accepted as a settled record', () => {
+  const tasks = [
+    record('t1', 'completed'),
+    record('t2', 'failed'),
+    record('t3', 'cancelled'),
+    record('t4', 'pending'),
+    record('t5', 'claimed'),
+    record('t6', 'in_progress'),
+  ]
+  assert.equal(settledTaskRecord({ id: 't1' }, tasks).status, 'completed')
+  assert.equal(settledTaskRecord({ id: 't2' }, tasks).status, 'failed')
+  assert.equal(settledTaskRecord({ id: 't3' }, tasks).status, 'cancelled')
+  for (const id of ['t4', 't5', 't6']) {
+    assert.equal(settledTaskRecord({ id }, tasks), undefined, `${id} must not be treated as settled`)
+  }
+  assert.equal(settledTaskRecord({ id: 'missing' }, tasks), undefined)
+  assert.equal(settledTaskRecord(undefined, tasks), undefined)
+})
+
+test('a completed record is the only one that may claim the work landed', () => {
+  const message = memberFailureMessage('policy', 'boom (code UNKNOWN)', 'noted_settled', undefined, record('t1', 'completed'))
+  assert.match(message, /had already completed/)
+  assert.match(message, /work landed/)
+  assert.match(message, /No|unchanged/)
+})
+
+test('failed and cancelled records are described by their closed state, not as delivered', () => {
+  for (const status of ['failed', 'cancelled']) {
+    const message = memberFailureMessage('policy', 'boom (code UNKNOWN)', 'noted_settled', undefined, record('t2', status))
+    assert.match(message, new RegExp(`was already closed as ${status}`))
+    assert.doesNotMatch(message, /work landed/)
+    assert.doesNotMatch(message, /had already completed/)
+  }
+})
+
+test('without a terminal record the message only says no open attempt', () => {
+  for (const disposition of ['noted_settled', 'failed_attempt']) {
+    const message = memberFailureMessage('policy', 'boom (code UNKNOWN)', disposition, undefined, undefined)
+    assert.match(message, /No open attempt was owned/)
+    assert.doesNotMatch(message, /already (completed|closed|settled)/)
+    assert.doesNotMatch(message, /work landed/)
+  }
+  assert.match(
+    memberFailureMessage('policy', 'boom (code UNKNOWN)', 'noted_settled', undefined, undefined),
+    /no task state was changed/,
+  )
+})
+
+test('a failed open attempt still names the task that was failed', () => {
+  const message = memberFailureMessage('policy', 'boom (code UNKNOWN)', 'failed_attempt', { id: 't9', subject: 'work' }, undefined)
+  assert.match(message, /Task t9 \("work"\) was marked failed/)
 })

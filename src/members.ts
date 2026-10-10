@@ -267,6 +267,59 @@ export function classifyMemberFailure(
   return 'failed_attempt'
 }
 
+/**
+ * The surviving durable record of the capability observed at the error event,
+ * or `undefined` when there is nothing honest to say about it.
+ *
+ * A task is only described as *settled* when its durable status is terminal
+ * (`completed`/`failed`/`cancelled`). A non-terminal record — for example a task
+ * that was claimed and then unclaimed or reassigned while the error was queued —
+ * must fall back to the plain "no open attempt" wording instead of implying a
+ * delivery landed.
+ */
+export function settledTaskRecord(
+  observed: Pick<TeamTask, 'id'> | undefined,
+  tasks: readonly Pick<TeamTask, 'id' | 'status' | 'subject'>[],
+): Pick<TeamTask, 'id' | 'status' | 'subject'> | undefined {
+  if (observed === undefined) return undefined
+  const record = tasks.find(candidate => candidate.id === observed.id)
+  if (record === undefined) return undefined
+  return TERMINAL_TASK_STATUSES.includes(record.status) ? record : undefined
+}
+
+/**
+ * Build the durable captain note for one recorded failure. Pure, so the wording
+ * boundaries are testable without a lock or a Harness.
+ * @param memberName - the member that failed.
+ * @param summary - the failure message plus its code.
+ * @param disposition - what the failure was allowed to do.
+ * @param task - the open attempt that was failed, when there was one.
+ * @param settledRecord - the terminal record of the observed task, when it exists.
+ * @returns the exact message the captain will read.
+ */
+export function memberFailureMessage(
+  memberName: string,
+  summary: string,
+  disposition: MemberFailureDisposition,
+  task: Pick<TeamTask, 'id' | 'subject'> | undefined,
+  settledRecord: Pick<TeamTask, 'id' | 'status' | 'subject'> | undefined,
+): string {
+  const head = `Member "${memberName}" hit an unrecoverable turn failure: ${summary}.`
+  if (disposition === 'failed_attempt' && task !== undefined) {
+    return `${head} Task ${task.id} ("${task.subject}") was marked failed; reassign it or retry when ready.`
+  }
+  if (settledRecord === undefined) {
+    return disposition === 'noted_settled'
+      ? `${head} No open attempt was owned; no task state was changed.`
+      : `${head} No open attempt was owned.`
+  }
+  // Only a completed record supports a claim about delivered work. A failed or
+  // cancelled record is described by its actual closed state.
+  return settledRecord.status === 'completed'
+    ? `${head} Task ${settledRecord.id} ("${settledRecord.subject}") had already completed; its state and output were left unchanged. This member's last turn died after its work landed.`
+    : `${head} Task ${settledRecord.id} ("${settledRecord.subject}") was already closed as ${settledRecord.status}; its record was left unchanged. This member's last turn died after that task had closed.`
+}
+
 /** Record a final turn failure, never an intermediate request retry. */
 export async function failMemberOpenAttempt(
   ctx: Context,
@@ -301,21 +354,15 @@ export async function failMemberOpenAttempt(
       task.updatedAt = Date.now()
     }
     if (member !== undefined && ctx.agents.get(brandedSessionId(member.id))?.status !== 'running') member.status = 'idle'
-    // Only claim that work "settled" when a durable record of that task proves
-    // it. A member that never completed a task (for example a failure during its
-    // welcome turn) gets the plain "no open attempt" wording instead of an
-    // unsupported claim about its work.
+    // Only a terminal record of the observed task may be described, and only a
+    // completed one supports a claim about delivered work. Anything else — a
+    // never-assigned member, or a record left pending/claimed while the error was
+    // queued — gets the plain "no open attempt" wording.
     const settledRecord = disposition === 'noted_settled'
-      ? observed.task === undefined ? undefined : team.tasks.find(candidate => candidate.id === observed.task!.id)
+      ? settledTaskRecord(observed.task, team.tasks)
       : undefined
     const message = {
-      ...createMessage(memberName, CAPTAIN_KEY, settledRecord !== undefined
-        ? `Member "${memberName}" hit an unrecoverable turn failure: ${summary}. Task ${settledRecord.id} ("${settledRecord.subject}") had already settled as ${settledRecord.status}; its state and output were left unchanged. This member's last turn died after its work landed.`
-        : disposition === 'noted_settled'
-          ? `Member "${memberName}" hit an unrecoverable turn failure: ${summary}. No open attempt was owned; no task state was changed.`
-          : task === undefined
-            ? `Member "${memberName}" hit an unrecoverable turn failure: ${summary}. No open attempt was owned.`
-            : `Member "${memberName}" hit an unrecoverable turn failure: ${summary}. Task ${task.id} ("${task.subject}") was marked failed; reassign it or retry when ready.`),
+      ...createMessage(memberName, CAPTAIN_KEY, memberFailureMessage(memberName, summary, disposition, task, settledRecord)),
       deliveryClaimedAt: Date.now(),
     }
     if (disposition === 'failed_attempt') await writeTeam(stateRoot, team)

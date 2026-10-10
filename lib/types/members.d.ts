@@ -169,6 +169,28 @@ export declare function classifyMemberFailure(observed: FailedMemberAttempt, cur
     /** The durable record of the task the observation referred to, settled or not. */
     readonly observedRecord?: Pick<TeamTask, 'id' | 'status' | 'subject'> | undefined;
 }): MemberFailureDisposition;
+/**
+ * The surviving durable record of the capability observed at the error event,
+ * or `undefined` when there is nothing honest to say about it.
+ *
+ * A task is only described as *settled* when its durable status is terminal
+ * (`completed`/`failed`/`cancelled`). A non-terminal record — for example a task
+ * that was claimed and then unclaimed or reassigned while the error was queued —
+ * must fall back to the plain "no open attempt" wording instead of implying a
+ * delivery landed.
+ */
+export declare function settledTaskRecord(observed: Pick<TeamTask, 'id'> | undefined, tasks: readonly Pick<TeamTask, 'id' | 'status' | 'subject'>[]): Pick<TeamTask, 'id' | 'status' | 'subject'> | undefined;
+/**
+ * Build the durable captain note for one recorded failure. Pure, so the wording
+ * boundaries are testable without a lock or a Harness.
+ * @param memberName - the member that failed.
+ * @param summary - the failure message plus its code.
+ * @param disposition - what the failure was allowed to do.
+ * @param task - the open attempt that was failed, when there was one.
+ * @param settledRecord - the terminal record of the observed task, when it exists.
+ * @returns the exact message the captain will read.
+ */
+export declare function memberFailureMessage(memberName: string, summary: string, disposition: MemberFailureDisposition, task: Pick<TeamTask, 'id' | 'subject'> | undefined, settledRecord: Pick<TeamTask, 'id' | 'status' | 'subject'> | undefined): string;
 /** Record a final turn failure, never an intermediate request retry. */
 export declare function failMemberOpenAttempt(ctx: Context, stateRoot: string, teamId: string, memberName: string, failure: {
     readonly code: string;
