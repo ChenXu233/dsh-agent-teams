@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import { guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, startMemberWithLenientFilter, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
+import { nearestLiveLead } from './lineage.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 
@@ -213,7 +214,7 @@ export async function failMemberOpenAttempt(
   if (prepared === undefined) return false
   // Use the same lease/acknowledgment contract as send_message, outside the
   // team lock: steering can synchronously start another agent turn.
-  const captain = ctx.agents.get(brandedSessionId(prepared.captainSessionId))
+  const captain = nearestLiveLead(ctx, { captainSessionId: prepared.captainSessionId })
   const delivered = captain !== undefined && steerCaptainReport(captain, memberName, prepared.message.content, mailboxPrompt(teamId, CAPTAIN_KEY, [prepared.message]))
   await withTeamLock(lockKey, () => delivered
     ? markMailboxDelivered(stateRoot, teamId, CAPTAIN_KEY, [prepared.message.id])

@@ -39,6 +39,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
 import { findTeamByCaptain } from './state.ts'
+import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { installTeamCapabilities } from './capabilities.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
@@ -266,7 +267,7 @@ export function apply(ctx: Context, config: Config): void {
         }
         const workspace = captain.session.header.cwd ?? process.cwd()
         const stateRoot = join(workspace, resolved.stateDir)
-        const team = await findTeamByCaptain(stateRoot, captain.id)
+        const team = await findTeamByCaptain(stateRoot, captain.id, await leadIdentityOfAsync(ctx, captain.session))
         if (team === undefined || team.id !== teamId) {
           res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
           res.end(JSON.stringify({ error: 'team not found for this captain' }))
@@ -322,7 +323,7 @@ export function apply(ctx: Context, config: Config): void {
         }
         const workspace = captain.session.header.cwd ?? process.cwd()
         const stateRoot = join(workspace, resolved.stateDir)
-        const team = await findTeamByCaptain(stateRoot, captain.id)
+        const team = await findTeamByCaptain(stateRoot, captain.id, await leadIdentityOfAsync(ctx, captain.session))
         if (team === undefined || team.id !== teamId) {
           res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
           res.end(JSON.stringify({ error: 'team not found for this captain' }))

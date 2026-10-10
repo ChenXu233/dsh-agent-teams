@@ -86,6 +86,7 @@ export declare function haltTeamWork(input: {
     signal?: AbortSignal;
 }): Promise<{
     teamName: string;
+    captainSessionId: string;
     cancelledTasks: number;
     alreadyHalted: boolean;
 }>;

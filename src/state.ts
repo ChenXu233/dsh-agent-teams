@@ -19,6 +19,7 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promise
 import { join } from 'node:path'
 import { TERMINAL_TASK_STATUSES, type TaskStatus, type TeamMember, type TeamMessage, type TeamProfileSnapshot, type TeamState, type TeamTask } from './types.ts'
 import { hasValidQualityTaskFields, isReviewPolicy, normalizeBlankOptionalTaskFields } from './quality-gates.ts'
+import { teamLeadMatch, type LeadIdentity } from './lineage.ts'
 
 export {
   amendTaskContract,
@@ -337,11 +338,14 @@ export async function recordRetiredMemberIds(stateRoot: string, memberIds: reado
  * Find the team owned by one captain session (at most one per captain).
  * @param stateRoot - resolved absolute state root directory.
  * @param captainSessionId - the owning session id.
+ * @param lead - durable lead identity of the calling session, when it may lead
+ *   through a fork chain; omitted keeps the exact-id contract.
  * @returns the team record, or undefined when the captain leads no team.
  */
 export async function findTeamByCaptain(
   stateRoot: string,
   captainSessionId: string,
+  lead?: LeadIdentity,
 ): Promise<TeamState | undefined> {
   let entries
   try {
@@ -356,7 +360,8 @@ export async function findTeamByCaptain(
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const team = await readTeam(stateRoot, entry.name)
-    if (team?.captainSessionId === captainSessionId) {
+    if (team !== undefined && (team.captainSessionId === captainSessionId
+      || (lead !== undefined && teamLeadMatch(team, lead)))) {
       if (found !== undefined && found.id !== team.id) {
         throw new Error(`captain session leads multiple active teams ("${found.id}", "${team.id}"); archive one before continuing`)
       }
@@ -368,15 +373,18 @@ export async function findTeamByCaptain(
 
 /**
  * Find the team in which one session is an active participant.
- * Captains match `captainSessionId`; members match their durable child session
- * id. Removed members no longer have access to team-scoped tools.
+ * Captains match `captainSessionId` — including a lead session that inherited
+ * it through a fork — and members match their durable child session id.
+ * Removed members no longer have access to team-scoped tools.
  * @param stateRoot - resolved absolute state root directory.
  * @param agentSessionId - calling captain/member session id.
+ * @param lead - durable lead identity of the calling session, when available.
  * @returns the team record, or undefined when the caller belongs to no team.
  */
 export async function findTeamByParticipant(
   stateRoot: string,
   agentSessionId: string,
+  lead?: LeadIdentity,
 ): Promise<TeamState | undefined> {
   let entries
   try {
@@ -391,8 +399,9 @@ export async function findTeamByParticipant(
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const team = await readTeam(stateRoot, entry.name)
-    const participates = team?.captainSessionId === agentSessionId
-      || team?.members.some((member) => member.id === agentSessionId && member.status !== 'removed') === true
+    const participates = team !== undefined && (team.captainSessionId === agentSessionId
+      || (lead !== undefined && teamLeadMatch(team, lead))
+      || team.members.some((member) => member.id === agentSessionId && member.status !== 'removed'))
     if (participates && team !== undefined) {
       if (found !== undefined && found.id !== team.id) {
         throw new Error(`agent session belongs to multiple active teams ("${found.id}", "${team.id}"); the target team is ambiguous`)
