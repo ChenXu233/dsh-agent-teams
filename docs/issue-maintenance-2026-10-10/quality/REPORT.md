@@ -197,3 +197,28 @@ pnpm typecheck                                                                ->
 
 - 四个 case 文件：161 14/14、174 19/19、175 7/7、183 7/7，全部 EXIT=0；`pnpm typecheck` EXIT=0；`pnpm verify` EXIT=0（`evidence/pnpm-verify-final3.log`）。
 - 修正未触及 #161/#174/#175/#183 的功能路径，只收紧绑定与枚举的安全边界；上一节 §9 的真实模型与浏览器验收结果不受影响（它们跑在收紧前的构建上，行为在这些路径上一致：run 中没有任何 unbound verdict 被当作 superseding evidence，也没有使用越界目录 pattern）。
+
+## 11. 收尾（新 commit）
+
+### 11.1 新回归已接入仓库验证链
+
+`package.json` 的 `verify:quality-gates` 现在同时运行 `quality-gates-tdd.mjs`、`quality-gates-repair-scope`、`quality-gates-amend` 以及本组四个新 case 文件（content-bound / work-order / repair-wiring / excluded-scope）。该链随 `pnpm verify` 一起执行，不再依赖手工调用。
+
+- `pnpm verify:quality-gates` → EXIT=0，**64 tests pass / 0 fail**（17 条既有 + 47 条新增：content-bound 14、work-order 19、repair-wiring 7、excluded-scope 7）。
+- `pnpm verify`（全量 gate）→ EXIT=0；`pnpm typecheck` → EXIT=0；`pnpm build` → EXIT=0；`pnpm install --frozen-lockfile` → EXIT=0。
+
+### 11.2 验收资料入库（大日志仍留在 /tmp）
+
+- `docs/issue-maintenance-2026-10-10/quality/real-model-acceptance.json`：sanitized 摘要（环境、模型路由、四个真实场景的逐字关键行、请求计数、面板 DOM/视觉证据、artifact 与 TAP 的 sha256、未覆盖项、`lib` 哈希与 `git-artifact-stamp.json`）。已核对不含 token / API key / 凭据内容。
+- `docs/issue-maintenance-2026-10-10/quality/panel-stale-verdict.png`：本分支自有实例上面板显示 stale verdict 的截图（sha256 `f53d102443f15d51a4c1d7f18c537596f753b531c937f08be0257db0a6ceb83b`）。
+- 原始日志、workspace、profile、baseline 插件树仍在 `/private/tmp/agentteams-issues-20261010/quality/`，供独立复核（未入库）。
+
+### 11.3 lib 与源码一致性核对
+
+- `node scripts/git-artifacts.mjs` → `Git artifacts match source and build settings.`（EXIT=0）。
+- `lib/git-artifact-stamp.json`：`source 4cc1271e…`、`output aef2d57f…`。
+- 关键产物 sha256：`lib/quality-gates.js ad6305da…`、`lib/artifacts.js b54a0a54…`、`lib/workspace-audit.js 0ee95370…`、`lib/tools.js f95f5c25…`、`lib/client.js 5bdeff44…`（完整列表见 §11.2 的 JSON）。
+
+### 11.4 状态
+
+四个 issue（#161 / #174 / #175 / #183）修复完成，原 case 重跑、真实 DeepSeek Flash 路径、面板 UI 均已验收；本 session 到此保持 idle，不再改代码，等待主管独立核验与整合。
