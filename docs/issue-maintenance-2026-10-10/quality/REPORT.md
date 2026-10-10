@@ -43,7 +43,7 @@
 1. **记录被判定的 revision**：review/requirements/verification 在 claim 时由 scheduler 写入 `verdictStartSnapshot`（真实 sha256/size/mtime）；close 时 `bindClosingVerdict` 读当前 scope，比较 claim 快照得到 `reviewedDuringDrift`，并写入 `reviewedTaskId`/`reviewedAttempt`/`reviewedArtifacts`/`reviewedScope`/`reviewedGaps`。评审期间被别人改文件 → verdict 不能声称绑定稳定 revision（blocker，除非被更晚的 sound verdict 覆盖）。
 2. **交付按当前字节判定**：`canDeclareDelivery(team, audit)` / `describeQualityLoop(team, audit)` 新增可选 `audit`（纯函数不读盘，由调用方传入当前字节）。`src/workspace-audit.ts` 的 `auditTeamWorkspace` 是**唯一**读盘入口。
 3. **多表面一致**：`agent_teams_status`（含 `Gate warnings` 段）与 Web 活动面板路由 `/plugins/dsh-agent-teams/state`（`TeamActivitySnapshot.delivery`/`loopState`/`deliverable` + 每任务 `verdictStale`，客户端面板以 `data-verdict-stale` 虚线告警渲染，不再显示裸 pass）都走同一个 audit。
-4. **收敛而非永久阻塞**：被后续合法 repair + 新 pass 覆盖的历史 pass 只报 warning（`superseded by <id>`）；只是 intermediate 的 verification 漂移同样是 warning。
+4. **收敛而非永久阻塞**：被后续合法 repair + 新 pass 覆盖的历史 pass 只报 warning（`superseded by <id>`）；verification 漂移也必须由更晚且内容绑定、覆盖漂移路径的有效 verdict 覆盖，才能降为 warning；否则要求复验并阻塞交付（§11）。
 5. **边界显式化**：broad scope 下新出现的文件若从未被审 → blocker（`appeared under the reviewed scope … never reviewed`）；review 时不可读 → `reviewedGaps` → blocker；pre-fix 历史记录没有绑定 → 明确 warning「无法确认当前字节」，不冒充已审核；当前 audit 自身不完整（超 cap / 不可读 / 非法 scope）→ blocker。
 
 ### #174 工单快照 + 过期标记（src/quality-gates.ts、src/tools.ts、src/scheduler.ts）
