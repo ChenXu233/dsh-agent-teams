@@ -56,6 +56,8 @@ import {
   taskKindOf,
 } from './state.ts'
 import { appendTaskEvidence } from './quality-gates.ts'
+import { restrictableToolNames } from './harness-compat.ts'
+import { requireToolPolicy, resolveMemberToolFilter, type MemberToolFilter, type MemberToolPolicy } from './tool-policies.ts'
 import type { ContractAmendmentInput } from './state.ts'
 import type { AcceptanceResult, CommandResult, ReviewFinding, ReviewVerdict, TaskKind } from './types.ts'
 import {
@@ -95,6 +97,8 @@ export interface ToolsConfig {
   maxMembers: number
   /** Named team profiles from the active DSH profile. */
   profiles: Record<string, import('./profiles.ts').TeamProfileConfig>
+  /** Owner-declared reusable member tool policies, keyed by policy id (#59). */
+  toolPolicies: Record<string, MemberToolPolicy>
 }
 
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
@@ -107,6 +111,8 @@ export type StagedPlanMutation =
       model: string
       reasoningEffort?: string | null
       executionPrompt?: string | null
+      /** Selected tool-policy id; an empty string clears it back to no policy. */
+      toolPolicy?: string
     }
   | {
       action: 'update_task'
@@ -253,6 +259,35 @@ function requireStagedTeam(team: TeamState): void {
 function trimmedOptional(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed === undefined || trimmed === '' ? undefined : trimmed
+}
+
+/**
+ * Resolve one member's selected tool policy into the persisted policy id and
+ * the immutable effective filter (#59).
+ *
+ * An unknown id fails here — before the member is written and before any child
+ * is created — so a typo can never persist a half-configured member or leave a
+ * resumable orphan behind. A member without a policy resolves to `{}`: the
+ * previous behavior and record shape stay untouched.
+ * @param config - resolved plugin config (declared policies + depth cap).
+ * @param captain - the live captain, whose registry view names the host tools.
+ * @param policyId - the selected policy id, or undefined for no policy.
+ * @returns the member fields to persist (`toolPolicy` + `toolFilter`), or `{}`.
+ */
+function memberToolSelection(
+  config: ToolsConfig,
+  captain: Agent,
+  policyId: string | undefined,
+): Pick<TeamMember, 'toolPolicy' | 'toolFilter'> {
+  if (policyId === undefined) return {}
+  const policy = requireToolPolicy(config.toolPolicies, policyId)
+  return {
+    toolPolicy: policyId,
+    toolFilter: resolveMemberToolFilter(policy, {
+      maxDepth: config.memberMaxDepth,
+      knownTools: restrictableToolNames(captain),
+    }),
+  }
 }
 
 /** Validate references and cycles before a staged graph can be saved or run. */
@@ -465,7 +500,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         const selection = await resolveMemberLlmSelection(ctx, captain, {
           provider: member.provider, model: member.model, reasoningEffort: member.reasoningEffort, fallback: member.fallback,
         }, signal)
-        await spawnMember(ctx, memberRuntime(config), memberSelections, selection, captain, team, member, config.stateDir, signal, text)
+        await spawnMember(ctx, memberRuntime(config), memberSelections, selection, captain, team, member, config.stateDir, signal, text, member.toolFilter)
         orphan = { ...member }
         delete member.spawnError
         await writeTeam(root, team)
@@ -513,6 +548,14 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           member.model = selection.model
           member.reasoningEffort = selection.reasoningEffort
           member.executionPrompt = trimmedOptional(mutation.executionPrompt)
+          // The roster editor replaces route/prompt fields; the tool policy is
+          // only touched when the mutation names one, so a plan revision cannot
+          // silently widen a member's tool set.
+          if (mutation.toolPolicy !== undefined) {
+            const selected = memberToolSelection(config, captain, trimmedOptional(mutation.toolPolicy))
+            member.toolPolicy = selected.toolPolicy
+            member.toolFilter = selected.toolFilter
+          }
         } else if (mutation.action === 'update_task') {
           const task = requireTask(fresh, mutation.taskId)
           if (task.status !== 'pending' || (task.attempt ?? 0) !== 0 || task.reassigning === true) {
@@ -718,6 +761,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           members: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
             name: { type: 'string', required: true }, role: { type: 'string' },
             provider: { type: 'string' }, model: { type: 'string' }, reasoning_effort: { type: 'string' },
+            tool_policy: { type: 'string', description: 'Optional owner-declared tool-policy id for this member.' },
           } } },
           tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
             id: { type: 'string', required: true, description: 'Local reference used by dependencies in this plan; the result maps it to a durable task id.' },
@@ -743,7 +787,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           phase: { type: 'string', required: true },
           profile: { type: 'string' },
           task_planning: { type: 'string' },
-          members: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { member_name: { type: 'string', required: true }, member_id: { type: 'string', required: true }, provider: { type: 'string', required: true }, model: { type: 'string', required: true }, reasoning_effort: { type: 'string' }, status: { type: 'string', required: true } } } },
+          members: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { member_name: { type: 'string', required: true }, member_id: { type: 'string', required: true }, provider: { type: 'string', required: true }, model: { type: 'string', required: true }, reasoning_effort: { type: 'string' }, tool_policy: { type: 'string' }, status: { type: 'string', required: true } } } },
           tasks: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { task_id: { type: 'string', required: true }, seed_id: { type: 'string', required: true }, subject: { type: 'string', required: true }, status: { type: 'string', required: true }, kind: { type: 'string' }, assignee: { type: 'string' }, dependencies: { type: 'array', items: { type: 'string' }, required: true } } } },
         },
       },
@@ -873,6 +917,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           provider: member.provider ?? '',
           model: member.model ?? '',
           ...member.reasoningEffort === undefined ? {} : { reasoning_effort: member.reasoningEffort },
+          ...member.toolPolicy === undefined ? {} : { tool_policy: member.toolPolicy },
           status: member.status,
         })),
         tasks: snapshot.tasks.map((task) => ({
@@ -916,6 +961,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             model: { type: 'string', description: 'Optional member model; defaults to the current staged route.' },
             reasoning_effort: { type: 'string', description: 'Optional member reasoning effort.' },
             execution_prompt: { type: 'string', description: 'Optional member-specific execution prompt.' },
+            tool_policy: { type: 'string', description: 'Optional owner-declared tool-policy id for this member; an empty string clears it back to the unchanged default tool set.' },
           },
         },
       },
@@ -959,6 +1005,9 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             model: operation.model?.trim() || member.model || '',
             reasoningEffort: operation.reasoning_effort ?? member.reasoningEffort,
             executionPrompt: operation.execution_prompt ?? member.executionPrompt,
+            // Omitted means "keep the current policy": a route/prompt revision
+            // must not silently change what the member may do.
+            ...operation.tool_policy === undefined ? {} : { toolPolicy: operation.tool_policy },
           }
         }
         if (operation.action === 'update_task') {
@@ -1050,6 +1099,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       model: { type: 'string', description: 'Optional model override. Omit for the captain\'s current model (or the configured memberModel default).' },
       reasoning_effort: { type: 'string', description: 'Optional reasoning effort override: one of the target model\'s supported effort ids, or "default" to force its default. When omitted, the captain\'s effort is inherited only for the same provider/model; a changed route uses the target default.' },
       executionPrompt: { type: 'string', description: 'Optional member-specific execution prompt. It remains editable while staged.' },
+      tool_policy: { type: 'string', description: 'Optional id of a tool policy declared by the deployment owner (config toolPolicies). It restricts which global tools this member sees and may invoke: a policy allow-list also keeps the four coordination tools, and captain-only tools can never be reopened. Omit for the unchanged default tool set.' },
     },
     output: {
       schema: {
@@ -1061,15 +1111,17 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           provider: { type: 'string', required: true },
           model: { type: 'string', required: true },
           reasoning_effort: { type: 'string' },
+          tool_policy: { type: 'string' },
           status: { type: 'string', required: true },
           phase: { type: 'string', required: true },
         },
       },
       render: (args, value) => [{
         type: 'text',
-        text: value.phase === 'staged'
+        text: (value.phase === 'staged'
           ? `Member "${value.member_name}" added to the staged roster (${value.provider}/${value.model}); no child was spawned.`
-          : `Member "${value.member_name}" added (session ${value.member_id || 'starts with first ready task'}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}, status ${value.status}).`,
+          : `Member "${value.member_name}" added (session ${value.member_id || 'starts with first ready task'}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}, status ${value.status}).`)
+          + (value.tool_policy === undefined ? '' : ` Tool policy "${value.tool_policy}" applies to this member.`),
       }],
     },
     async execute(args, exec) {
@@ -1098,6 +1150,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           reasoningEffort: args.reasoning_effort,
           fallback: config.fallback,
         }, exec.signal)
+        const toolSelection = memberToolSelection(config, captain, trimmedOptional(args.tool_policy))
         const member: TeamMember = {
           id: '',
           name: memberName,
@@ -1107,6 +1160,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           reasoningEffort: selection.reasoningEffort,
           ...selection.fallback === undefined ? {} : { fallback: selection.fallback },
           executionPrompt: trimmedOptional(args.executionPrompt),
+          ...toolSelection,
           joinedAt: Date.now(),
           status: 'idle',
         }
@@ -1127,6 +1181,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           ...selection.reasoningEffort === undefined
             ? {}
             : { reasoning_effort: selection.reasoningEffort },
+          ...member.toolPolicy === undefined ? {} : { tool_policy: member.toolPolicy },
           status: member.status,
           phase: fresh.phase ?? 'running',
         }
@@ -2047,6 +2102,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           provider: member.provider ?? '',
           model: member.model ?? '',
           reasoning_effort: member.reasoningEffort ?? '',
+          tool_policy: member.toolPolicy ?? '',
           status: member.status,
           activity: member.id !== '' ? (activity.get(member.id) ?? 'unknown') : 'unspawned',
           ...member.spawnError === undefined ? {} : { spawn_error: member.spawnError },
@@ -2311,6 +2367,9 @@ async function initializeProfileTeam(input: {
     ...input.staged ? { phase: 'staged' as const, planReviewState: 'awaiting_review' as const } : {},
     members: profile.members.map((template, index) => {
       const selection = selections[index]!
+      // A profile member selects a policy by id; an unknown id fails here,
+      // before the team directory and any child session exist (#59).
+      const toolSelection = memberToolSelection(input.config, input.captain, template.toolPolicy)
       return {
         id: '',
         name: template.name,
@@ -2320,6 +2379,7 @@ async function initializeProfileTeam(input: {
         reasoningEffort: selection.reasoningEffort,
         executionPrompt: template.executionPrompt ?? profile.executionPrompt ?? input.config.executionPrompt,
         ...selection.fallback === undefined ? {} : { fallback: selection.fallback },
+        ...toolSelection,
         joinedAt: now,
         status: 'idle' as const,
       }
@@ -2498,6 +2558,7 @@ function renderStatus(value: JsonValue): string {
       provider: string
       model: string
       reasoning_effort: string
+      tool_policy: string
       status: string
       activity: string
       spawn_error?: string
@@ -2534,7 +2595,8 @@ function renderStatus(value: JsonValue): string {
       const route = member.provider && member.model ? ` · ${member.provider}/${member.model}` : ''
       const effort = member.reasoning_effort ? ` · reasoning ${member.reasoning_effort}` : ''
       const failure = member.spawn_error === undefined ? '' : `\n      start failed: ${member.spawn_error.slice(0, 400)}`
-      return `  - ${member.name} [${member.role}] ${member.status}/${member.activity}${route}${effort}${failure}`
+      const policy = member.tool_policy ? ` · policy ${member.tool_policy}` : ''
+      return `  - ${member.name} [${member.role}] ${member.status}/${member.activity}${route}${effort}${policy}${failure}`
     }),
     `Tasks (${team.tasks.length}):`,
     ...team.tasks.map((task) => {

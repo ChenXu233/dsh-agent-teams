@@ -14,6 +14,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type Agent } from '@deepseek-ai/dsh-agent';
 import type { Session } from '@deepseek-ai/dsh-session';
+import type { MemberToolFilter } from './tool-policies.ts';
 import { type TeamMember, type TeamState, type TeamTask } from './types.ts';
 /** Persona snapshot of a profile protocol; the full text lives on team.json. */
 export declare const PERSONA_PROTOCOL_MAX_CHARS = 400;
@@ -150,8 +151,13 @@ export declare function memberWelcome(team: TeamState, memberName: string): stri
  * @param member - the member draft whose `id` is filled on success.
  * @param stateDir - configured state directory (for the persona).
  * @param signal - caller cancellation, forwarded to the start.
+ * @param initialPrompt - first turn text; the welcome message when omitted.
+ * @param resolvedFilter - the member's effective tool filter (a selected
+ *   policy, or the legacy captain-only filter when the member has none). The
+ *   caller resolves it so `spawnMember` forwards exactly one immutable filter
+ *   to `startContinuable`.
  */
-export declare function spawnMember(ctx: Context, config: MemberRuntimeConfig, selections: MemberSelectionRuntime, llmSelection: MemberLlmSelection, captain: Agent, team: TeamState, member: TeamMember, stateDir: string, signal: AbortSignal, initialPrompt?: string): Promise<void>;
+export declare function spawnMember(ctx: Context, config: MemberRuntimeConfig, selections: MemberSelectionRuntime, llmSelection: MemberLlmSelection, captain: Agent, team: TeamState, member: TeamMember, stateDir: string, signal: AbortSignal, initialPrompt?: string, resolvedFilter?: MemberToolFilter): Promise<void>;
 /**
  * Deliver one message to a member as its next FIFO turn. Best effort: a
  * failure (member gone or not continuable) is logged and reported as `false`

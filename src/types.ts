@@ -8,6 +8,8 @@
  * @module dsh-agent-teams/types
  */
 
+import type { MemberToolFilter } from './tool-policies.ts'
+
 /** Task lifecycle statuses in progression order. */
 export type TaskStatus =
   | 'pending'
@@ -195,6 +197,19 @@ export interface TeamMember {
   activeModel?: string
   /** Whether the fallback route is currently active. */
   fallbackActive?: boolean
+  /**
+   * Owner-declared tool-policy id this member selected (`#59`), absent for a
+   * member without a policy (the unchanged default behavior). The Captain
+   * model may only select a configured id; it never submits raw tool lists.
+   */
+  toolPolicy?: string
+  /**
+   * The immutable effective tool filter resolved when the member was created
+   * and handed to the child's `toolFilter`. `team.json` keeps it for audit,
+   * status, and recovery diagnostics; the continuable descriptor remains the
+   * authority that reapplies the filter to a cold-resumed child.
+   */
+  toolFilter?: MemberToolFilter
   joinedAt: number
   status: MemberStatus
   /** Execution admission is closed while a failed/pending handoff is drained. */

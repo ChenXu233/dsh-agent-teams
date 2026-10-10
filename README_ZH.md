@@ -153,9 +153,25 @@ CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后�
     memberModel: deepseek-v4
     memberMaxDepth: 0
     maxMembers: 8
+    toolPolicies:
+      researcher:
+        allow: [read, glob, grep]
+      implementer:
+        deny: [web_search]
 ```
 
 `memberMaxDepth` 默认 `0`，团队成员不能再创建子代理；显式设为 `1` 可允许一层后代，运行时和代码工具调用同样受限。默认成员统一通过团队消息汇报，避免再走宿主消息重复通知队长。无任务成员不调用模型；任务分配开启独立轮次，纠正消息进入最近的模型步骤。消息投递与读取分别记录；移除和归档必须等成员分支及待处理输入清理完成后才报告成功。
+
+`toolPolicies` 是部署方配置：按 id 复用的成员工具策略。成员只能“按 id 选择”——`agent_teams_add_member` 的 `tool_policy`、内联 `plan` 的成员行，或 profile 成员行的 `tool_policy`。队长模型只能选择已声明的策略，不能提交原始 allow/deny 列表，也不能在运行时新建策略。
+
+- `deny` 让指定全局工具从该成员的 schema 中消失，并拒绝其调用。
+- `allow` 只保留列出的全局工具；四个协调工具（`agent_teams_claim_task`、`agent_teams_update_task`、`agent_teams_send_message`、`agent_teams_status`）始终会被加入 allow 列表。
+- 队长专属工具始终被拒绝，策略无法重新打开；策略也不允许拒绝必须保留的协调工具。
+- 未知 id、空策略、空列表会在挂载时或写入成员前直接失败。
+- `agent_teams_status` 会显示每个成员选择的策略 id；完整生效过滤器保存在 `team.json` 供审计，重启后由子会话的持久 descriptor 重新应用。
+- 未配置策略的团队与成员保持原有工具集和记录结构；`agent_teams_edit_plan` 传空 `tool_policy` 可清除暂存成员的策略。
+
+这是全局工具的模型可见性与调用限制，不是 OS 沙箱，也不是授权边界。
 
 普通调研、仓库审计可用 `agent_teams_create({name, description, approval:"required", plan:{members:[{name:"researcher"}], tasks:[{id:"audit", subject:"审计现有实现", assignee:"researcher"}]}})` 一次创建完整草案。任务的 `dependencies` 引用同一批中的 `id`，支持前向引用并校验环；结果返回实际任务 ID。`kind=review` 专用于对既有 implementation/repair 任务的质量复审，普通仓库审计使用默认的 `kind=work`。
 

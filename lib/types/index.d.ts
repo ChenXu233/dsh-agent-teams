@@ -21,6 +21,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 import { type TeamProfileConfig } from './profiles.ts';
+import { type MemberToolPolicy } from './tool-policies.ts';
 export declare const name = "agent-teams";
 export declare const inject: string[];
 /** Plugin configuration. */
@@ -44,6 +45,16 @@ export interface Config {
     maxMembers?: number;
     /** Named multi-role team profiles. */
     profiles?: Record<string, TeamProfileConfig>;
+    /**
+     * Reusable per-member tool policies declared by the deployment owner (#59),
+     * keyed by policy id. A member selects one by id (`tool_policy` on
+     * `agent_teams_add_member`, a plan member, or a profile member row); the
+     * Captain model can select an existing policy but never submit raw lists.
+     * `allow` keeps only the named global tools (the four coordination tools are
+     * always added); `deny` removes the named global tools. Captain-only tools
+     * stay denied either way.
+     */
+    toolPolicies?: Record<string, MemberToolPolicy>;
     /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
     promptSectionOrder?: number;
     /**

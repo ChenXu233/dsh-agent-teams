@@ -10,6 +10,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
+import { type MemberToolPolicy } from './tool-policies.ts';
 import { type TeamState, type TeamTask } from './types.ts';
 export { steerCaptainReport } from './members.ts';
 /** Resolved plugin config consumed by the tools. */
@@ -30,6 +31,8 @@ export interface ToolsConfig {
     maxMembers: number;
     /** Named team profiles from the active DSH profile. */
     profiles: Record<string, import('./profiles.ts').TeamProfileConfig>;
+    /** Owner-declared reusable member tool policies, keyed by policy id (#59). */
+    toolPolicies: Record<string, MemberToolPolicy>;
 }
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
 export type StagedPlanMutation = {
@@ -40,6 +43,8 @@ export type StagedPlanMutation = {
     model: string;
     reasoningEffort?: string | null;
     executionPrompt?: string | null;
+    /** Selected tool-policy id; an empty string clears it back to no policy. */
+    toolPolicy?: string;
 } | {
     action: 'update_task';
     taskId: string;
