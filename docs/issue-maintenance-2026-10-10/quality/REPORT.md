@@ -222,3 +222,48 @@ pnpm typecheck                                                                ->
 ### 11.4 状态
 
 四个 issue（#161 / #174 / #175 / #183）修复完成，原 case 重跑、真实 DeepSeek Flash 路径、面板 UI 均已验收；本 session 到此保持 idle，不再改代码，等待主管独立核验与整合。
+
+## 12. 整合期发现的 #161 × #175 交叉遗漏（新 commit）
+
+主管整合时用本 session 保存的真实 S-BC candidate `team.json` 复现出一条交叉遗漏：
+
+```
+t1 implementation.changedPaths = ['lib/format.js']
+t5 repair.changedPaths         = ['lib/sum.js']        (自动轮)
+t6 verification.reviewedScope  = ['lib/sum.js']        (自动复验)
+t4 review.dependencies         = ['t6']  reviewedTaskId = 't1'  reviewedScope = ['lib/format.js']
+```
+
+预先计划的 review 被重接到复验之后，却仍只绑定最初的 source 文件；同时漂移的 verification 被无条件降级为 warning。因此在闭环之后再真实改动 `lib/sum.js` 时，**当前字节没有任何有效 review/gate 证据，Delivery 仍然是 ok**。
+
+### 12.1 修正一：verdict 绑定覆盖整条被判定的 lineage
+
+`verdictScopePatterns` 现在沿 `dependencies` + `reviewedTaskId`/`sourceTaskId` 求出闭包（`verdictLineageTasks`），收集闭包内**所有** implementation/repair 的 `changedPaths`；没有 changedPaths 时回退到闭包内的 `inScope` 模式，再单文件也没有才用 deliverables。于是被重接的 review 同时绑定 `lib/format.js`（原 source）与 `lib/sum.js`（causal repair），不会为了“换成 repair”而丢掉原 source 覆盖。该函数同时用于 claim 快照与 close 绑定，生产路径自动生效。
+
+### 12.2 修正二：漂移的 verification 不再无条件降级
+
+`verdictAuditNotes` 里 verification 特例改为：**只有被真正更晚、content-bound、且覆盖全部漂移路径的 sound verdict supersede 时**才是 warning（既有的 `covering` 分支，正常 repair + 新 review 的收敛依然成立）；没有这种证据时它是 **blocker**，要求重新复验，不得宣称已交付。review/requirements 的行为不变。
+
+### 12.3 永久真实文件系统回归（红 → 绿）
+
+新增 `scripts/quality-gates-cross-binding.test.mjs`（4 条，真实临时工作区 + 真实 symlink-free 文件读写，无 mock Context/模型），并接入 `verify:quality-gates`：
+
+1. 重接后的 review 绑定 `['lib/format.js','lib/sum.js']`；
+2. 闭环后真实改写 `lib/sum.js` → `Delivery` 必须 blocked 且 blocker 点名该文件；
+3. 旧形态（review 只绑 format，即真实 S-BC artifact 的形状）→ 漂移的 verification 必须 block（`t6 … lib/sum.js`）；
+4. 正向对照：更晚且同时绑定两者的 sound review → `ok=true`，旧 gate 报 `superseded by t9`。
+
+红证据（`git archive HEAD`(=f7c8358) 的 `lib/` + 本 case，`node --test`）：
+
+```
+not ok 1 … the review scope lost a judged artifact: ["lib/format.js"]
+not ok 2 … a changed gate input was still delivered: {"ok":true,"blockers":[],"warnings":["t6 (verification) verdict covers a revision that no longer exists: lib/sum.js changed (sha256 a8753d5f -> ebd90c2e) — re-verify …"]}
+not ok 3 … a drifted verification was demoted to a warning: {"ok":true,…}
+# pass 1 / fail 3
+```
+
+修正后：同文件 `4 pass / 0 fail`；`pnpm verify:quality-gates` → **68 pass / 0 fail**（17 既有 + 51 新增）；`pnpm typecheck`、`pnpm verify` → EXIT=0。
+
+### 12.4 未重跑的部分
+
+按指示不再重跑已完成的一次性真实 lab（S-A / S-B2 / S-BC / S-C2 / #183 的 baseline & candidate 运行均已记录并保留在 `/private/tmp`）；主管整合后的真实 case 会重新走完整 loop。§7、§9.5、§12 的未覆盖项保持不变。

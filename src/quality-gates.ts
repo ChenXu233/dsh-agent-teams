@@ -1203,12 +1203,58 @@ export function bindReviewToRevision(team: TeamState, task: TeamTask, binding: R
  * scope patterns of its contract (expanded by the caller).
  */
 export function verdictScopePatterns(team: TeamState, task: TeamTask): string[] {
+  const lineage = verdictLineageTasks(team, task)
+  // Every implementation/repair this gate transitively judges: the original
+  // source AND the repairs that followed it. A pre-planned review whose edge
+  // was rewired to a re-verification must still bind the bytes the original
+  // source changed, otherwise a later edit to the repair's target would have
+  // no valid review evidence at all (#161 x #175).
+  const changed = new Set<string>()
+  for (const item of lineage) {
+    const kind = taskKindOf(item)
+    if (kind !== 'implementation' && kind !== 'repair') continue
+    for (const path of item.changedPaths ?? []) {
+      const normalized = normalizeWorkspacePath(path)
+      if (normalized !== undefined) changed.add(normalized)
+    }
+  }
+  if (changed.size > 0) return [...changed]
+  const scope = new Set<string>([
+    ...(task.inScope ?? []),
+    ...lineage.flatMap((item) => item.inScope ?? []),
+  ])
+  if (scope.size > 0) return [...scope]
+  return (reviewedTargetOf(team, task)?.deliverables ?? [])
+    .map((path) => normalizeWorkspacePath(path))
+    .filter((path): path is string => path !== undefined)
+}
+
+/**
+ * The artifacts a gate transitively judges: follow explicit review/source
+ * links and dependency edges (a repair records the source it fixes, a
+ * verification depends on the repair, a review depends on the verification).
+ */
+function verdictLineageTasks(team: TeamState, task: TeamTask): TeamTask[] {
+  const byId = new Map(team.tasks.map((item) => [item.id, item]))
+  const visited = new Set<string>()
+  const queue = [...task.dependencies]
+  const explicit = task.reviewedTaskId ?? task.sourceTaskId
+  if (explicit !== undefined) queue.push(explicit)
   const target = reviewedTargetOf(team, task)
-  const changed = (target?.changedPaths ?? []).map((path) => normalizeWorkspacePath(path)).filter((path): path is string => path !== undefined)
-  if (changed.length > 0) return [...new Set(changed)]
-  const scope = task.inScope ?? target?.inScope ?? []
-  if (scope.length > 0) return [...scope]
-  return (target?.deliverables ?? []).map((path) => normalizeWorkspacePath(path)).filter((path): path is string => path !== undefined)
+  if (target !== undefined && target.id !== task.id) queue.push(target.id)
+  const found: TeamTask[] = []
+  while (queue.length > 0) {
+    const id = queue.shift() as string
+    if (visited.has(id)) continue
+    visited.add(id)
+    const item = byId.get(id)
+    if (item === undefined) continue
+    found.push(item)
+    queue.push(...item.dependencies)
+    const link = item.reviewedTaskId ?? item.sourceTaskId
+    if (link !== undefined) queue.push(link)
+  }
+  return found
 }
 
 /** Scope patterns recorded verdicts bound, for new-file detection. */
@@ -1429,8 +1475,11 @@ export function verdictAuditNotes(team: TeamState, audit: DeliveryAudit = {}): V
       notes.push({ taskId: item.id, level: 'warning', message: `${detail} — superseded by ${covering.id}, which binds the current bytes` })
       continue
     }
+    // A drifted gate without a sound covering verdict leaves the current bytes
+    // with no valid evidence, whether it is a review or a verification: the
+    // only difference is what the captain has to do next.
     if (kind === 'verification') {
-      notes.push({ taskId: item.id, level: 'warning', message: `${detail} — re-verify the current bytes if this revision is the one being delivered` })
+      notes.push({ taskId: item.id, level: 'blocker', message: `${detail} — re-verify the current bytes; no later sound verdict bound them` })
       continue
     }
     notes.push({ taskId: item.id, level: 'blocker', message: `${detail} — re-review the current bytes; do not report this revision as verified` })

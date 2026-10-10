@@ -110,8 +110,8 @@
     "note": "the supervisor 3081 GUI was not used; this is this branch own instance"
   },
   "repoRegression": {
-    "verifyChain": "pnpm verify:quality-gates now runs quality-gates-tdd.mjs + repair-scope + amend + content-bound + work-order + repair-wiring + excluded-scope",
-    "verifyQualityGates": "64 tests pass / 0 fail (17 pre-existing + 47 new)",
+    "verifyChain": "pnpm verify:quality-gates runs quality-gates-tdd.mjs + repair-scope + amend + content-bound + work-order + repair-wiring + excluded-scope + cross-binding",
+    "verifyQualityGates": "68 tests pass / 0 fail (17 pre-existing + 51 new)",
     "pnpmTypecheck": "exit 0",
     "pnpmVerify": "exit 0",
     "pnpmBuild": "exit 0",
@@ -138,8 +138,10 @@
       "183": "826356921d449eb83c865fabdeb3177fe94bf22ff0ef0327f4b4eb34247a2f8d"
     },
     "i183ContractProof": "d04c0439444d5bc73021bd8075f61723980afd1b871f4133210294d470d62a17",
-    "verifyQualityGatesLog": "555b6b22ba78992d4a474bf52c2dabaf3e6f1d06a19ff4c6a87c2a43bd6cade8",
-    "finalVerifyLog": "52f6558a52ba147110f353708d4e31d73e2f9469d2944d7145884a3b5b20c066"
+    "verifyQualityGatesLog": "13662f7be89d6c73398ab87bf2f64fb58ab6fa8e45d8c7e75f79e5672ef69afc",
+    "finalVerifyLog": "1368550ef013d271c2cf0a9826b88dc40a415c60049db0f90a30ed434157090f",
+    "crossRedTap": "7bce6446d9ba927c020ed2096ceff69eab7d379f793cbd74f2768dc55de62df4",
+    "crossGreenTap": "64fd826c43cbdcd5c0f4fcb605b0e294135081e31e9c2d2c92f15e87bdb56154"
   },
   "limits": [
     "no real-model run where the finding points only at .env.example",
@@ -148,21 +150,36 @@
     "mtime comparison has a 1 ms tolerance; hard links are indistinguishable from regular files"
   ],
   "libReconciliation": {
+    "gitArtifactStamp": {
+      "schema": 1,
+      "source": "8594dd3671b4a057d94973244c849f16bfcde22cc795f604c247d6ece8a4f969",
+      "output": "b3d6790b24e710874d60d0aec7857dc1e2f02a3dd923a8a48a8da3b388b2ccf7"
+    },
     "libBuildHashes": {
-      "lib/quality-gates.js": "ad6305da15f46a64c1ee03b92429dafc1701f0098db36015d47bfab2b66b5a58",
+      "lib/quality-gates.js": "63430af82ee25f981ac2d4429ffe3a9f112f7537089b96981e33bdb7a88a688e",
       "lib/artifacts.js": "b54a0a548b3512a07dbfae3ec5f8a989bbb3b108ce313fb1b393f1c82df7fd8a",
       "lib/workspace-audit.js": "0ee95370791fd2a9dcd98eae6dcda76b37cb30b743cf63be093212cffd021d16",
       "lib/tools.js": "f95f5c25a86190b8fdd20fee8cf6940cb398fa21fa66a9ad8442e45c4e2b0211",
-      "lib/scheduler.js": "235c497f6835c91313eff9a1b0905ee62569d5fba509d39d960264f135b7151e",
-      "lib/snapshot.js": "4e0863105f4fb187014829f85ec295d43e7acaf012f1064c6a9649e04e17a35a",
-      "lib/index.js": "5f6e271b3b1d0fd0b297beb3a5eebf8a5d52c81bf8e1f98c573b9a8718a8f5cf",
       "lib/client.js": "5bdeff44402d67f6e6837c4a1f6a066cc05d39b970d09298b46de581b18b0d88"
+    }
+  },
+  "crossGroupFinding": {
+    "foundBy": "supervisor integration, reproduced from this session saved S-BC candidate team.json",
+    "shape": "t1 changedPaths [lib/format.js]; t5 repair changedPaths [lib/sum.js]; t6 verification reviewedScope [lib/sum.js]; t4 review dependencies [t6] but reviewedTaskId t1 and reviewedScope [lib/format.js]",
+    "impact": "after the loop closed, a later real edit of lib/sum.js produced only a verification warning, so Delivery stayed ok with no valid review evidence for the current bytes",
+    "fix1": "verdictScopePatterns walks the judged lineage (dependencies + reviewed/source links) and binds every implementation/repair changedPaths in it, falling back to their inScope patterns",
+    "fix2": "a drifted verification is a blocker unless a later content-bound sound verdict covers every drifted path (supersession branch), so repair + new review still converges",
+    "caseFile": "scripts/quality-gates-cross-binding.test.mjs (4 real-filesystem cases, wired into verify:quality-gates)",
+    "redProof": {
+      "against": "lib/ of f7c8358",
+      "result": "pass 1 / fail 3",
+      "messages": [
+        "the review scope lost a judged artifact: [\"lib/format.js\"]",
+        "a changed gate input was still delivered: {\"ok\":true,\"blockers\":[],\"warnings\":[t6 verification … lib/sum.js changed …]}",
+        "a drifted verification was demoted to a warning: {\"ok\":true,…}"
+      ]
     },
-    "gitArtifactStamp": {
-      "schema": 1,
-      "source": "4cc1271e60cb6750941db7ec082101fc38d716826b021981fe792859919d9aa1",
-      "output": "aef2d57fd9bec9c7f2a403fb8d63ee401b777fe42ec44b00e48f146c37c98776"
-    },
-    "sourceCommitUnderTest": "76d60a01579c7ad6828340be81e0aa8fa1a37c4a"
-  }
+    "greenProof": "4 pass / 0 fail; tap evidence/candidate4-161x175.tap"
+  },
+  "sourceCommitUnderTest": "884d0a0b9f1519bed03b0ed027ffc464a0297a8f"
 }
