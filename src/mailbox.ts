@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { acknowledgeMailbox, CAPTAIN_KEY, discardMailboxMessages, findTeamByCaptain, readMailbox, readUnreadMailbox, readTeam, sanitizeKey, withTeamLock } from './state.ts'
 import type { TeamMessage, TeamState } from './types.ts'
 import { sessionOwnEvents } from './harness-compat.ts'
+import { leadIdentityOfAsync, sessionLeadsTeamAsync } from './lineage.ts'
 
 const PREFIX = 'AgentTeams inbox receipt: '
 
@@ -77,10 +78,10 @@ export function installMailboxAdmission(ctx: Context, stateDir: string): void {
     if (successfulSettlements.size > 0) {
       // Narrow containment: only AgentTeams state reads degrade silently.
       try {
-        const owned = await findTeamByCaptain(root, payload.agent.id)
+        const owned = await findTeamByCaptain(root, payload.agent.id, await leadIdentityOfAsync(ctx, payload.agent.session))
         if (owned !== undefined) await withTeamLock(`team:${root}:${owned.id}`, async () => {
           const team = await readTeam(root, owned.id)
-          if (team?.captainSessionId !== payload.agent.id || team.halted) return
+          if (team === undefined || !(await sessionLeadsTeamAsync(ctx, team, payload.agent.id)) || team.halted) return
           const reports = await readMailbox(root, team.id, CAPTAIN_KEY)
           for (const member of team.members) {
             if (!successfulSettlements.has(member.id) || member.status === 'removed' || member.stopping) continue
@@ -119,9 +120,14 @@ export function installMailboxAdmission(ctx: Context, stateDir: string): void {
         await withTeamLock(`team:${root}:${receipt.teamId}`, async () => {
           const team = await readTeam(root, receipt.teamId)
           if (team === undefined) return
+          // Captain mail is admitted for any lead session of the team: after a
+          // fork the human reads it in the fork while members still address the
+          // recorded captain. Acknowledging marks it read for both.
+          const isCaptainRecipient = receipt.recipient === CAPTAIN_KEY
+            && await sessionLeadsTeamAsync(ctx, team, payload.agent.id)
           const recipientId = receipt.recipient === CAPTAIN_KEY ? team.captainSessionId
             : team.members.find(member => member.name === receipt.recipient && member.status !== 'removed' && member.stopping !== true)?.id
-          if (recipientId !== payload.agent.id) return
+          if (!isCaptainRecipient && recipientId !== payload.agent.id) return
           const selected = (await readMailbox(root, team.id, receipt.recipient)).filter(message => batch.ids.has(message.id))
           const current = selected.filter(message => message.readAt === undefined && isCurrentMail(team, message))
           await discardMailboxMessages(root, team.id, receipt.recipient, selected.filter(message => !isCurrentMail(team, message)).map(message => message.id))
