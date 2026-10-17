@@ -112,7 +112,7 @@
 
 **不配置整个 `memberContext` 时功能完全关闭**：不注册看门狗、不向 `team.json` 写任何新字段，行为与旧版本一致。要回到旧行为：删掉整个 `memberContext`，或保留阈值并把 `onLimit` 设为 `off`（块内仍需至少一个 `maxTokens` / `maxRatio`，否则挂载时报错）。
 
-**成员级预算**：profile 成员行、内联 `plan` 成员行、`agent_teams_add_member` 的 `context_max_tokens`，以及 `agent_teams_edit_plan`（`update_member`，传 `null` 可清除）都接受一个正整数。它与插件默认进入同一次预算解析：成员级 `context_max_tokens`、插件 `maxTokens`、`floor(contextWindow × maxRatio)` 三者中**最小的那个生效**——所以成员级值只会让该成员更早压缩，不会放宽插件的上限。
+**成员级预算**：profile 成员行、内联 `plan` 成员行、`agent_teams_add_member` 的 `context_max_tokens`，以及 `agent_teams_edit_plan`（`update_member`，传 `null` 可清除）都接受一个正整数。执行前计划审查面板的成员卡片里也有「上下文预算」输入框，可直接为 staged 成员编辑同一字段：它预填该成员的**声明值**（`context_max_tokens`，不是运行期测量值），**留空/清空并保存 = 发送 `null` = 清除成员级预算、回到插件默认**。它与插件默认进入同一次预算解析：成员级 `context_max_tokens`、插件 `maxTokens`、`floor(contextWindow × maxRatio)` 三者中**最小的那个生效**——所以成员级值只会让该成员更早压缩，不会放宽插件的上限。
 
 **触发语义**：看门狗只在该成员 `agent/status` 进入 `idle` 时评测——压缩要求成员空闲且没有排队唤醒，成员正忙或有排队消息时本次跳过、下一轮空闲再评（不报错、不原地重试）。`cooldownMs` 与 `minTurnGap` 只约束重复压缩：从未压缩过的成员首次超限立即行动。用量采样写盘节流为至少 5 秒一次，`team.json` 里的数字最多滞后数秒。
 
