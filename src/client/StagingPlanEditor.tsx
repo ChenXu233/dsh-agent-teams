@@ -362,19 +362,49 @@ function StagedMemberEditor({ team, member, modelDirectory, onPendingChange, t }
   const [model, setModel] = useState(member.model ?? '')
   const [reasoningEffort, setReasoningEffort] = useState(member.reasoningEffort ?? '')
   const [executionPrompt, setExecutionPrompt] = useState(member.executionPrompt ?? '')
+  // Member context budget as a raw input string: '' means inherit the plugin
+  // default. The baseline is the member's DECLARED budget (the durable roster
+  // value the host projects as `contextBudget`) — never the runtime usage
+  // sample: a staged member that never ran has no sample, and prefilling from
+  // one would turn a model-only save into a silent `null` budget clear.
+  const initialBudget = member.contextBudget === undefined || member.contextBudget === null ? '' : String(member.contextBudget)
+  const [budgetInput, setBudgetInput] = useState(initialBudget)
   const remoteSignature = JSON.stringify([
     member.role,
     member.provider ?? '',
     member.model ?? '',
     member.reasoningEffort ?? '',
     member.executionPrompt ?? '',
+    initialBudget,
   ])
   const [savedSignature, setSavedSignature] = useState(remoteSignature)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<PlanFeedback>()
   useDismissSuccess(feedback, setFeedback)
-  const signature = JSON.stringify([role, provider, model, reasoningEffort, executionPrompt])
+  const signature = JSON.stringify([role, provider, model, reasoningEffort, executionPrompt, budgetInput])
   const dirty = signature !== savedSignature
+  /**
+   * Three-state budget semantics, aligned with the host /plan route (a missing
+   * key keeps the current value; explicit null clears it back to the plugin
+   * default): a cleared input means "clear my member-level override" and sends
+   * `context_max_tokens: null`. The prefill always reflects the member's
+   * current declared budget, so a blank box genuinely means "no member-level
+   * budget right now" — sending null for such a member is a no-op, while for
+   * one that had a budget the prefill is non-blank and blanking it is an
+   * intentional clear.
+   */
+  const budgetPayload = (): { context_max_tokens?: number | null } => {
+    const trimmed = budgetInput.trim()
+    if (trimmed === '') return { context_max_tokens: null }
+    const parsed = Number(trimmed)
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) return {}
+    return { context_max_tokens: parsed }
+  }
+  const budgetInvalid = budgetInput.trim() !== ''
+    && (() => {
+      const parsed = Number(budgetInput.trim())
+      return !Number.isSafeInteger(parsed) || parsed <= 0
+    })()
 
   useEffect(() => {
     onPendingChange(`member:${member.name}`, dirty || busy)
@@ -387,17 +417,23 @@ function StagedMemberEditor({ team, member, modelDirectory, onPendingChange, t }
     setModel(member.model ?? '')
     setReasoningEffort(member.reasoningEffort ?? '')
     setExecutionPrompt(member.executionPrompt ?? '')
+    setBudgetInput(member.contextBudget === undefined || member.contextBudget === null ? '' : String(member.contextBudget))
     setSavedSignature(remoteSignature)
-  }, [member.role, member.provider, member.model, member.reasoningEffort, member.executionPrompt, remoteSignature])
+  }, [member.role, member.provider, member.model, member.reasoningEffort, member.executionPrompt, member.contextBudget, remoteSignature])
 
   const markEdited = (): void => { setFeedback(undefined) }
   const persist = async (selection: PlanModelSelection = { provider, model, reasoningEffort }): Promise<void> => {
+    if (budgetInvalid) {
+      setFeedback({ tone: 'error', message: t('plan.member.budgetInvalid', { value: budgetInput.trim() }) })
+      return
+    }
     const nextSignature = JSON.stringify([
       role,
       selection.provider,
       selection.model,
       selection.reasoningEffort,
       executionPrompt,
+      budgetInput,
     ])
     setProvider(selection.provider)
     setModel(selection.model)
@@ -415,6 +451,7 @@ function StagedMemberEditor({ team, member, modelDirectory, onPendingChange, t }
         model: selection.model,
         reasoningEffort: selection.reasoningEffort,
         executionPrompt,
+        ...budgetPayload(),
       })
       setSavedSignature(nextSignature)
       setFeedback({ tone: 'success', message: t('plan.saved') })
@@ -461,10 +498,25 @@ function StagedMemberEditor({ team, member, modelDirectory, onPendingChange, t }
               t={t}
             />
             <label>{t('plan.member.prompt')}<textarea name="executionPrompt" value={executionPrompt} onChange={(event) => { setExecutionPrompt(event.currentTarget.value); markEdited() }} rows={3} /></label>
+            <label data-budget-invalid={budgetInvalid || undefined}>
+              {t('plan.member.budget')}
+              <input
+                name="contextMaxTokens"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                placeholder={t('plan.model.providerDefault')}
+                value={budgetInput}
+                aria-invalid={budgetInvalid || undefined}
+                onChange={(event) => { setBudgetInput(event.currentTarget.value); markEdited() }}
+              />
+              <small>{budgetInvalid ? t('plan.member.budgetInvalid', { value: budgetInput.trim() }) : t('plan.member.budgetHint')}</small>
+            </label>
           </fieldset>
           <span className={css.planActions}>
             <Feedback value={feedback} />
-            <button type="submit" disabled={busy || !dirty || provider.trim() === '' || model.trim() === ''}>
+            <button type="submit" disabled={busy || !dirty || budgetInvalid || provider.trim() === '' || model.trim() === ''}>
               {busy ? t('plan.saving') : t('plan.save')}
             </button>
           </span>
