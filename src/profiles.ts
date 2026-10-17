@@ -20,7 +20,7 @@ export const PROFILE_PROTOCOL_PROMPT_LIMIT = 240
 
 const PROFILE_KEYS = ['description', 'protocol', 'executionPrompt', 'fallback', 'members', 'tasks', 'taskPlanning', 'reviewPolicy'] as const
 const REVIEW_POLICY_KEYS = ['requirementsMinRounds', 'requirementsMaxRounds', 'codeMaxRounds', 'maxRepairAttempts', 'requiredReviewers'] as const
-const MEMBER_KEYS = ['name', 'role', 'provider', 'model', 'reasoning_effort', 'executionPrompt', 'fallback', 'tool_policy'] as const
+const MEMBER_KEYS = ['name', 'role', 'provider', 'model', 'reasoning_effort', 'executionPrompt', 'fallback', 'tool_policy', 'context_max_tokens'] as const
 const FALLBACK_KEYS = ['provider', 'model'] as const
 const TASK_KEYS = ['id', 'subject', 'description', 'assignee', 'dependencies'] as const
 
@@ -43,6 +43,11 @@ export interface TeamProfileMemberConfig {
    * profile only names a configured policy; it never carries raw tool lists.
    */
   tool_policy?: string
+  /**
+   * Per-member context budget in tokens (plan 02). Beats the plugin-level
+   * `memberContext` default; a member row without it uses the default.
+   */
+  context_max_tokens?: number
 }
 
 /** One seed-task row in a named team-profile template (unresolved). */
@@ -81,6 +86,8 @@ export interface NormalizedProfileMember {
   executionPrompt?: string
   fallback?: TeamModelFallbackConfig
   toolPolicy?: string
+  /** Resolved per-member context budget in tokens (plan 02). */
+  contextMaxTokens?: number
 }
 
 /** A profile seed task after assignee canonicalization; `sourceIndex` is the YAML order. */
@@ -467,10 +474,11 @@ function normalizeMember(
   const executionPrompt = optionalNonEmptyString(raw['executionPrompt'], `${path}.executionPrompt`)
   const fallback = normalizeFallback(raw['fallback'], `${path}.fallback`)
   const toolPolicy = optionalNonEmptyString(raw['tool_policy'], `${path}.tool_policy`)
+  const contextMaxTokens = optionalPositiveInt(raw['context_max_tokens'], `${path}.context_max_tokens`)
   if (provider !== undefined && model === undefined) {
     throw new Error(`profile member "${name}" sets provider without model`)
   }
-  return omitUndefined({ name, role, provider, model, reasoningEffort, executionPrompt, fallback, toolPolicy })
+  return omitUndefined({ name, role, provider, model, reasoningEffort, executionPrompt, fallback, toolPolicy, contextMaxTokens })
 }
 
 function normalizeFallback(value: unknown, path: string): TeamModelFallbackConfig | undefined {

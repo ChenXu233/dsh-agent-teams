@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { MemberToolFilter } from './tool-policies.ts'
-import { FINDING_SEVERITIES, REVIEW_VERDICTS, TASK_KINDS, TERMINAL_TASK_STATUSES, type ReviewFinding, type TaskStatus, type TeamMember, type TeamMessage, type TeamProfileSnapshot, type TeamState, type TeamTask } from './types.ts'
+import { FINDING_SEVERITIES, REVIEW_VERDICTS, TASK_KINDS, TERMINAL_TASK_STATUSES, type MemberContextUsage, type ReviewFinding, type TaskStatus, type TeamMember, type TeamMessage, type TeamProfileSnapshot, type TeamState, type TeamTask } from './types.ts'
 import { hasValidQualityTaskFields, isReviewPolicy, isValidFindingLine, normalizeBlankOptionalTaskFields } from './quality-gates.ts'
 import { teamLeadMatch, type LeadIdentity } from './lineage.ts'
 
@@ -762,6 +762,15 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+/** Validate the optional sampled context-usage record (plan 02). */
+function isMemberContextUsage(value: unknown): value is MemberContextUsage {
+  return isRecord(value)
+    && isFiniteNumber(value['tokens'])
+    && (value['limit'] === undefined || isFiniteNumber(value['limit']))
+    && isFiniteNumber(value['measuredAt'])
+    && (value['compactions'] === undefined || (Number.isSafeInteger(value['compactions']) && (value['compactions'] as number) >= 0))
+}
+
 /** Validate one member record at the durable JSON boundary. */
 function isTeamMember(value: unknown): value is TeamMember {
   if (!isRecord(value)) return false
@@ -782,6 +791,12 @@ function isTeamMember(value: unknown): value is TeamMember {
     // A member without a policy keeps the legacy shape: both fields stay absent.
     && isOptionalNonBlankString(value['toolPolicy'])
     && (value['toolFilter'] === undefined || isMemberToolFilter(value['toolFilter']))
+    // Plan-02 context-budget bookkeeping is optional; records written before it
+    // existed keep validating, and the fields never gate team readability.
+    && (value['contextMaxTokens'] === undefined || isFiniteNumber(value['contextMaxTokens']))
+    && (value['contextUsage'] === undefined || isMemberContextUsage(value['contextUsage']))
+    && (value['lastCompactAt'] === undefined || isFiniteNumber(value['lastCompactAt']))
+    && (value['lastShadowedTokens'] === undefined || isFiniteNumber(value['lastShadowedTokens']))
     && isFiniteNumber(value['joinedAt'])
     && (value['status'] === 'idle' || value['status'] === 'working' || value['status'] === 'removed')
 }
@@ -894,7 +909,13 @@ export function describeTeamStateDefect(raw: unknown, expectedId: string): strin
   const memberKeys = new Set<string>()
   const memberIds = new Set<string>()
   for (const [index, member] of (raw['members'] as unknown[]).entries()) {
-    if (!isTeamMember(member)) return `members[${index}] is not a valid member record`
+    if (!isTeamMember(member)) {
+      if (isRecord(member)
+        && (member['contextUsage'] !== undefined && !isMemberContextUsage(member['contextUsage']))) {
+        return `members[${index}].contextUsage is not a valid context-usage record`
+      }
+      return `members[${index}] is not a valid member record`
+    }
     const key = sanitizeKey(member.name)
     if (key === CAPTAIN_KEY) return `members[${index}]: name "${member.name}" is reserved for the captain`
     if (memberKeys.has(key)) return `members[${index}]: name "${member.name}" is already used by another member`

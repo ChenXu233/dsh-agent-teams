@@ -26,6 +26,7 @@ import { nearestLiveLead } from './lineage.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
+import { installMemberContextWatchdog, resolveMemberContextBudget, resolveMemberContextWindow, type MemberContextConfig } from './member-context.ts'
 
 /** Persona snapshot of a profile protocol; the full text lives on team.json. */
 export const PERSONA_PROTOCOL_MAX_CHARS = 400
@@ -40,6 +41,32 @@ function brandedSessionId(value: string): SessionId {
   return value as SessionId
 }
 
+/** Structural view of the optional host compaction service (plan 02). */
+interface CompactionView {
+  compactNow(agent: Agent, signal: AbortSignal, sourceCommandId?: unknown): Promise<{ shadowedTokenCount?: number } | null>
+}
+
+/** Structural view of the optional host token-meter service (plan 02). */
+interface MeterView {
+  measure(session: Session): { totalTokens: number }
+}
+
+/** Read the host token meter when mounted; undefined keeps the watchdog disabled. */
+function optionalMemberTokenMeter(ctx: Context): MeterView | undefined {
+  const meter = (ctx as unknown as { tokenMeter?: unknown }).tokenMeter
+  const measure = (meter as { measure?: unknown } | undefined)?.measure
+  return typeof measure === 'function' ? { measure: measure.bind(meter) as MeterView['measure'] } : undefined
+}
+
+/** Read the host compaction engine when mounted; undefined keeps the watchdog disabled. */
+function optionalMemberCompaction(ctx: Context): CompactionView | undefined {
+  const engine = (ctx as unknown as { compaction?: unknown }).compaction
+  const compactNow = (engine as { compactNow?: unknown } | undefined)?.compactNow
+  return typeof compactNow === 'function'
+    ? { compactNow: compactNow.bind(engine) as CompactionView['compactNow'] }
+    : undefined
+}
+
 /** Runtime knobs for member spawning, resolved from plugin config. */
 export interface MemberRuntimeConfig {
   /** Registered `ctx.subagents` provider name (must support continuable + persona). */
@@ -50,6 +77,11 @@ export interface MemberRuntimeConfig {
   executionPrompt?: string
   /** Plugin-wide fallback route. */
   fallback?: { provider: string; model: string }
+  /**
+   * Plugin-level per-member context budget (plan 02); `undefined` when the
+   * `memberContext` block is unconfigured, which installs nothing.
+   */
+  memberContext?: MemberContextConfig
 }
 
 /** Durable provider/model/reasoning snapshot for one member. */
@@ -621,7 +653,10 @@ export function installMemberSelectionRuntime(
   ctx: Context,
   stateDir: string,
   onFailureSettled?: (workspace: string, teamId: string, memberName: string) => Promise<void>,
+  /** Live view of the plugin `memberContext` config; `undefined` keeps the watchdog off. */
+  memberContextRef?: { current: MemberContextConfig | undefined },
 ): MemberSelectionRuntime {
+  const memberContextConfigRef = memberContextRef ?? { current: undefined }
   const pending = new Map<string, MemberLlmSelection>()
   installContinuableMemberSetup(ctx, (childCtx, child) => {
     const descriptor = foldSubagentDescriptor(sessionOwnEvents(child.session))
@@ -652,10 +687,28 @@ export function installMemberSelectionRuntime(
       if (!admitted) return { kind: 'reject' }
       return next()
     })
+    // Per-member context budget watchdog (plan 02). Installed only when a
+    // budget resolves: the member's own `context_max_tokens` beats the plugin
+    // `memberContext` default, `onLimit: 'off'` disables it, and a ratio-only
+    // budget without a knowable context window stays off (no guessing). With no
+    // `memberContext` configured the resolution is `undefined` and nothing here
+    // changes the previous behavior — no listener, no accounting, no fields.
+    const disposeWatchdog = installMemberContextGuard({
+      ctx,
+      childCtx,
+      child,
+      teamId,
+      memberName,
+      stateRoot,
+      parentSessionId,
+      pluginConfig: memberContextConfigRef.current,
+      meter: optionalMemberTokenMeter(ctx),
+      engine: optionalMemberCompaction(ctx),
+    })
     let selection = pending.get(key)
     if (selection === undefined) {
       const team = readTeamSync(stateRoot, teamId)
-      if (team?.captainSessionId !== parentSessionId) return disposeAdmission
+      if (team?.captainSessionId !== parentSessionId) return () => { disposeWatchdog(); disposeAdmission() }
       const durableMember = team.members.find(member => member.name === memberName)
       selection = selectionFromMember(durableMember)
       if (selection !== undefined && (descriptor.agentProvider !== durableMember?.provider || descriptor.agentModel !== durableMember?.model)) {
@@ -708,7 +761,7 @@ export function installMemberSelectionRuntime(
       }
     })
     // Legacy teams still need failure reporting even without a saved route.
-    if (selection === undefined) return () => { disposeFailure(); disposeAdmission() }
+    if (selection === undefined) return () => { disposeWatchdog(); disposeFailure(); disposeAdmission() }
     const selectionRef = { current: modelSelection(selection), assembled: undefined as ModelSelection | undefined }
     const disposeSelection = installModelSelection(childCtx, selectionRef)
     const fallback = selection.fallback
@@ -736,6 +789,7 @@ export function installMemberSelectionRuntime(
     return () => {
       disposeFallback()
       disposeSelection()
+      disposeWatchdog()
       disposeFailure()
       disposeAdmission()
     }
@@ -1092,3 +1146,153 @@ export function memberActivity(
   }
   return activity
 }
+
+/**
+ * Resolve and install one member's idle context watchdog, or return a no-op
+ * disposer when no budget applies. Pure wiring: the decision policy lives in
+ * {@link decideMemberContextAction} and the watchdog in
+ * {@link installMemberContextWatchdog}, both unit-testable without a Harness.
+ *
+ * Budget priority: the durable member row `context_max_tokens` beats the
+ * plugin `memberContext` default. The context window comes from the routed
+ * model info; unknown windows disable ratio-only budgets rather than guessing.
+ */
+function installMemberContextGuard(input: {
+  ctx: Context
+  childCtx: Context
+  child: Agent
+  teamId: string
+  memberName: string
+  stateRoot: string
+  parentSessionId: string
+  pluginConfig: MemberContextConfig | undefined
+  meter: MeterView | undefined
+  engine: CompactionView | undefined
+}): () => void {
+  const { ctx, childCtx, child, teamId, memberName, stateRoot, parentSessionId } = input
+  const config = input.pluginConfig
+  const meter = input.meter
+  const engine = input.engine
+  // Fast path: nothing configured, or the host lacks the services the
+  // watchdog needs (minimal compositions). Exactly the previous behavior.
+  if (config === undefined || config.onLimit === 'off') return () => undefined
+  if (meter === undefined || engine === undefined) {
+    ctx.logger.info('agent-teams: memberContext configured but the host exposes no tokenMeter/compaction service; per-member context budgets stay disabled')
+    return () => undefined
+  }
+  const durableMember = readTeamSync(stateRoot, teamId)?.members.find(item => item.name === memberName)
+  // Per-setup watchdog disposers; the returned closure releases them all.
+  const active: (() => void)[] = []
+  void resolveMemberContextWindow(child).then((contextWindow) => {
+    const budget = resolveMemberContextBudget({
+      memberContextMaxTokens: durableMember?.contextMaxTokens,
+      config,
+      contextWindow,
+    })
+    if (budget === undefined) {
+      if (config.maxRatio !== undefined && durableMember?.contextMaxTokens === undefined && contextWindow === undefined) {
+        ctx.logger.info(`agent-teams: member "${memberName}" has a ratio-only context budget but no knowable context window; watchdog disabled for it`)
+      }
+      return
+    }
+    let lastSampleWrittenAt = 0
+    // Throttle durable sampling (plan 02: >= 5s between writes) so idle events
+    // cannot hammer team.json; the watchdog still evaluates every idle event.
+    const SAMPLE_THROTTLE_MS = 5_000
+    const COMPACT_TIMEOUT_MS = 120_000
+
+    const writeSample = (tokens: number): void => {
+      const now = Date.now()
+      if (now - lastSampleWrittenAt < SAMPLE_THROTTLE_MS) return
+      lastSampleWrittenAt = now
+      void withTeamLock(`team:${stateRoot}:${teamId}`, async () => {
+        const team = await readTeam(stateRoot, teamId)
+        if (team === undefined || team.captainSessionId !== parentSessionId) return
+        const member = team.members.find(item => item.name === memberName && item.id === child.id)
+        if (member === undefined || member.status === 'removed') return
+        member.contextUsage = {
+          tokens,
+          limit: budget.tokens,
+          measuredAt: now,
+          ...member.contextUsage?.compactions === undefined ? {} : { compactions: member.contextUsage.compactions },
+        }
+        await writeTeam(stateRoot, team)
+      }).catch((error: unknown) => {
+        ctx.logger.warn(`agent-teams: failed to record context usage for "${memberName}": ${String(error)}`)
+      })
+    }
+
+    const disposeWatchdog = installMemberContextWatchdog({
+      onStatus: (handler) => childCtx.on('agent/status', (payload: { agent: Agent; status: string }) => {
+        // Thin adapter for the frozen deps shape: the host payload carries the
+        // Agent while deps want the id; the watchdog filters and counts turns.
+        handler({ agentId: payload.agent.id, status: payload.status })
+      }),
+      measureTokens: () => {
+        const used = meter.measure(child.session).totalTokens
+        // Throttled durable sampling keeps the latest reading visible even when
+        // below budget; the watchdog consumes the same measurement directly.
+        if (used !== undefined && Number.isFinite(used)) writeSample(used)
+        return used
+      },
+      compact: async () => {
+        // Race guard: the idle event that admitted this compaction may already
+        // be stale by the time the async body runs.
+        if (child.status !== 'idle') return null
+        try {
+          return await engine.compactNow(child, AbortSignal.timeout(COMPACT_TIMEOUT_MS), undefined)
+        } catch (error: unknown) {
+          // ManualCompactionError('busy') is the normal race against queued
+          // waking work: absorb it silently and never retry here — the next
+          // idle event re-evaluates from scratch (plan-02 contract).
+          if (isBusyCompactionError(error)) return null
+          throw error
+        }
+      },
+      record: (event) => {
+        if (event.kind === 'measured') return // sampling already persisted it
+        if (event.kind === 'compacted') {
+          void withTeamLock(`team:${stateRoot}:${teamId}`, async () => {
+            const team = await readTeam(stateRoot, teamId)
+            if (team === undefined || team.captainSessionId !== parentSessionId) return
+            const member = team.members.find(item => item.name === memberName && item.id === child.id)
+            if (member === undefined || member.status === 'removed') return
+            member.lastCompactAt = Date.now()
+            member.lastShadowedTokens = event.shadowedTokens
+            const previous = member.contextUsage?.compactions ?? 0
+            member.contextUsage = {
+              tokens: meter.measure(child.session).totalTokens,
+              limit: budget.tokens,
+              measuredAt: Date.now(),
+              compactions: previous + 1,
+            }
+            await writeTeam(stateRoot, team)
+          }).catch((error: unknown) => {
+            ctx.logger.warn(`agent-teams: failed to record compaction for "${memberName}": ${String(error)}`)
+          })
+        }
+        // 'notified' | 'skipped' | 'failed' need no durable record yet.
+      },
+      log: (level, message) => ctx.logger[level](`agent-teams: member "${memberName}" ${message}`),
+    }, {
+      memberAgentId: child.id,
+      budgetTokens: budget.tokens,
+      config: {
+        onLimit: config.onLimit,
+        cooldownMs: config.cooldownMs,
+        minTurnGap: config.minTurnGap,
+      },
+    })
+    active.push(disposeWatchdog)
+  }).catch(() => undefined)
+  return () => {
+    for (const dispose of active.splice(0)) dispose()
+  }
+}
+
+/** Whether an error is the expected busy rejection of an idle compaction. */
+function isBusyCompactionError(error: unknown): boolean {
+  return error instanceof Error && (error as { name?: string }).name === 'ManualCompactionError'
+    && (error as { code?: string }).code === 'busy'
+}
+

@@ -44,6 +44,7 @@ import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
 import { installTeamCapabilities } from './capabilities.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
+import { parseMemberContextConfig, type MemberContextConfig } from './member-context.ts'
 
 import { authenticatedWebRoutes, readJsonRequest, RequestBodyError, type BrowserRequestGate, type WebRouteHost } from './web-routes.ts'
 
@@ -53,7 +54,13 @@ const WEB_SERVER_KEYS = ['webServer', 'httpServer'] as const
 const WORKSPACE_KEYS = ['workspaceRegistry', 'workspace'] as const
 
 export const name = 'agent-teams'
-export const inject = ['tools', 'llm', 'subagents', 'systemPrompt', 'agents']
+// `tokenMeter` and `compaction` power the optional per-member context budget
+// (plan 02). Both services ship in every standard Harness composition — the
+// desktop profile mounts `token-meter` and a `compaction-basic` engine
+// (cordis.yml `plugins:` rows) — but a minimal composition may omit them, so
+// they are read defensively at the watchdog boundary: plugin loading never
+// requires them, and an unconfigured `memberContext` keeps zero new behavior.
+export const inject = ['tools', 'llm', 'subagents', 'systemPrompt', 'agents', 'tokenMeter', 'compaction']
 
 /** Plugin configuration. */
 export interface Config {
@@ -100,6 +107,14 @@ export interface Config {
    * stay denied either way.
    */
   toolPolicies?: Record<string, MemberToolPolicy>
+  /**
+   * Plugin-level per-member context budget (plan 02). A member's own
+   * `context_max_tokens` (profile row, `agent_teams_add_member`, plan member,
+   * or `edit_plan` update) beats this default; when both a ratio and an
+   * absolute value resolve, the smaller budget wins. When the whole object is
+   * absent nothing is registered: no watchdog, no fields, no behavior change.
+   */
+  memberContext?: MemberContextConfig
   /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
   promptSectionOrder?: number
   /**
@@ -127,6 +142,17 @@ const toolPolicyConfig = z.union([
   z.object({ allow: z.const(undefined), deny: z.array(z.string()).min(1).required() }),
   z.object({ allow: z.array(z.string()).min(1).required(), deny: z.array(z.string()).min(1).required() }),
 ])
+
+// Plan-02 budget thresholds. `maxTokens` and `maxRatio` are alternatives; the
+// resolved budget takes the smaller of whichever are set, and a ratio without
+// a knowable model context window disables the watchdog instead of guessing.
+const memberContextConfig = z.object({
+  maxTokens: z.natural(),
+  maxRatio: z.number(),
+  cooldownMs: z.natural().default(60_000),
+  minTurnGap: z.natural().default(1),
+  onLimit: z.union([z.const('compact'), z.const('notify'), z.const('off')]).default('compact'),
+})
 
 export const Config: z<Config> = z.object({
   stateDir: z.string().default('.agent-teams'),
@@ -168,6 +194,7 @@ export const Config: z<Config> = z.object({
     })),
   })).default({}),
   toolPolicies: z.dict(toolPolicyConfig).default({}),
+  memberContext: memberContextConfig,
   memberMaxDepth: z.natural().default(0),
   maxMembers: z.natural().min(1).default(8),
   promptSectionOrder: z.natural().default(117),
@@ -204,6 +231,10 @@ export function apply(ctx: Context, config: Config): void {
     // Owner configuration is validated once, at mount: an empty or malformed
     // policy must never reach a member creation path.
     toolPolicies: parseToolPolicies(config.toolPolicies),
+    // Validated once at mount; `undefined` when the whole `memberContext` block
+    // is absent, which keeps every downstream path on the previous behavior
+    // (no watchdog, no accounting, no extra fields).
+    memberContext: parseMemberContextConfig(config.memberContext),
   }
 
   // Provider registration is a sibling plugin's effect (`subagent-spawn` /
