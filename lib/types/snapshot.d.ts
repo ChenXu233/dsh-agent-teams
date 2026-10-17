@@ -27,6 +27,21 @@ export interface TeamActivityMember {
     readonly total: number;
     readonly currentTask: string;
     readonly unread: number;
+    /**
+     * Latest context usage of this member (plan 02, frozen client shape).
+     * Durable team.json sample; live agents may carry fresher tokens. Absent
+     * until the first idle sample, so unconfigured deployments keep the exact
+     * previous payload.
+     */
+    readonly context?: {
+        tokens: number;
+        limit?: number;
+        ratio?: number;
+        compactions?: number;
+        measuredAt?: number;
+    };
+    /** True when `context.tokens` was measured from the resident agent this snapshot. */
+    readonly contextLive?: boolean;
 }
 /** One task row of the activity snapshot. */
 export interface TeamActivityTask {

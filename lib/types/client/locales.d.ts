@@ -74,6 +74,11 @@ export declare const zh: {
     'member.status.settled': string;
     'member.status.discarded': string;
     'member.status.stopped': string;
+    'member.context.usage': string;
+    'member.context.usageNoLimit': string;
+    'member.context.compactions': string;
+    'member.context.aria': string;
+    'member.context.ariaOver': string;
     'task.assignee.unclaimed': string;
     'task.summary.waitingBreakdown': string;
     'task.summary.staged': string;
@@ -289,6 +294,11 @@ export declare const en: {
     'member.status.settled': string;
     'member.status.discarded': string;
     'member.status.stopped': string;
+    'member.context.usage': string;
+    'member.context.usageNoLimit': string;
+    'member.context.compactions': string;
+    'member.context.aria': string;
+    'member.context.ariaOver': string;
     'task.assignee.unclaimed': string;
     'task.summary.waitingBreakdown': string;
     'task.summary.staged': string;

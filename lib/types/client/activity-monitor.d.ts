@@ -1,4 +1,17 @@
 /** Shared, demand-driven state for the AgentTeams browser monitor. */
+/**
+ * Plan 02 member context sample exactly as the host projects it in
+ * `src/snapshot.ts` (tokens / limit / ratio / compactions / measuredAt).
+ * Kept as a named type so the view can reference the non-null shape without
+ * re-declaring — and drifting from — the wire contract.
+ */
+export interface ActivityMemberContext {
+    readonly tokens: number;
+    readonly limit?: number;
+    readonly ratio?: number;
+    readonly compactions?: number;
+    readonly measuredAt?: number;
+}
 /** One member row of a host snapshot. */
 export interface ActivityMember {
     readonly id: string;
@@ -15,6 +28,14 @@ export interface ActivityMember {
     readonly total: number;
     readonly currentTask: string;
     readonly unread: number;
+    /**
+     * Latest context usage of this member (plan 02). Durable team.json sample
+     * mirrored from the host projection; `null` is tolerated exactly like an
+     * absent sample so a partial payload never renders as an empty badge shell.
+     */
+    readonly context?: ActivityMemberContext | null;
+    /** True when `context.tokens` was measured from the resident agent this snapshot. */
+    readonly contextLive?: boolean;
 }
 /** One task row of a host snapshot. */
 export interface ActivityTask {

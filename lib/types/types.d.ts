@@ -216,6 +216,21 @@ export interface TeamTask {
 }
 /** Member lifecycle status. */
 export type MemberStatus = 'idle' | 'working' | 'removed';
+/**
+ * Latest sampled context usage of one member (plan 02). Written only by the
+ * plugin-side idle watchdog; every field except `measuredAt` is optional so
+ * older team.json records keep reading unchanged.
+ */
+export interface MemberContextUsage {
+    /** Most recent measured context size in tokens. */
+    tokens: number;
+    /** The budget this member was installed with, when one was resolved. */
+    limit?: number;
+    /** Epoch ms of the sample. */
+    measuredAt: number;
+    /** Cumulative automatic idle compactions performed for this member. */
+    compactions?: number;
+}
 /** One team member: a continuable subagent plus its team-side record. */
 export interface TeamMember {
     /** Durable continuable subagent session id (empty until spawned). */
@@ -262,6 +277,18 @@ export interface TeamMember {
      * member. Cleared by the next successful start.
      */
     spawnError?: string;
+    /**
+     * Per-member context budget from the roster row (`context_max_tokens`);
+     * beats the plugin-level `memberContext` default (plan 02). Absent for
+     * members without a member-level override.
+     */
+    contextMaxTokens?: number;
+    /** Latest sampled context usage; absent until the idle watchdog samples once. */
+    contextUsage?: MemberContextUsage;
+    /** Epoch ms of the last idle compaction the watchdog performed. */
+    lastCompactAt?: number;
+    /** Shadowed token count of that compaction. */
+    lastShadowedTokens?: number;
 }
 /** One mailbox message. */
 export interface TeamMessage {

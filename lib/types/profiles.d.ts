@@ -32,6 +32,11 @@ export interface TeamProfileMemberConfig {
      * profile only names a configured policy; it never carries raw tool lists.
      */
     tool_policy?: string;
+    /**
+     * Per-member context budget in tokens (plan 02). Beats the plugin-level
+     * `memberContext` default; a member row without it uses the default.
+     */
+    context_max_tokens?: number;
 }
 /** One seed-task row in a named team-profile template (unresolved). */
 export interface TeamProfileTaskConfig {
@@ -67,6 +72,8 @@ export interface NormalizedProfileMember {
     executionPrompt?: string;
     fallback?: TeamModelFallbackConfig;
     toolPolicy?: string;
+    /** Resolved per-member context budget in tokens (plan 02). */
+    contextMaxTokens?: number;
 }
 /** A profile seed task after assignee canonicalization; `sourceIndex` is the YAML order. */
 export interface NormalizedProfileTask {

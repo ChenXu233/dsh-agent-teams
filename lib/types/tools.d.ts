@@ -11,6 +11,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { type MemberToolPolicy } from './tool-policies.ts';
+import type { MemberContextConfig } from './member-context.ts';
 import type { ArtifactSnapshot } from './types.ts';
 import { type TeamState, type TeamTask } from './types.ts';
 export { steerCaptainReport } from './members.ts';
@@ -36,6 +37,12 @@ export interface ToolsConfig {
     profiles: Record<string, import('./profiles.ts').TeamProfileConfig>;
     /** Owner-declared reusable member tool policies, keyed by policy id (#59). */
     toolPolicies: Record<string, MemberToolPolicy>;
+    /**
+     * Plugin-level per-member context budget (plan 02); `undefined` when the
+     * `memberContext` block is unconfigured, which disables the watchdog and all
+     * accounting.
+     */
+    memberContext?: MemberContextConfig;
 }
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
 export type StagedPlanMutation = {
@@ -48,6 +55,8 @@ export type StagedPlanMutation = {
     executionPrompt?: string | null;
     /** Selected tool-policy id; an empty string clears it back to no policy. */
     toolPolicy?: string;
+    /** Per-member context budget in tokens (plan 02); a new number sets it, null clears it. */
+    contextMaxTokens?: number | null;
 } | {
     action: 'update_task';
     taskId: string;

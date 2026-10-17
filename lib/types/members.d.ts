@@ -16,6 +16,7 @@ import { type Agent } from '@deepseek-ai/dsh-agent';
 import type { Session } from '@deepseek-ai/dsh-session';
 import type { MemberToolFilter } from './tool-policies.ts';
 import { type TeamMember, type TeamState, type TeamTask } from './types.ts';
+import { type MemberContextConfig } from './member-context.ts';
 /** Persona snapshot of a profile protocol; the full text lives on team.json. */
 export declare const PERSONA_PROTOCOL_MAX_CHARS = 400;
 /** Runtime knobs for member spawning, resolved from plugin config. */
@@ -31,6 +32,11 @@ export interface MemberRuntimeConfig {
         provider: string;
         model: string;
     };
+    /**
+     * Plugin-level per-member context budget (plan 02); `undefined` when the
+     * `memberContext` block is unconfigured, which installs nothing.
+     */
+    memberContext?: MemberContextConfig;
 }
 /** Durable provider/model/reasoning snapshot for one member. */
 export interface MemberLlmSelection {
@@ -223,7 +229,11 @@ export declare function resolveMemberLlmSelection(ctx: Context, captain: Agent, 
  * record. Legacy members without a complete saved route retain Harness's
  * descriptor provider/model behavior.
  */
-export declare function installMemberSelectionRuntime(ctx: Context, stateDir: string, onFailureSettled?: (workspace: string, teamId: string, memberName: string) => Promise<void>): MemberSelectionRuntime;
+export declare function installMemberSelectionRuntime(ctx: Context, stateDir: string, onFailureSettled?: (workspace: string, teamId: string, memberName: string) => Promise<void>, 
+/** Live view of the plugin `memberContext` config; `undefined` keeps the watchdog off. */
+memberContextRef?: {
+    current: MemberContextConfig | undefined;
+}): MemberSelectionRuntime;
 /**
  * The member's system prompt (persona), shadowing the deployment persona for
  * that child. Self-contained: it replaces the whole persona section.
