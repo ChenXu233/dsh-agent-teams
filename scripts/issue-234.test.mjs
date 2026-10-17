@@ -32,7 +32,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { registerAgentTeamsTools } from '../lib/tools.js'
-import { sanitizeKey } from '../lib/state.js'
+import { readTeam, sanitizeKey, writeTeam } from '../lib/state.js'
 
 const requireTools = createRequire(import.meta.resolve('@deepseek-ai/dsh-tools'))
 const { createScope } = await import(pathToFileURL(requireTools.resolve('@deepseek-ai/dsh-scope')).href)
@@ -120,6 +120,17 @@ async function mount() {
     agent,
     signal: new AbortController().signal,
   })
+  /** Dispatch any registered tool through the same real runtime path. */
+  const executeTool = (agent, name, args) => host.tools.execute({
+    name,
+    arguments: args,
+    callId: `issue-234-${name}-${++seq}`,
+    agent,
+    signal: new AbortController().signal,
+  })
+  const stateRoot = join(workspace, '.agent-teams')
+  const loadTeam = teamId => readTeam(stateRoot, teamId)
+  const saveTeam = team => writeTeam(stateRoot, team)
   const teamPath = teamId => join(workspace, '.agent-teams', teamId, 'team.json')
   const readCreated = async teamId => JSON.parse(await readFile(teamPath(teamId), 'utf8'))
   const exists = async teamId => {
@@ -130,7 +141,16 @@ async function mount() {
       return false
     }
   }
-  return { createCaptain, execute, readCreated, exists, dispose: () => rm(workspace, { recursive: true, force: true }) }
+  return {
+    createCaptain,
+    execute,
+    executeTool,
+    loadTeam,
+    saveTeam,
+    readCreated,
+    exists,
+    dispose: () => rm(workspace, { recursive: true, force: true }),
+  }
 }
 
 for (const [label, plan] of [['an empty-array shell', EMPTY_ARRAY_SHELL], ['a placeholder-member shell', PLACEHOLDER_MEMBER_SHELL]]) {
@@ -233,6 +253,171 @@ await test('a blank profile plus an empty shell equals "neither provided" (issue
     assert.equal(team.profile, undefined)
     assert.deepEqual(team.members, [])
     assert.deepEqual(team.tasks, [])
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+/**
+ * Mount a running team with one spawned member ("fixer"), a sibling member
+ * ("scout") and the tasks the claim_task cases below need. Real gateways
+ * materialize the deprecated `assignee` argument, so the claim path is driven
+ * with the exact shapes a model sends.
+ * @param extraTasks - additional tasks appended to the fixture roster.
+ * @returns the fixture plus the captain / member / sibling agents.
+ */
+async function mountRunningTeam(extraTasks = []) {
+  const fixture = await mount()
+  const captain = fixture.createCaptain('captain-claim')
+  const fixer = fixture.createCaptain('member-fixer')
+  const scout = fixture.createCaptain('member-scout')
+  const created = await fixture.execute(captain, { name: 'Claim Team', approval: 'required', profile: PROFILE })
+  assert.equal(created.isError, false, JSON.stringify(created))
+  const team = await fixture.loadTeam(created.value.team_id)
+  const now = Date.now()
+  const task = (id, subject, assignee, status, extra = {}) => ({
+    id,
+    subject,
+    status,
+    assignee,
+    dependencies: [],
+    attempt: 0,
+    createdAt: now,
+    updatedAt: now,
+    ...extra,
+  })
+  team.phase = 'running'
+  delete team.planReviewState
+  team.members = [
+    { ...team.members[0], id: fixer.id },
+    { id: scout.id, name: 'scout', role: 'analyst', provider: 'fake', model: 'fake-model', joinedAt: now, status: 'idle' },
+  ]
+  team.tasks = [
+    task('t1', 'member task', 'fixer', 'pending'),
+    task('t2', 'other member task', 'scout', 'pending'),
+    task('t3', 'captain takeover', 'captain', 'claimed', { attempt: 1, attemptId: 'captain-attempt-1' }),
+    ...extraTasks,
+  ]
+  team.taskSeq = team.tasks.length
+  await fixture.saveTeam(team)
+  return { fixture, captain, fixer, scout, teamId: team.id }
+}
+
+await test('a member claim ignores a blank or self-named materialized assignee (issue #234 follow-up)', async () => {
+  const { fixture, fixer, teamId } = await mountRunningTeam()
+  try {
+    const blank = await fixture.executeTool(fixer, 'agent_teams_claim_task', { task_id: 't1', assignee: '' })
+    assert.equal(blank.isError, false, JSON.stringify(blank))
+    assert.doesNotMatch(JSON.stringify(blank), /members cannot set assignee when claiming a task/)
+    assert.equal(blank.value.assignee, 'fixer')
+    assert.equal(blank.value.status, 'claimed')
+    assert.equal(typeof blank.value.attempt_id, 'string')
+    let team = await fixture.loadTeam(teamId)
+    assert.equal(team.tasks.find(entry => entry.id === 't1').status, 'claimed')
+    assert.equal(team.tasks.find(entry => entry.id === 't1').attemptId, blank.value.attempt_id)
+
+    // Restating the caller's own member name asks for exactly what a claim does;
+    // the retry the gateway produced must return the same attempt, not an error.
+    const selfNamed = await fixture.executeTool(fixer, 'agent_teams_claim_task', { task_id: 't1', assignee: 'fixer' })
+    assert.equal(selfNamed.isError, false, JSON.stringify(selfNamed))
+    assert.doesNotMatch(JSON.stringify(selfNamed), /members cannot set assignee when claiming a task/)
+    assert.equal(selfNamed.value.assignee, 'fixer')
+    assert.equal(selfNamed.value.attempt_id, blank.value.attempt_id)
+
+    const padded = await fixture.executeTool(fixer, 'agent_teams_claim_task', { task_id: 't1', assignee: '  fixer  ' })
+    assert.equal(padded.isError, false, JSON.stringify(padded))
+    assert.equal(padded.value.attempt_id, blank.value.attempt_id)
+
+    team = await fixture.loadTeam(teamId)
+    assert.equal(team.tasks.find(entry => entry.id === 't1').assignee, 'fixer')
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+await test('a member claim still rejects redirecting the assignee at another member (issue #234 follow-up)', async () => {
+  const { fixture, fixer, teamId } = await mountRunningTeam()
+  try {
+    const result = await fixture.executeTool(fixer, 'agent_teams_claim_task', { task_id: 't2', assignee: 'scout' })
+    assert.equal(result.isError, true, JSON.stringify(result))
+    assert.match(JSON.stringify(result), /members cannot set assignee when claiming a task/)
+    const team = await fixture.loadTeam(teamId)
+    const task = team.tasks.find(entry => entry.id === 't2')
+    assert.equal(task.status, 'pending')
+    assert.equal(task.assignee, 'scout')
+    assert.equal(task.attemptId, undefined)
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+await test('a captain claim ignores a blank materialized assignee (issue #234 follow-up)', async () => {
+  const { fixture, captain, teamId } = await mountRunningTeam()
+  try {
+    const result = await fixture.executeTool(captain, 'agent_teams_claim_task', { task_id: 't3', assignee: '   ' })
+    assert.equal(result.isError, false, JSON.stringify(result))
+    assert.doesNotMatch(JSON.stringify(result), /captains must use agent_teams_reassign_task/)
+    assert.equal(result.value.assignee, 'captain')
+    assert.equal(result.value.attempt_id, 'captain-attempt-1')
+    const team = await fixture.loadTeam(teamId)
+    assert.equal(team.tasks.find(entry => entry.id === 't3').assignee, 'captain')
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+await test('a captain claim still rejects a non-empty assignee (issue #234 follow-up)', async () => {
+  const { fixture, captain } = await mountRunningTeam()
+  try {
+    const result = await fixture.executeTool(captain, 'agent_teams_claim_task', { task_id: 't1', assignee: 'fixer' })
+    assert.equal(result.isError, true, JSON.stringify(result))
+    assert.match(JSON.stringify(result), /captains must use agent_teams_reassign_task/)
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+await test('a member cannot claim a task assigned to another member (issue #234 follow-up)', async () => {
+  const { fixture, fixer, teamId } = await mountRunningTeam()
+  try {
+    // Both gateway shapes must hit the ownership guard: a materialized blank and
+    // the caller restating its own name. Neither may take scout's task.
+    for (const assignee of ['', 'fixer']) {
+      const before = (await fixture.loadTeam(teamId)).tasks.find(entry => entry.id === 't2')
+      assert.equal(before.assignee, 'scout')
+      assert.equal(before.status, 'pending')
+      const result = await fixture.executeTool(fixer, 'agent_teams_claim_task', { task_id: 't2', assignee })
+      assert.equal(result.isError, true, JSON.stringify(result))
+      // The ownership guard names the actual owner, so the rejection is diagnosable.
+      assert.match(result.error.message, /^task t2 is assigned to "scout", not you$/)
+      const after = (await fixture.loadTeam(teamId)).tasks.find(entry => entry.id === 't2')
+      assert.equal(after.assignee, 'scout')
+      assert.equal(after.status, 'pending')
+      assert.equal(after.attempt, 0)
+      assert.equal(after.attemptId, undefined)
+      assert.notEqual(after.assignee, 'fixer')
+    }
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+await test('a captain cannot read a member attempt through a blank assignee (issue #234 follow-up)', async () => {
+  // scout already holds this task, so the attempt id belongs to a member (#125).
+  const { fixture, captain, teamId } = await mountRunningTeam([
+    { id: 't4', subject: 'member claimed task', status: 'claimed', assignee: 'scout', dependencies: [], attempt: 1, attemptId: 'member-attempt-1', createdAt: Date.now(), updatedAt: Date.now() },
+  ])
+  try {
+    const result = await fixture.executeTool(captain, 'agent_teams_claim_task', { task_id: 't4', assignee: '' })
+    assert.equal(result.isError, true, JSON.stringify(result))
+    assert.match(result.error.message, /captains must use agent_teams_reassign_task/)
+    // The member's capability must not leak through the captain's read.
+    assert.doesNotMatch(JSON.stringify(result), /member-attempt-1/)
+    const task = (await fixture.loadTeam(teamId)).tasks.find(entry => entry.id === 't4')
+    assert.equal(task.assignee, 'scout')
+    assert.equal(task.status, 'claimed')
+    assert.equal(task.attempt, 1)
+    assert.equal(task.attemptId, 'member-attempt-1')
   } finally {
     await fixture.dispose()
   }
