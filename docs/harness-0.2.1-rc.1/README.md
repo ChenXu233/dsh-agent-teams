@@ -2,7 +2,7 @@
 
 目标为官方 `dsh-v0.2.1-rc.1`，commit `1600d8a1e140dcde43a1a0941940a0480712c011`。对照基线为 `dsh-v0.2.0-rc.2`。用户提供的本地 Harness checkout 与目标 tag 一致，工作树干净；本次未修改该参考仓库。
 
-插件起点为 `1094b84add6f2fb19edf659367fe2fd5f7f14154` / `0.1.23`。适配候选为 `0.1.24-rc.1`，尚未发布，发布渠道预定 `next`。
+插件起点为 `1094b84add6f2fb19edf659367fe2fd5f7f14154` / `0.1.23`。适配版本为 `0.1.24-rc.1`，已发布到 npm `next`。发布源码为 `33f29cd`，完整 CI 验收与 registry 产物记录见[发布记录](publication.json)。
 
 ## 已核实的变化及处理
 
@@ -24,7 +24,7 @@
 
 未验证真实模型服务、交互式浏览器、Electron 桌面安装、其他操作系统和真实用户数据迁移。更早的历史宿主仍保留兼容分支和 CI 矩阵，本次本地实测范围以运行摘要为准。
 
-## 最终结果（2026-10-17）
+## 本地候选验收结果（2026-10-17）
 
 - `pnpm typecheck`、`pnpm build`、完整 `pnpm verify` 全部通过；无跳过的已失败基线检查。
 - 新宿主：293 个精确 DSH 包，10/10 真实 CLI 场景通过，见 [运行摘要](runtime-0.2.1-rc.1.json) 与 [依赖闭包](cohort-0.2.1-rc.1.json)。
@@ -43,4 +43,6 @@ pnpm pack --out /tmp/agent-teams-candidate.tgz
 node scripts/harness-runtime-verify.mjs --host-version 0.2.1-rc.1 --artifact /tmp/agent-teams-candidate.tgz --report-dir /tmp/agent-teams-new-run
 ```
 
-用新的 report-dir 隔离每轮状态，不能复用有旧团队/trace 的场景目录。后续发布仍需按维护流程完成全支持矩阵、其他平台和实际服务的适用验收；本次未创建提交、推送或发布。
+用新的 report-dir 隔离每轮状态，不能复用有旧团队/trace 的场景目录。该本地候选之后仅调整发布文档及 Windows 测试初始文件时间。正式发布流水线完成 Ubuntu/Windows 检查和全部 9 个宿主的 CLI 验收；npm 包逐字节匹配 CI 产物，`latest` 仍为 `0.1.23`。真实模型、交互式浏览器及 Electron 的限制仍适用。
+
+从官方 registry 下载发布包并安装到隔离 Harness `0.2.1-rc.1` 后，stability 场景通过，覆盖热重载、工具准入、消息续接、重派与归档，见[发布后消费者复验](published-consumer.json)。
