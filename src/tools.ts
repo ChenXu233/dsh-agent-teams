@@ -12,7 +12,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
@@ -71,6 +71,7 @@ import { readArtifactScope, snapshotWorkspacePaths, workspacePathExists } from '
 import { restrictableToolNames } from './harness-compat.ts'
 import { memberSpawnRelaxableDeny, optionalToolPolicy, requireToolPolicy, resolveMemberToolFilter, type MemberToolFilter, type MemberToolPolicy } from './tool-policies.ts'
 import type { ContractAmendmentInput } from './state.ts'
+import type { MemberContextConfig, MemberContextWatchdogDeps } from './member-context.ts'
 import type { AcceptanceResult, ArtifactDigest, ArtifactSnapshot, CommandResult, ReviewFinding, ReviewVerdict, TaskKind } from './types.ts'
 import {
   deliverToMember,
@@ -114,6 +115,12 @@ export interface ToolsConfig {
   profiles: Record<string, import('./profiles.ts').TeamProfileConfig>
   /** Owner-declared reusable member tool policies, keyed by policy id (#59). */
   toolPolicies: Record<string, MemberToolPolicy>
+  /**
+   * Plugin-level per-member context budget (plan 02); `undefined` when the
+   * `memberContext` block is unconfigured, which disables the watchdog and all
+   * accounting.
+   */
+  memberContext?: MemberContextConfig
 }
 
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
@@ -128,6 +135,8 @@ export type StagedPlanMutation =
       executionPrompt?: string | null
       /** Selected tool-policy id; an empty string clears it back to no policy. */
       toolPolicy?: string
+      /** Per-member context budget in tokens (plan 02); a new number sets it, null clears it. */
+      contextMaxTokens?: number | null
     }
   | {
       action: 'update_task'
@@ -493,6 +502,23 @@ function optionalTeamServices(ctx: Context): {
 }
 
 /**
+ * Structural view of the optional host token-meter service (plan 02). Absent
+ * on compositions without it — context accounting then degrades to whatever
+ * the durable record holds instead of failing tool calls.
+ */
+interface TokenMeterView {
+  measure(session: Session): { totalTokens: number }
+}
+
+/** Read the host token meter when mounted; undefined keeps status display durable-only. */
+function optionalTeamTokenMeter(ctx: Context): TokenMeterView | undefined {
+  const meter = (ctx as unknown as { tokenMeter?: unknown }).tokenMeter
+  if (meter === undefined || meter === null) return undefined
+  const measure = (meter as { measure?: unknown }).measure
+  return typeof measure === 'function' ? { measure: measure.bind(meter) as TokenMeterView['measure'] } : undefined
+}
+
+/**
  * Attach the team's recorded captain session in this process without sending a
  * prompt: the Harness controller's create-with-existing-id path resumes the
  * session and leaves every durable field (including `captainSessionId`)
@@ -639,9 +665,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
   installMemberDelegationGuard(ctx, config.stateDir, config.memberMaxDepth ?? 0)
   installMailboxAdmission(ctx, config.stateDir)
   const scheduler = installTeamScheduler(ctx, { stateDir: config.stateDir, executionPrompt: config.executionPrompt, dispatch: dispatchMember })
+  // Live view of the plugin budget config for the per-child watchdog (plan 02);
+  // the ref indirection keeps a later config reload from being captured stale.
+  const memberContextRef = { current: config.memberContext }
   const memberSelections = installMemberSelectionRuntime(ctx, config.stateDir, (workspace, teamId, memberName) => (
     scheduler.kickMember(workspace, teamId, memberName)
-  ))
+  ), memberContextRef)
 
   async function dispatchMember(captain: Agent, teamId: string, memberName: string, text: string, signal: AbortSignal, mode: 'queue' | 'steer', attemptId?: string): Promise<boolean> {
     const root = stateRootOf(workspaceOf(captain), config)
@@ -728,6 +757,15 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             const selected = memberToolSelection(config, captain, trimmedOptional(mutation.toolPolicy))
             member.toolPolicy = selected.toolPolicy
             member.toolFilter = selected.toolFilter
+          }
+          if (mutation.contextMaxTokens !== undefined) {
+            if (mutation.contextMaxTokens === null) {
+              delete member.contextMaxTokens
+            } else if (Number.isSafeInteger(mutation.contextMaxTokens) && mutation.contextMaxTokens > 0) {
+              member.contextMaxTokens = mutation.contextMaxTokens
+            } else {
+              throw new Error(`context_max_tokens must be a positive integer for member "${member.name}"`)
+            }
           }
         } else if (mutation.action === 'update_task') {
           const task = requireTask(fresh, mutation.taskId)
@@ -935,6 +973,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             name: { type: 'string', required: true }, role: { type: 'string' },
             provider: { type: 'string' }, model: { type: 'string' }, reasoning_effort: { type: 'string' },
             tool_policy: { type: 'string', description: 'Optional owner-declared tool-policy id for this member.' },
+            context_max_tokens: { type: 'number', description: 'Optional per-member context budget in tokens (plan 02); beats the plugin-level memberContext default.' },
           } } },
           tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
             id: { type: 'string', required: true, description: 'Local reference used by dependencies in this plan; the result maps it to a durable task id.' },
@@ -1157,6 +1196,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             reasoning_effort: { type: 'string', description: 'Optional member reasoning effort.' },
             execution_prompt: { type: 'string', description: 'Optional member-specific execution prompt.' },
             tool_policy: { type: 'string', description: 'Optional owner-declared tool-policy id for this member; an empty string clears it back to the unchanged default tool set.' },
+            context_max_tokens: { type: 'number', description: 'Per-member context budget in tokens (plan 02); set a positive integer or null to clear it back to the plugin default.' },
           },
         },
       },
@@ -1203,6 +1243,9 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             // Omitted means "keep the current policy": a route/prompt revision
             // must not silently change what the member may do.
             ...operation.tool_policy === undefined ? {} : { toolPolicy: operation.tool_policy },
+            ...(operation.context_max_tokens === undefined
+              ? {}
+              : { contextMaxTokens: operation.context_max_tokens === null ? null : operation.context_max_tokens }),
           }
         }
         if (operation.action === 'update_task') {
@@ -1295,6 +1338,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       reasoning_effort: { type: 'string', description: 'Optional reasoning effort override: one of the target model\'s supported effort ids, or "default" to force its default. When omitted, the captain\'s effort is inherited only for the same provider/model; a changed route uses the target default.' },
       executionPrompt: { type: 'string', description: 'Optional member-specific execution prompt. It remains editable while staged.' },
       tool_policy: { type: 'string', description: 'Optional id of a tool policy declared by the deployment owner (config toolPolicies). It restricts which global tools this member sees and may invoke: a policy allow-list also keeps the four coordination tools, and captain-only tools can never be reopened. Omit for the unchanged default tool set.' },
+      context_max_tokens: { type: 'number', description: 'Optional per-member context budget in tokens (plan 02). When set, the member is auto-compacted at idle once its measured context reaches this value; beats the plugin-level memberContext default. Omit to inherit that default (when configured).' },
     },
     output: {
       schema: {
@@ -1307,6 +1351,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           model: { type: 'string', required: true },
           reasoning_effort: { type: 'string' },
           tool_policy: { type: 'string' },
+          context_max_tokens: { type: 'number' },
           status: { type: 'string', required: true },
           phase: { type: 'string', required: true },
         },
@@ -1347,6 +1392,10 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           fallback: config.fallback,
         }, exec.signal)
         const toolSelection = memberToolSelection(config, captain, trimmedOptional(args.tool_policy))
+        const contextMaxTokens = args.context_max_tokens
+        if (contextMaxTokens !== undefined && !(Number.isSafeInteger(contextMaxTokens) && contextMaxTokens > 0)) {
+          throw new Error('context_max_tokens must be a positive integer')
+        }
         const member: TeamMember = {
           id: '',
           name: memberName,
@@ -1357,6 +1406,9 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           ...selection.fallback === undefined ? {} : { fallback: selection.fallback },
           executionPrompt: trimmedOptional(args.executionPrompt),
           ...toolSelection,
+          // Member-level override; the plugin memberContext default resolves
+          // per install in the watchdog (plan 02).
+          ...contextMaxTokens === undefined ? {} : { contextMaxTokens },
           joinedAt: Date.now(),
           status: 'idle',
         }
@@ -1378,6 +1430,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             ? {}
             : { reasoning_effort: selection.reasoningEffort },
           ...member.toolPolicy === undefined ? {} : { tool_policy: member.toolPolicy },
+          ...member.contextMaxTokens === undefined ? {} : { context_max_tokens: member.contextMaxTokens },
           status: member.status,
           phase: fresh.phase ?? 'running',
         }
@@ -2303,17 +2356,41 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       const audit = auditTeamWorkspace(workspace, team)
       const members = team.members
         .filter((member) => member.status !== 'removed')
-        .map((member) => ({
-          name: member.name,
-          role: member.role ?? '',
-          provider: member.provider ?? '',
-          model: member.model ?? '',
-          reasoning_effort: member.reasoningEffort ?? '',
-          tool_policy: member.toolPolicy ?? '',
-          status: member.status,
-          activity: member.id !== '' ? (activity.get(member.id) ?? 'unknown') : 'unspawned',
-          ...member.spawnError === undefined ? {} : { spawn_error: member.spawnError },
-        }))
+        .map((member) => {
+          // Context usage (plan 02): the durable sample from team.json is the
+          // base value — a cold member is never resumed or measured for a
+          // status query. Only an already-resident live agent is measured
+          // directly, which overrides the display value (context_live).
+          const live = member.id !== '' ? ctx.agents.get(member.id as SessionId) : undefined
+          const liveTokens = live !== undefined
+            ? optionalTeamTokenMeter(ctx)?.measure(live.session).totalTokens
+            : undefined
+          const durableTokens = member.contextUsage?.tokens
+          const tokens = liveTokens ?? durableTokens
+          const limit = member.contextMaxTokens ?? config.memberContext?.maxTokens
+          return {
+            name: member.name,
+            role: member.role ?? '',
+            provider: member.provider ?? '',
+            model: member.model ?? '',
+            reasoning_effort: member.reasoningEffort ?? '',
+            tool_policy: member.toolPolicy ?? '',
+            status: member.status,
+            activity: member.id !== '' ? (activity.get(member.id) ?? 'unknown') : 'unspawned',
+            ...member.spawnError === undefined ? {} : { spawn_error: member.spawnError },
+            ...tokens === undefined || member.contextUsage === undefined ? {} : {
+              context: {
+                tokens,
+                ...limit === undefined ? {} : { limit },
+                ...limit === undefined || limit <= 0 ? {} : { ratio: tokens / limit },
+                ...member.contextUsage.compactions === undefined ? {} : { compactions: member.contextUsage.compactions },
+                // A live reading is measured now; otherwise the durable sample time.
+                ...(liveTokens !== undefined ? { measured_at: Date.now() } : { measured_at: member.contextUsage.measuredAt }),
+              },
+              context_live: liveTokens !== undefined,
+            },
+          }
+        })
       const tasks = team.tasks.map((task) => ({
         id: task.id,
         subject: task.subject,
@@ -2593,6 +2670,8 @@ async function initializeProfileTeam(input: {
         executionPrompt: template.executionPrompt ?? profile.executionPrompt ?? input.config.executionPrompt,
         ...selection.fallback === undefined ? {} : { fallback: selection.fallback },
         ...toolSelection,
+        // Member-level budget from the profile/inline roster row (plan 02).
+        ...template.contextMaxTokens === undefined ? {} : { contextMaxTokens: template.contextMaxTokens },
         joinedAt: now,
         status: 'idle' as const,
       }
@@ -2779,6 +2858,7 @@ function memberRuntime(config: ToolsConfig): MemberRuntimeConfig {
     maxDepth: config.memberMaxDepth,
     executionPrompt: config.executionPrompt,
     fallback: config.fallback,
+    memberContext: config.memberContext,
   }
 }
 
@@ -2799,6 +2879,8 @@ function renderStatus(value: JsonValue): string {
       status: string
       activity: string
       spawn_error?: string
+      context?: { tokens: number; limit?: number; ratio?: number; compactions?: number; measured_at?: number }
+      context_live?: boolean
     }[]
     tasks: { id: string; subject: string; status: string; assignee: string; dependencies: string[]; attempt: number; attempt_id: string; reassigning: boolean; seed_id?: string; output?: string; kind?: string; round?: number; verdict?: string; findings_open?: number; supplemental_evidence?: string; fixes?: string }[]
     captain_inbox: { from: string; content: string }[]
@@ -2834,7 +2916,13 @@ function renderStatus(value: JsonValue): string {
       const effort = member.reasoning_effort ? ` · reasoning ${member.reasoning_effort}` : ''
       const failure = member.spawn_error === undefined ? '' : `\n      start failed: ${member.spawn_error.slice(0, 400)}`
       const policy = member.tool_policy ? ` · policy ${member.tool_policy}` : ''
-      return `  - ${member.name} [${member.role}] ${member.status}/${member.activity}${route}${effort}${policy}${failure}`
+      const context = member.context === undefined
+        ? ''
+        : ` · ctx ${member.context.tokens}${member.context.limit === undefined ? '' : `/${member.context.limit}`}`
+          + (member.context.ratio === undefined ? '' : ` (${Math.round(member.context.ratio * 100)}%)`)
+          + (member.context.compactions === undefined ? '' : ` · ${member.context.compactions} compactions`)
+          + (member.context_live === true ? ' (live)' : '')
+      return `  - ${member.name} [${member.role}] ${member.status}/${member.activity}${route}${effort}${policy}${context}${failure}`
     }),
     `Tasks (${team.tasks.length}):`,
     ...team.tasks.map((task) => {

@@ -39,6 +39,21 @@ export interface TeamActivityMember {
   readonly total: number
   readonly currentTask: string
   readonly unread: number
+  /**
+   * Latest context usage of this member (plan 02, frozen client shape).
+   * Durable team.json sample; live agents may carry fresher tokens. Absent
+   * until the first idle sample, so unconfigured deployments keep the exact
+   * previous payload.
+   */
+  readonly context?: {
+    tokens: number
+    limit?: number
+    ratio?: number
+    compactions?: number
+    measuredAt?: number
+  }
+  /** True when `context.tokens` was measured from the resident agent this snapshot. */
+  readonly contextLive?: boolean
 }
 
 /** One task row of the activity snapshot. */
@@ -179,6 +194,26 @@ export async function assembleTeamSnapshot(
       total: owned.length,
       currentTask: currentTaskOf(member.name, tasks),
       unread: unreadByMember.get(member.name) ?? 0,
+      // Durable sample only; a cold member is never resumed to fill this in.
+      // The client (02b) renders the badge; live measurement stays a future
+      // refinement because snapshots poll from the web route without a host
+      // Agent guarantee per member.
+      ...member.contextUsage === undefined
+        ? {}
+        : (() => {
+          const tokens = member.contextUsage.tokens
+          const limit = member.contextUsage.limit ?? member.contextMaxTokens
+          return {
+            context: {
+              tokens,
+              ...limit === undefined ? {} : { limit },
+              ...limit !== undefined && limit > 0 ? { ratio: tokens / limit } : {},
+              ...member.contextUsage.compactions === undefined ? {} : { compactions: member.contextUsage.compactions },
+              measuredAt: member.contextUsage.measuredAt,
+            },
+            contextLive: false,
+          }
+        })(),
     }
   })
   const captainInbox = await readUnreadMailbox(stateRoot, state.id, CAPTAIN_KEY)
