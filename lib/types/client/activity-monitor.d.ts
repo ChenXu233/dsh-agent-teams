@@ -36,6 +36,14 @@ export interface ActivityMember {
     readonly context?: ActivityMemberContext | null;
     /** True when `context.tokens` was measured from the resident agent this snapshot. */
     readonly contextLive?: boolean;
+    /**
+     * The member's DECLARED context budget, mirrored from the host's
+     * `contextBudget` projection (src/snapshot.ts): present whenever the roster
+     * row has `contextMaxTokens`, independent of any runtime usage sample. The
+     * plan editor prefills its budget input from this field; `null` is tolerated
+     * like an absent value so a partial payload never prefills a fake number.
+     */
+    readonly contextBudget?: number | null;
 }
 /** One task row of a host snapshot. */
 export interface ActivityTask {

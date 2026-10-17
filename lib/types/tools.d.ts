@@ -38,7 +38,7 @@ export interface ToolsConfig {
     /** Owner-declared reusable member tool policies, keyed by policy id (#59). */
     toolPolicies: Record<string, MemberToolPolicy>;
     /**
-     * Plugin-level per-member context budget (plan 02); `undefined` when the
+     * Plugin-level per-member context budget; `undefined` when the
      * `memberContext` block is unconfigured, which disables the watchdog and all
      * accounting.
      */
@@ -55,7 +55,7 @@ export type StagedPlanMutation = {
     executionPrompt?: string | null;
     /** Selected tool-policy id; an empty string clears it back to no policy. */
     toolPolicy?: string;
-    /** Per-member context budget in tokens (plan 02); a new number sets it, null clears it. */
+    /** Per-member context budget in tokens; a new number sets it, null clears it. */
     contextMaxTokens?: number | null;
 } | {
     action: 'update_task';

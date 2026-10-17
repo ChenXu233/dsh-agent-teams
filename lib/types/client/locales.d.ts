@@ -123,6 +123,9 @@ export declare const zh: {
     'plan.member.model': string;
     'plan.member.reasoning': string;
     'plan.member.reasoningHint': string;
+    'plan.member.budget': string;
+    'plan.member.budgetHint': string;
+    'plan.member.budgetInvalid': string;
     'plan.model.choose': string;
     'plan.model.currentUnavailable': string;
     'plan.model.route': string;
@@ -343,6 +346,9 @@ export declare const en: {
     'plan.member.model': string;
     'plan.member.reasoning': string;
     'plan.member.reasoningHint': string;
+    'plan.member.budget': string;
+    'plan.member.budgetHint': string;
+    'plan.member.budgetInvalid': string;
     'plan.model.choose': string;
     'plan.model.currentUnavailable': string;
     'plan.model.route': string;

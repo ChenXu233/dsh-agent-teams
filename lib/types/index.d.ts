@@ -71,7 +71,7 @@ export interface Config {
      */
     toolPolicies?: Record<string, MemberToolPolicy>;
     /**
-     * Plugin-level per-member context budget (plan 02). A member's own
+     * Plugin-level per-member context budget. A member's own
      * `context_max_tokens` (profile row, `agent_teams_add_member`, plan member,
      * or `edit_plan` update) beats this default; when both a ratio and an
      * absolute value resolve, the smaller budget wins. When the whole object is
