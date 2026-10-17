@@ -158,6 +158,13 @@ CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后�
         allow: [read, glob, grep]
       implementer:
         deny: [web_search]
+    # 可选：成员上下文预算（成员空闲且用量达阈值时自动压缩一次）
+    memberContext:
+      maxTokens: 150000   # 与 maxRatio 二选一或同时给出（取更小者）
+      # maxRatio: 0.15    # 按成员模型 contextWindow 的比例；取不到窗口则不生效
+      cooldownMs: 60000
+      minTurnGap: 1
+      onLimit: compact    # compact | notify | off
 ```
 
 `memberMaxDepth` 默认 `0`，团队成员不能再创建子代理；显式设为 `1` 可允许一层后代，运行时和代码工具调用同样受限。默认成员统一通过团队消息汇报，避免再走宿主消息重复通知队长。无任务成员不调用模型；任务分配开启独立轮次，纠正消息进入最近的模型步骤。消息投递与读取分别记录；移除和归档必须等成员分支及待处理输入清理完成后才报告成功。
@@ -172,6 +179,8 @@ CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后�
 - 未配置策略的团队与成员保持原有工具集和记录结构；`agent_teams_edit_plan` 传空 `tool_policy` 可清除暂存成员的策略。
 
 这是全局工具的模型可见性与调用限制，不是 OS 沙箱，也不是授权边界。
+
+`memberContext` 为每个成员设置插件级的上下文预算：成员**空闲**且测得的上下文用量达到阈值时，插件自动对它压缩一次并记账。`maxTokens`（绝对值）与 `maxRatio`（成员模型 `contextWindow` 的比例，取不到窗口则不参与计算）至少给一个，同时给出时取更小；`cooldownMs`（默认 `60000`）与 `minTurnGap`（默认 `1`）防抖；`onLimit`（默认 `compact`）可选 `notify`（只记 info 日志，不压缩）或 `off`。**不配置整个 `memberContext` 时功能完全关闭**（不注册看门狗、不写任何新字段）；回到旧行为可删掉整个块，或保留阈值并把 `onLimit` 设为 `off`（块内仍需至少一个 `maxTokens`/`maxRatio`，否则挂载时报错）。成员级 `context_max_tokens`（profile 成员行、内联 `plan` 成员行、`agent_teams_add_member`、`agent_teams_edit_plan` 的 `update_member`，传 `null` 可清除）与插件默认进入同一次解析，最终取更小者——它只会让该成员更早触发，不会放宽插件上限。成员正忙或有排队消息时不压缩，下一轮空闲再评；`agent_teams_status` 的成员可携带 `context { tokens, limit, ratio, compactions, measured_at }` 与 `context_live`，活动面板成员行显示当前用量/上限与已压缩次数。详见 [docs/usage.md](./docs/usage.md)。
 
 普通调研、仓库审计可用 `agent_teams_create({name, description, approval:"required", plan:{members:[{name:"researcher"}], tasks:[{id:"audit", subject:"审计现有实现", assignee:"researcher"}]}})` 一次创建完整草案。任务的 `dependencies` 引用同一批中的 `id`，支持前向引用并校验环；结果返回实际任务 ID。`kind=review` 专用于对既有 implementation/repair 任务的质量复审，普通仓库审计使用默认的 `kind=work`。
 

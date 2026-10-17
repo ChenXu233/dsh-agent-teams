@@ -171,6 +171,15 @@ Defaults work without extra setup. A trusted profile can override member behavio
         allow: [read, glob, grep]
       implementer:
         deny: [web_search]
+    # Optional: per-member context budget (auto-compacts once an idle member
+    # reaches its threshold)
+    memberContext:
+      maxTokens: 150000   # with maxRatio: either one, or both (smaller wins)
+      # maxRatio: 0.15    # share of the member model's contextWindow; without a
+                          # known window this field has no effect
+      cooldownMs: 60000
+      minTurnGap: 1
+      onLimit: compact    # compact | notify | off
 ```
 
 `memberMaxDepth` defaults to `0`: team members cannot create nested subagents. Set `1` to explicitly permit one descendant level; the limit also covers runtime/code-tool calls. Default members report through team messages only, avoiding duplicate native parent reports. Idle roster members make no model requests. Task assignments start distinct turns; coordination joins the nearest model step. Acceptance and consumption are tracked separately. Removal/archive drains the selected branch and its pending input before reporting success.
@@ -185,6 +194,8 @@ Defaults work without extra setup. A trusted profile can override member behavio
 - Teams and members created without a policy keep their previous tool set and record shape. An empty `tool_policy` on `agent_teams_edit_plan` clears a staged member's policy.
 
 This is model tool visibility and invocation policy for global tools, not an OS sandbox or an authorization boundary.
+
+`memberContext` gives each member a plugin-level context budget: when a member is **idle** and its measured context usage reaches the threshold, the plugin compacts it once and records the event. `maxTokens` (absolute) and `maxRatio` (a share of the member model's `contextWindow`; without a known window the ratio is ignored rather than guessed) — give at least one, and the smaller budget wins when both apply. `cooldownMs` (default `60000`) and `minTurnGap` (default `1`) debounce repeats; `onLimit` (default `compact`) also accepts `notify` (logs only, never compacts) or `off`. **With the whole `memberContext` block absent the feature is fully off** (no watchdog, no new fields) and behavior matches previous versions; to restore the old behavior either remove the block or keep a threshold and set `onLimit: off` (the block still needs at least one `maxTokens`/`maxRatio`, otherwise mounting fails). A member-level `context_max_tokens` (on a profile member row, an inline `plan` member row, `agent_teams_add_member`, or `agent_teams_edit_plan` `update_member`; pass `null` to clear) joins the same resolution — the smallest of the member value, the plugin `maxTokens`, and the window-derived ratio wins, so it only makes that member compact earlier and never loosens the plugin bound. A busy member or one with queued waking input is skipped and re-evaluated at the next idle boundary. `agent_teams_status` members can carry `context { tokens, limit, ratio, compactions, measured_at }` plus `context_live`, and the activity panel shows each member's usage/limit and compaction count. See [docs/usage.md](./docs/usage.md) for details.
 
 `memberProvider` is the sub-agent runtime backend (`spawn` / `fork`), not an LLM provider. Cross-LLM-provider routing uses the optional `provider` + `model` fields of `agent_teams_add_member`; `memberModel` is only a model default for all members. A member on the captain's current provider/model inherits the captain's reasoning effort, while a changed provider or model automatically uses the target model's default. To request a particular effort, pass the optional `reasoning_effort` field — one of the target model's supported effort ids, or `"default"` to force the model's own default.
 

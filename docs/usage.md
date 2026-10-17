@@ -86,11 +86,37 @@
         allow: [read, glob, grep] # 只保留这些全局工具（四个协调工具自动加入）
       implementer:
         deny: [web_search]        # 只移除这些全局工具
+    memberContext:                # 可选：成员上下文预算（自动压缩，见下）
+      maxTokens: 150000           # 触发阈值（绝对值）；与 maxRatio 可同时给出，取更小者
+      # maxRatio: 0.15            # 或按成员模型 contextWindow 的比例
+      cooldownMs: 60000           # 两次压缩之间的最小间隔
+      minTurnGap: 1               # 两次压缩之间至少隔 N 个回合
+      onLimit: compact            # compact | notify | off
 ```
 
 `toolPolicies` 的 id 由部署方声明，成员只能按 id 选择：`agent_teams_add_member` 的 `tool_policy`、内联 `plan` 的成员行，或 profile 成员行的 `tool_policy`。队长模型不能提交原始 allow/deny 列表，也不能在运行时新建策略。队长专属工具始终被拒绝且无法通过 allow 列表重新打开；四个协调工具（`agent_teams_claim_task`、`agent_teams_update_task`、`agent_teams_send_message`、`agent_teams_status`）始终可用，策略也不允许拒绝它们。未知 id、空策略或空列表会在挂载时或写入成员前直接失败，不会留下成员或可恢复的孤儿会话。生效的策略 id 与解析后的过滤器会写入 `team.json`（`toolPolicy` / `toolFilter`），`agent_teams_status` 显示策略 id；重启后由子会话持久 descriptor 重新应用同一过滤器。未配置策略的成员保持原有工具集与记录结构。该能力是全局工具的模型可见性与调用限制，不是 OS 沙箱或授权边界。
 
 最终优先级为：成员显式 `provider` + `model` / `model` → `memberModel` → 队长当前路由。成员沿用队长当前 provider/model 时继承队长的思考强度；provider 或 model 任一改变时自动使用目标模型的默认档。显式 `reasoning_effort`（目标模型支持的档位 id，或 `"default"`）优先，并在目标 provider/model 上创建前校验；不兼容时成员创建会明确失败。最终生效的 provider/model/思考强度会写入 `team.json`，供状态查询和成员冷恢复使用。
+
+### 成员上下文预算（memberContext）
+
+`memberContext` 为每个成员设置插件级的上下文预算：成员**空闲**且测得的上下文用量达到阈值时，插件调用宿主压缩服务对它做一次压缩并记账。Harness 自带的自动压缩按 provider/model 统一配置，默认接近满窗才触发；`memberContext` 让某个成员（而不是整个模型）更早压缩。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `maxTokens` | — | 触发阈值（绝对 token 数）；与 `maxRatio` 至少给一个（否则挂载时直接报错），同时给出时取更小者 |
+| `maxRatio` | — | 按成员模型 `contextWindow` 的比例；取不到该窗口时这一项不参与计算（不猜窗口大小）；若它是唯一阈值，该成员的看门狗保持关闭并记一条 info 日志 |
+| `cooldownMs` | `60000` | 两次压缩之间的最小间隔（毫秒） |
+| `minTurnGap` | `1` | 两次压缩之间至少经过的回合数（成员每进入一次 `running` 记一回合） |
+| `onLimit` | `compact` | 达到阈值时的动作：`compact` 压缩一次；`notify` 只记录（info 日志），不压缩、不写盘；`off` 不注册看门狗（连用量采样也不做） |
+
+**不配置整个 `memberContext` 时功能完全关闭**：不注册看门狗、不向 `team.json` 写任何新字段，行为与旧版本一致。要回到旧行为：删掉整个 `memberContext`，或保留阈值并把 `onLimit` 设为 `off`（块内仍需至少一个 `maxTokens` / `maxRatio`，否则挂载时报错）。
+
+**成员级预算**：profile 成员行、内联 `plan` 成员行、`agent_teams_add_member` 的 `context_max_tokens`，以及 `agent_teams_edit_plan`（`update_member`，传 `null` 可清除）都接受一个正整数。它与插件默认进入同一次预算解析：成员级 `context_max_tokens`、插件 `maxTokens`、`floor(contextWindow × maxRatio)` 三者中**最小的那个生效**——所以成员级值只会让该成员更早压缩，不会放宽插件的上限。
+
+**触发语义**：看门狗只在该成员 `agent/status` 进入 `idle` 时评测——压缩要求成员空闲且没有排队唤醒，成员正忙或有排队消息时本次跳过、下一轮空闲再评（不报错、不原地重试）。`cooldownMs` 与 `minTurnGap` 只约束重复压缩：从未压缩过的成员首次超限立即行动。用量采样写盘节流为至少 5 秒一次，`team.json` 里的数字最多滞后数秒。
+
+**可观测性**：`agent_teams_status` 的成员可携带 `context: { tokens, limit?, ratio?, compactions?, measured_at }` 与 `context_live`。`limit` / `ratio` 只在能确定上限时出现（成员级 `context_max_tokens` 或插件 `maxTokens`；只用 `maxRatio` 时状态里没有这两项），面板此时只显示 tokens。`context_live: true` 表示本次是从驻留会话实时测量的，否则 `tokens` 来自最近一次落盘采样；冷成员也有值（读 `team.json`），查询状态不会唤醒任何成员。记账写入成员记录的 `contextUsage`（压缩时另有 `lastCompactAt` / `lastShadowedTokens`），老 `team.json` 仍可读。活动面板成员行显示当前用量/上限与已压缩次数（面板走轮询快照，展示的是落盘采样）。
 
 ## 使用协议
 
