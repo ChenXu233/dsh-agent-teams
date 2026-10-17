@@ -116,7 +116,7 @@ export interface ToolsConfig {
   /** Owner-declared reusable member tool policies, keyed by policy id (#59). */
   toolPolicies: Record<string, MemberToolPolicy>
   /**
-   * Plugin-level per-member context budget (plan 02); `undefined` when the
+   * Plugin-level per-member context budget; `undefined` when the
    * `memberContext` block is unconfigured, which disables the watchdog and all
    * accounting.
    */
@@ -135,7 +135,7 @@ export type StagedPlanMutation =
       executionPrompt?: string | null
       /** Selected tool-policy id; an empty string clears it back to no policy. */
       toolPolicy?: string
-      /** Per-member context budget in tokens (plan 02); a new number sets it, null clears it. */
+      /** Per-member context budget in tokens; a new number sets it, null clears it. */
       contextMaxTokens?: number | null
     }
   | {
@@ -502,7 +502,7 @@ function optionalTeamServices(ctx: Context): {
 }
 
 /**
- * Structural view of the optional host token-meter service (plan 02). Absent
+ * Structural view of the optional host token-meter service. Absent
  * on compositions without it — context accounting then degrades to whatever
  * the durable record holds instead of failing tool calls.
  */
@@ -665,7 +665,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
   installMemberDelegationGuard(ctx, config.stateDir, config.memberMaxDepth ?? 0)
   installMailboxAdmission(ctx, config.stateDir)
   const scheduler = installTeamScheduler(ctx, { stateDir: config.stateDir, executionPrompt: config.executionPrompt, dispatch: dispatchMember })
-  // Live view of the plugin budget config for the per-child watchdog (plan 02);
+  // Live view of the plugin budget config for the per-child watchdog;
   // the ref indirection keeps a later config reload from being captured stale.
   const memberContextRef = { current: config.memberContext }
   const memberSelections = installMemberSelectionRuntime(ctx, config.stateDir, (workspace, teamId, memberName) => (
@@ -973,7 +973,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             name: { type: 'string', required: true }, role: { type: 'string' },
             provider: { type: 'string' }, model: { type: 'string' }, reasoning_effort: { type: 'string' },
             tool_policy: { type: 'string', description: 'Optional owner-declared tool-policy id for this member.' },
-            context_max_tokens: { type: 'number', description: 'Optional per-member context budget in tokens (plan 02); beats the plugin-level memberContext default.' },
+            context_max_tokens: { type: 'number', description: 'Optional per-member context budget in tokens: when set, this idle member is auto-compacted once its measured context reaches the value. A member-level value and the plugin memberContext default resolve to the smaller one, so this only tightens; omit it to inherit that default (no-op when no default is configured).' },
           } } },
           tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
             id: { type: 'string', required: true, description: 'Local reference used by dependencies in this plan; the result maps it to a durable task id.' },
@@ -1196,7 +1196,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             reasoning_effort: { type: 'string', description: 'Optional member reasoning effort.' },
             execution_prompt: { type: 'string', description: 'Optional member-specific execution prompt.' },
             tool_policy: { type: 'string', description: 'Optional owner-declared tool-policy id for this member; an empty string clears it back to the unchanged default tool set.' },
-            context_max_tokens: { type: 'number', description: 'Per-member context budget in tokens (plan 02); set a positive integer or null to clear it back to the plugin default.' },
+            context_max_tokens: { type: 'number', description: 'Per-member context budget in tokens; set a positive integer to tighten this member, or null to clear it back to the plugin default (no-op when none is configured).' },
           },
         },
       },
@@ -1338,7 +1338,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       reasoning_effort: { type: 'string', description: 'Optional reasoning effort override: one of the target model\'s supported effort ids, or "default" to force its default. When omitted, the captain\'s effort is inherited only for the same provider/model; a changed route uses the target default.' },
       executionPrompt: { type: 'string', description: 'Optional member-specific execution prompt. It remains editable while staged.' },
       tool_policy: { type: 'string', description: 'Optional id of a tool policy declared by the deployment owner (config toolPolicies). It restricts which global tools this member sees and may invoke: a policy allow-list also keeps the four coordination tools, and captain-only tools can never be reopened. Omit for the unchanged default tool set.' },
-      context_max_tokens: { type: 'number', description: 'Optional per-member context budget in tokens (plan 02). When set, the member is auto-compacted at idle once its measured context reaches this value; beats the plugin-level memberContext default. Omit to inherit that default (when configured).' },
+      context_max_tokens: { type: 'number', description: 'Optional per-member context budget in tokens: when set, the member is auto-compacted at idle once its measured context reaches the value. The member-level value and the plugin memberContext default resolve to the smaller one, so this only tightens; omit it to inherit that default (and nothing happens when no default is configured).' },
     },
     output: {
       schema: {
@@ -1407,7 +1407,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           executionPrompt: trimmedOptional(args.executionPrompt),
           ...toolSelection,
           // Member-level override; the plugin memberContext default resolves
-          // per install in the watchdog (plan 02).
+          // per install in the watchdog.
           ...contextMaxTokens === undefined ? {} : { contextMaxTokens },
           joinedAt: Date.now(),
           status: 'idle',
@@ -2357,7 +2357,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       const members = team.members
         .filter((member) => member.status !== 'removed')
         .map((member) => {
-          // Context usage (plan 02): the durable sample from team.json is the
+          // Context usage: the durable sample from team.json is the
           // base value — a cold member is never resumed or measured for a
           // status query. Only an already-resident live agent is measured
           // directly, which overrides the display value (context_live).
@@ -2670,7 +2670,7 @@ async function initializeProfileTeam(input: {
         executionPrompt: template.executionPrompt ?? profile.executionPrompt ?? input.config.executionPrompt,
         ...selection.fallback === undefined ? {} : { fallback: selection.fallback },
         ...toolSelection,
-        // Member-level budget from the profile/inline roster row (plan 02).
+        // Member-level budget from the profile/inline roster row.
         ...template.contextMaxTokens === undefined ? {} : { contextMaxTokens: template.contextMaxTokens },
         joinedAt: now,
         status: 'idle' as const,
