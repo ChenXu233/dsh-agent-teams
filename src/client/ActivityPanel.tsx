@@ -55,6 +55,7 @@ import {
   subscribeActivityMonitorTargets,
   subscribeActivitySnapshots,
   type ActivityMember,
+  type ActivityMemberContext,
   type ActivityTask,
   type ActivityTeam,
 } from './activity-monitor.ts'
@@ -120,6 +121,24 @@ function initialPanelBounds(): PanelBounds {
 /** Initial-letter fallback for unmatched roles. */
 function memberInitial(name: string): string {
   return name.trim().slice(0, 1).toUpperCase() || '?'
+}
+
+/**
+ * Abbreviated token count for the inline badge: 143210 → "143k",
+ * 1500000 → "1.5M". Returns undefined for a missing or unusable number so the
+ * caller omits the badge instead of rendering a placeholder.
+ */
+function tokenCountText(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return undefined
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`
+  return `${Math.round(value)}`
+}
+
+/** True when the member sits at or over its own context budget. */
+function contextOverBudget(usage: ActivityMemberContext): boolean {
+  if (usage.ratio !== undefined && Number.isFinite(usage.ratio)) return usage.ratio >= 1
+  return usage.limit !== undefined && Number.isFinite(usage.limit) && usage.limit > 0 && usage.tokens >= usage.limit
 }
 
 function stableHash(value: string): number {
@@ -212,6 +231,62 @@ function CollapsedBadge({ count, busy, onClick, t }: {
       <span className={css.badgeDot} data-busy={busy} aria-hidden />
       <span className={css.badgeCount}>{count}</span>
     </button>
+  )
+}
+
+/**
+ * Inline context badges for one member row, on the existing model-badge line:
+ * `143k / 150k` whenever the snapshot carries a measured sample, plus the
+ * localized compaction count only once the member has actually been
+ * compacted. Both reuse the model pill class — inline-flex, `min-width: 0`,
+ * `max-width: 132px`, single line with ellipsis — so an extra badge neither
+ * overflows the docked panel nor wraps the member line, and the usage badge
+ * swaps to the warning color when the member sits over its own budget.
+ */
+function MemberContextBadges({ member, t }: {
+  readonly member: ActivityMember
+  readonly t: AgentTeamsTranslate
+}) {
+  const usage = member.context
+  if (usage === undefined || usage === null) return null
+  const tokens = tokenCountText(usage.tokens)
+  if (tokens === undefined) return null
+  const limitText = usage.limit !== undefined && Number.isFinite(usage.limit) && usage.limit > 0
+    ? tokenCountText(usage.limit)
+    : undefined
+  const usageText = limitText === undefined
+    ? t('member.context.usageNoLimit', { tokens })
+    : t('member.context.usage', { tokens, limit: limitText })
+  const over = contextOverBudget(usage)
+  const compactions = usage.compactions !== undefined && Number.isFinite(usage.compactions) && usage.compactions > 0
+    ? Math.floor(usage.compactions)
+    : undefined
+  const compactionText = compactions === undefined ? '' : t('member.context.compactions', { count: compactions })
+  return (
+    <>
+      <span
+        className={css.memberModel}
+        role="img"
+        data-member-context={usageText}
+        data-over={over ? 'true' : undefined}
+        title={t(over ? 'member.context.ariaOver' : 'member.context.aria', { usage: usageText })}
+        aria-label={t(over ? 'member.context.ariaOver' : 'member.context.aria', { usage: usageText })}
+        style={over ? { color: 'var(--dsw-alias-state-warn-primary)', borderColor: 'var(--dsw-alias-state-warn-primary)' } : undefined}
+      >
+        {usageText}
+      </span>
+      {compactions !== undefined && (
+        <span
+          className={css.memberModel}
+          role="img"
+          data-member-compactions={compactions}
+          title={compactionText}
+          aria-label={compactionText}
+        >
+          {compactionText}
+        </span>
+      )}
+    </>
   )
 }
 
@@ -684,6 +759,9 @@ export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscar
                           {compactModelLabel(memberModel)}
                         </span>
                       )}
+                      {/* Plan 02 context budget: same badge line, only when the
+                          snapshot actually carries a measurement. */}
+                      <MemberContextBadges member={member} t={t} />
                       <span className={css.memberState} data-activity={member.activity}>
                         <WorkGlyph active={member.activity === 'working'} />
                         {discarded
