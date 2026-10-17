@@ -54,6 +54,14 @@ export interface TeamActivityMember {
   }
   /** True when `context.tokens` was measured from the resident agent this snapshot. */
   readonly contextLive?: boolean
+  /**
+   * The member's DECLARED context budget (`contextMaxTokens` on the durable
+   * roster row), projected whenever it is set — including for a staged member
+   * that has never run and therefore has no usage sample. This is the
+   * prefill source for the plan editor's budget input; the runtime `context`
+   * object above stays a measurement-only projection and never feeds it.
+   */
+  readonly contextBudget?: number
 }
 
 /** One task row of the activity snapshot. */
@@ -214,6 +222,9 @@ export async function assembleTeamSnapshot(
             contextLive: false,
           }
         })(),
+      // Declared budget, independent of any usage sample: a staged member that
+      // never ran still carries it so the plan editor can prefill its input.
+      ...member.contextMaxTokens === undefined ? {} : { contextBudget: member.contextMaxTokens },
     }
   })
   const captainInbox = await readUnreadMailbox(stateRoot, state.id, CAPTAIN_KEY)
