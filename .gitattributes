@@ -1,0 +1,10 @@
+# Upstream-sync conflict automation (docs/upstream-sync.md).
+#
+# lib/** are build artifacts: the source of truth is src/, and after any
+# conflict the whole lib/ tree must be regenerated with `pnpm build`. The
+# merge driver below takes the upstream ("theirs") side so the merge can
+# finish without markers; the sync script rebuilds afterwards.
+lib/** merge=built-artifacts
+# The lockfile is owned by the upstream release; after a conflict take the
+# upstream file and let `pnpm install` re-resolve local resolution state.
+pnpm-lock.yaml merge=lockfile-upstream
