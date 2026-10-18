@@ -19,7 +19,7 @@ import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { createUserMessage, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
-import { guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, startMemberWithLenientFilter, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
+import { guardSubagentCreation, startMember, usesManagedActivations, guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, startMemberWithLenientFilter, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
 import { nearestLiveLead } from './lineage.ts'
@@ -177,6 +177,7 @@ export interface MemberSelectionRuntime {
     label: string,
     selection: MemberLlmSelection,
     operation: () => Promise<T>,
+    setup?: TeamMember['runtimeSetup'],
   ): Promise<T>
 }
 
@@ -658,6 +659,7 @@ export function installMemberSelectionRuntime(
 ): MemberSelectionRuntime {
   const memberContextConfigRef = memberContextRef ?? { current: undefined }
   const pending = new Map<string, MemberLlmSelection>()
+  const pendingSetup = new Map<string, NonNullable<TeamMember['runtimeSetup']>>()
   installContinuableMemberSetup(ctx, (childCtx, child) => {
     const descriptor = foldSubagentDescriptor(sessionOwnEvents(child.session))
     if (descriptor?.mode !== 'continuable' || !descriptor.label.startsWith(MEMBER_LABEL_PREFIX)) {
@@ -687,6 +689,7 @@ export function installMemberSelectionRuntime(
       if (!admitted) return { kind: 'reject' }
       return next()
     })
+
     // Per-member context budget watchdog (plan 02). Installed only when a
     // budget resolves: the member's own `context_max_tokens` beats the plugin
     // `memberContext` default, `onLimit: 'off'` disables it, and a ratio-only
@@ -705,10 +708,40 @@ export function installMemberSelectionRuntime(
       meter: optionalMemberTokenMeter(ctx),
       engine: optionalMemberCompaction(ctx),
     })
+
+    // New activations no longer persist persona/toolFilter in host descriptors.
+    // Install them before the first request, and restore the exact saved values
+    // after a cold resume. Historical descriptors remain owned by Harness.
+    const savedTeam = pending.has(key) ? undefined : readTeamSync(stateRoot, teamId)
+    const savedMember = savedTeam?.captainSessionId === parentSessionId
+      ? savedTeam.members.find(member => member.id === child.id && member.name === memberName)
+      : undefined
+    const setup = pendingSetup.get(key) ?? savedMember?.runtimeSetup
+    if (usesManagedActivations(ctx.subagents) && savedMember !== undefined
+      && setup === undefined && descriptor.toolFilter === undefined) {
+      disposeAdmission()
+      throw new Error('agent-teams: saved member runtime setup is missing; refusing an unrestricted resume')
+    }
+    let disposeSetup = (): void => undefined
+    if (usesManagedActivations(ctx.subagents) && setup !== undefined) {
+      try {
+        const stopFilter = childCtx.tools.restrict(setup.toolFilter)
+        try {
+          const stopPersona = childCtx.systemPrompt.section({
+            name: 'deployment:persona-prefix',
+            order: childCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
+            text: setup.persona,
+          })
+          disposeSetup = () => { stopPersona(); stopFilter() }
+        } catch (error) { stopFilter(); throw error }
+      } catch (error) { disposeWatchdog(); disposeAdmission(); throw error }
+    }
+    const cleanupAdmission = (): void => { disposeSetup(); disposeAdmission() }
     let selection = pending.get(key)
     if (selection === undefined) {
       const team = readTeamSync(stateRoot, teamId)
-      if (team?.captainSessionId !== parentSessionId) return () => { disposeWatchdog(); disposeAdmission() }
+      if (team?.captainSessionId !== parentSessionId) return () => { disposeWatchdog(); cleanupAdmission() }
+
       const durableMember = team.members.find(member => member.name === memberName)
       selection = selectionFromMember(durableMember)
       if (selection !== undefined && (descriptor.agentProvider !== durableMember?.provider || descriptor.agentModel !== durableMember?.model)) {
@@ -761,7 +794,7 @@ export function installMemberSelectionRuntime(
       }
     })
     // Legacy teams still need failure reporting even without a saved route.
-    if (selection === undefined) return () => { disposeWatchdog(); disposeFailure(); disposeAdmission() }
+    if (selection === undefined) return () => { disposeWatchdog(); disposeFailure(); cleanupAdmission() }
     const selectionRef = { current: modelSelection(selection), assembled: undefined as ModelSelection | undefined }
     const disposeSelection = installModelSelection(childCtx, selectionRef)
     const fallback = selection.fallback
@@ -791,7 +824,7 @@ export function installMemberSelectionRuntime(
       disposeSelection()
       disposeWatchdog()
       disposeFailure()
-      disposeAdmission()
+      cleanupAdmission()
     }
   })
 
@@ -807,16 +840,19 @@ export function installMemberSelectionRuntime(
       label: string,
       selection: MemberLlmSelection,
       operation: () => Promise<T>,
+      setup?: TeamMember['runtimeSetup'],
     ): Promise<T> {
       const key = pendingSelectionKey(parentSessionId, label)
       if (pending.has(key)) {
         throw new Error(`member model selection is already pending for "${label}"`)
       }
       pending.set(key, selection)
+      if (setup !== undefined) pendingSetup.set(key, setup)
       try {
         return await operation()
       } finally {
         pending.delete(key)
+        pendingSetup.delete(key)
       }
     },
   }
@@ -945,10 +981,11 @@ export async function spawnMember(
   if (provider.prepareContinuable === undefined) {
     throw new Error(`agent-teams: provider "${config.provider}" does not support continuable members`)
   }
-  if (!provider.capabilities.persona) {
+  const legacyCapabilities = provider.capabilities as unknown as { persona?: boolean; toolFilter?: boolean }
+  if (!usesManagedActivations(ctx.subagents) && !legacyCapabilities.persona) {
     throw new Error(`agent-teams: provider "${config.provider}" cannot apply a member persona`)
   }
-  if (!provider.capabilities.toolFilter) {
+  if (!usesManagedActivations(ctx.subagents) && !legacyCapabilities.toolFilter) {
     throw new Error(`agent-teams: provider "${config.provider}" cannot restrict captain-only tools for members`)
   }
   const label = `${MEMBER_LABEL_PREFIX}${team.id}:${member.name}`
@@ -956,47 +993,49 @@ export async function spawnMember(
   // captain-only deny list plus the depth entries this host registers.
   const requestedFilter = resolvedFilter ?? memberToolFilter(config.maxDepth, restrictableToolNames(captain))
   // The lenient retry may drop names this host reports unknown; keep the exact
-  // filter the host accepted so team.json and the child descriptor agree.
+  // filter the host accepted for the durable member setup.
   let acceptedFilter = requestedFilter
-  const start = await selections.withPending(captain.id, label, llmSelection, () => (
-    startMemberWithLenientFilter(
-      toolFilter => {
-        acceptedFilter = toolFilter
-        return ctx.subagents.startContinuable({
-          provider: config.provider,
-          label,
-          request: {
-            prompt: [{ type: 'text', text: initialPrompt ?? memberWelcome(team, member.name) }],
-            parent: captain,
-            persona: memberPersona(team, member, stateDir, config.executionPrompt),
-            // Depth deny entries name host tools; resolve them against the
-            // running host's registry so a renamed delegation tool cannot abort
-            // the spawn (see memberToolFilter). Depth is still enforced by the
-            // parent-chain guard installed at plugin mount. A filter the host
-            // still rejects is retried without the names it reported.
-            toolFilter,
-            agentOptions: {
-              provider: llmSelection.provider,
-              model: llmSelection.model,
-              ...llmSelection.reasoningEffort === undefined
-                ? {}
-                : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
-            },
-            // Harness request.maxDepth caps the absolute depth of THIS creation;
-            // it is not inherited by later delegations. The guard below enforces
-            // the configured member-relative descendant budget instead.
+  const start = await startMemberWithLenientFilter(
+    toolFilter => {
+      acceptedFilter = toolFilter
+      const setup = { persona: memberPersona(team, member, stateDir, config.executionPrompt), toolFilter }
+      return selections.withPending(captain.id, label, llmSelection, () => startMember(ctx.subagents, {
+        provider: config.provider,
+        label,
+        request: {
+          prompt: [{ type: 'text', text: initialPrompt ?? memberWelcome(team, member.name) }],
+          parent: captain,
+          persona: memberPersona(team, member, stateDir, config.executionPrompt),
+          // Depth deny entries name host tools; resolve them against the
+          // running host's registry so a renamed delegation tool cannot abort
+          // the spawn (see memberToolFilter). Depth is still enforced by the
+          // parent-chain guard installed at plugin mount. A filter the host
+          // still rejects is retried without the names it reported.
+          toolFilter,
+          agentOptions: {
+            provider: llmSelection.provider,
+            model: llmSelection.model,
+            ...llmSelection.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
           },
-          signal,
-        })
-      },
-      requestedFilter,
-      relaxableDeny,
-    )
-  ))
+          // Harness request.maxDepth caps the absolute depth of THIS creation;
+          // it is not inherited by later delegations. The guard below enforces
+          // the configured member-relative descendant budget instead.
+        },
+        signal,
+      }), setup)
+    },
+    requestedFilter,
+    relaxableDeny,
+  )
   member.id = start.childId
+  if (usesManagedActivations(ctx.subagents)) {
+    member.runtimeSetup = { persona: memberPersona(team, member, stateDir, config.executionPrompt), toolFilter: acceptedFilter }
+  }
   // Only a policy member carries a persisted filter snapshot; a member without
-  // a policy keeps the previous record shape and behavior. The descriptor, not
-  // this snapshot, is what reapplies the filter on a cold resume.
+  // a policy keeps its public record shape. Legacy descriptors or runtimeSetup
+  // restore the filter on cold resume, depending on the host generation.
   if (member.toolFilter !== undefined) member.toolFilter = { ...acceptedFilter }
 }
 
@@ -1072,7 +1111,6 @@ export function installRetiredMemberGuard(ctx: Context, stateDir: string): void 
 
 /** Bound all descendant creation, including renamed tools and code-runtime calls. */
 export function installMemberDelegationGuard(ctx: Context, stateDir: string, maxDepth: number): void {
-  const runtime = ctx.subagents
   let active = true
   const check = (parent: Agent): void => {
     if (!active) return
@@ -1102,24 +1140,8 @@ export function installMemberDelegationGuard(ctx: Context, stateDir: string, max
       depth++
     }
   }
-  ctx.effect(() => {
-    const start = runtime.start
-    const continuable = runtime.startContinuable
-    const startDescriptor = Object.getOwnPropertyDescriptor(runtime, 'start')
-    const continuableDescriptor = Object.getOwnPropertyDescriptor(runtime, 'startContinuable')
-    const guardedStart: typeof start = async (name, request) => { check(request.parent); return start.call(runtime, name, request) }
-    const guardedContinuable: typeof continuable = async spec => { check(spec.request.parent); return continuable.call(runtime, spec) }
-    runtime.start = guardedStart
-    runtime.startContinuable = guardedContinuable
-    return () => {
-      active = false
-      for (const [key, fn, descriptor] of [['start', guardedStart, startDescriptor], ['startContinuable', guardedContinuable, continuableDescriptor]] as const) {
-        if (Object.getOwnPropertyDescriptor(runtime, key)?.value !== fn) continue
-        if (descriptor === undefined) Reflect.deleteProperty(runtime, key)
-        else Object.defineProperty(runtime, key, descriptor)
-      }
-    }
-  }, 'agent-teams: member delegation budget')
+  guardSubagentCreation(ctx, check)
+  ctx.effect(() => () => { active = false }, 'agent-teams: delegation guard lifetime')
 }
 
 /**

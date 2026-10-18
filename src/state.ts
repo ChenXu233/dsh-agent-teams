@@ -797,6 +797,9 @@ function isTeamMember(value: unknown): value is TeamMember {
     && (value['contextUsage'] === undefined || isMemberContextUsage(value['contextUsage']))
     && (value['lastCompactAt'] === undefined || isFiniteNumber(value['lastCompactAt']))
     && (value['lastShadowedTokens'] === undefined || isFiniteNumber(value['lastShadowedTokens']))
+    && (value['runtimeSetup'] === undefined || (isRecord(value['runtimeSetup'])
+      && typeof value['runtimeSetup']['persona'] === 'string'
+      && isMemberToolFilter(value['runtimeSetup']['toolFilter'])))
     && isFiniteNumber(value['joinedAt'])
     && (value['status'] === 'idle' || value['status'] === 'working' || value['status'] === 'removed')
 }
