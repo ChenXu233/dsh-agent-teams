@@ -860,3 +860,34 @@ test('02m. staged prefill uses the declared budget (real staged shape); badges s
   assert.equal((panelHtml.match(/data-member-context=/g) ?? []).length, 1, 'declared-only budget must not mint a usage badge')
   assert.equal((panelHtml.match(/data-member-compactions=/g) ?? []).length, 1, 'declared-only budget must not mint a compaction badge')
 })
+
+
+// ===========================================================================
+// 07c — upstream-sync merge fidelity (both directions must hold).
+// Upstream: v0.1.24 (0.2.1-rc.1 support + member activation/resume fixes)
+// + v0.1.25 (0.2.1-rc.2 installer fix). Ours: plan 02 (member context budget).
+// These assertions double as the canary for the red/green probe: reverting any
+// one upstream substantive change must turn this block red.
+// ===========================================================================
+
+test('07c. merge fidelity: upstream 0.2.1 support landed and plan-02 wiring coexists', async () => {
+  const root = new URL('../', import.meta.url)
+  const pkg = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
+  const compat = JSON.parse(await readFile(new URL('compatibility.json', root), 'utf8'))
+  const agentPeer = pkg.peerDependencies?.['@deepseek-ai/dsh-agent'] ?? ''
+  assert.match(agentPeer, /0\.2\.1-rc\.2/, '0.2.1-rc.2 peer accepted (v0.1.25 installer fix)')
+  assert.match(agentPeer, /0\.2\.1-rc\.1/, '0.2.1-rc.1 peer accepted (v0.1.24)')
+  assert.match(agentPeer, /0\.2\.0-rc\.2/, '0.2.0-rc.2 stays supported')
+  const supported = compat.supportedHosts.map(host => host.version)
+  assert.ok(supported.includes('0.2.1-rc.2') && supported.includes('0.2.1-rc.1') && supported.includes('0.2.0-rc.2'),
+    'compatibility.json supportedHosts keeps 0.2.1-rc.2 / 0.2.1-rc.1 / 0.2.0-rc.2')
+  const membersSource = await readFile(new URL('lib/members.js', root), 'utf8')
+  assert.match(membersSource, /usesManagedActivations/, 'upstream managed activations present')
+  assert.match(membersSource, /runtimeSetup/, 'upstream runtimeSetup persistence present')
+  assert.match(membersSource, /installMemberContextGuard/, 'plan-02 watchdog present')
+  const toolsSource = await readFile(new URL('lib/tools.js', root), 'utf8')
+  assert.match(toolsSource, /memberContextRef/, 'plan-02 budget ref present after the upstream call-site move')
+  const stateSource = await readFile(new URL('lib/state.js', root), 'utf8')
+  assert.match(stateSource, /contextMaxTokens/, 'plan-02 durable fields still validate')
+  assert.match(stateSource, /runtimeSetup/, 'upstream runtimeSetup validation kept')
+})
