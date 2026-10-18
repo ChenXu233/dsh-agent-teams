@@ -71,10 +71,10 @@ The conversation card and activity panel use Harness's official locale service. 
 In the app sidebar, open **Plugins → Add plugin** and enter the npm package spec:
 
 ```text
-@nanmicoder/dsh-agent-teams@0.1.24
+@nanmicoder/dsh-agent-teams
 ```
 
-Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
+The package name resolves npm `latest`. To pin a version, append `@0.1.24`. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
 The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile in `0.2.1-rc.1`. Check the embedded core against the compatibility list. Harness `0.2.1-rc.1` is now the exact published target; its RC status is unchanged. The earlier source-only `0.2.0` prediction is no longer a support declaration. See the [release migration evidence](./docs/harness-0.2.1-rc.1/README.md).
 
@@ -89,10 +89,10 @@ Skip this if you already run this version. Alpha is opt-in: select an exact Alph
 
 ### CLI / Web: 2. Install the AgentTeams plugin
 
-Install or upgrade from npm using the exact stable version:
+Install or upgrade from npm using the package name (resolves npm `latest`, currently `0.1.24`):
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.24
+dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams
 ```
 
 For a CLI-managed installation, replace `web` with your active CLI profile. **Stop and restart that profile's Harness process, then refresh the browser.** Installing the plugin does not upgrade Harness; the host and plugin have independent `latest` channels.

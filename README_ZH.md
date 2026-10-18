@@ -70,10 +70,10 @@
 在应用侧栏打开「插件 → 添加插件」，输入 npm 包名和版本：
 
 ```text
-@nanmicoder/dsh-agent-teams@0.1.24
+@nanmicoder/dsh-agent-teams
 ```
 
-安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
+不带版本号的包名会安装 npm `latest`；需要锁定版本时可追加 `@0.1.24`。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
 
 桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。当前精确目标是已发布的 `0.2.1-rc.1`，仍属于 RC；此前源码预测的 `0.2.0` 已退出支持声明。详见[迁移验收记录](./docs/harness-0.2.1-rc.1/README.md)。
 
@@ -88,10 +88,10 @@ dsh --version
 
 ### CLI / Web：2. 安装 AgentTeams 插件
 
-从 npm 安装或升级插件（锁定精确正式版本）：
+从 npm 安装或升级插件（不带版本号时使用 npm `latest`，当前为正式版 `0.1.24`）：
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.24
+dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams
 ```
 
 CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后，停止并重新启动该 profile 的 Harness 进程，再刷新浏览器。** 安装插件不会自动升级宿主；Harness 的 `latest` 与插件的 `latest` 是两个独立渠道。
