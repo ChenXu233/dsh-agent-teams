@@ -8,7 +8,7 @@
 
 | DSH 能力 | AgentTeams 用法 |
 |---|---|
-| `ctx.tools` 注册表 | 注册原有 14 个业务工具；按会话身份限制模型可见工具 |
+| `ctx.tools` 注册表 | 注册 15 个业务工具（原 14 个 + `agent_teams_run_command`）；按会话身份限制模型可见工具 |
 | `ctx.subagents.startContinuable()` | 创建成员：durable 可续聊子代理，带成员 persona |
 | `ctx.subagents.followup()` | 唤醒收件成员（消息进入其下一轮次） |
 | 持久化团队成员表 + `ctx.agents` | 前者保存 durable 成员身份，后者提供真实 `running / idle / ready` 活动状态（不依赖易变的子代理目录投影） |
