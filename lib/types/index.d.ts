@@ -78,6 +78,12 @@ export interface Config {
      * absent nothing is registered: no watchdog, no fields, no behavior change.
      */
     memberContext?: MemberContextConfig;
+    /**
+     * Command names `agent_teams_run_command` may never issue into a member
+     * session (default `["agent-teams"]`: this plugin's own activation surface).
+     * Override to widen or narrow the deny list.
+     */
+    memberCommandDeny?: string[];
     /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
     promptSectionOrder?: number;
     /**

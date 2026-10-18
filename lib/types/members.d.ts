@@ -292,6 +292,16 @@ export declare function spawnMember(ctx: Context, config: MemberRuntimeConfig, s
  */
 export declare function deliverToMember(ctx: Context, captain: Agent, childId: string, text: string, signal: AbortSignal, mode?: 'queue' | 'steer'): Promise<boolean>;
 /**
+ * Resolve one member's live Agent for command execution, cold members included.
+ *
+ * Priority: the host typert lookup (`lookups.get('agent')`, configured by
+ * dsh-api-session-controller to `resolveAgent`) — it resumes a cold member,
+ * which is the intended behavior for issuing that member's own commands.
+ * Fallback: the process-local agent registry. Both miss ⇒ `undefined`; callers
+ * must surface a readable error instead of guessing.
+ */
+export declare function resolveMemberAgent(ctx: Context, childId: string): Promise<Agent | undefined>;
+/**
  * Request cancellation of one live member's current turn. Best effort, fire
  * and return; the target may keep running until it observes the signal.
  * @param ctx - the plugin context (injects `subagents`).

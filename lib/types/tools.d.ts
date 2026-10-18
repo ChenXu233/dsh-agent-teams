@@ -43,6 +43,13 @@ export interface ToolsConfig {
      * accounting.
      */
     memberContext?: MemberContextConfig;
+    /**
+     * Command names (without the leading slash) `agent_teams_run_command` may
+     * never issue into a member session. Default: this plugin's own
+     * agent-teams surface, so the captain cannot re-enter the activation
+     * command through a member.
+     */
+    memberCommandDeny?: string[];
 }
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
 export type StagedPlanMutation = {
