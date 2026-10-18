@@ -38,10 +38,11 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
-import { findTeamByCaptain } from './state.ts'
+import { findTeamByCaptain, sanitizeKey } from './state.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
+import { deliverToMember } from './members.ts'
 import { installTeamCapabilities } from './capabilities.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
 import { parseMemberContextConfig, type MemberContextConfig } from './member-context.ts'
@@ -115,6 +116,12 @@ export interface Config {
    * absent nothing is registered: no watchdog, no fields, no behavior change.
    */
   memberContext?: MemberContextConfig
+  /**
+   * Command names `agent_teams_run_command` may never issue into a member
+   * session (default `["agent-teams"]`: this plugin's own activation surface).
+   * Override to widen or narrow the deny list.
+   */
+  memberCommandDeny?: string[]
   /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
   promptSectionOrder?: number
   /**
@@ -195,6 +202,7 @@ export const Config: z<Config> = z.object({
   })).default({}),
   toolPolicies: z.dict(toolPolicyConfig).default({}),
   memberContext: memberContextConfig,
+  memberCommandDeny: z.array(z.string()),
   memberMaxDepth: z.natural().default(0),
   maxMembers: z.natural().min(1).default(8),
   promptSectionOrder: z.natural().default(117),
@@ -251,6 +259,9 @@ export function apply(ctx: Context, config: Config): void {
     // is absent, which keeps every downstream path on the previous behavior
     // (no watchdog, no accounting, no extra fields).
     memberContext: parseMemberContextConfig(config.memberContext),
+    // Command deny list for agent_teams_run_command; the plugin's own
+    // agent-teams surface is always the safe default.
+    memberCommandDeny: config.memberCommandDeny ?? ['agent-teams'],
   }
 
   // Provider registration is a sibling plugin's effect (`subagent-spawn` /
@@ -382,6 +393,83 @@ export function apply(ctx: Context, config: Config): void {
         }
       },
     }), 'agent-teams: halt route')
+
+    // Member prompt route: a human in the activity panel sends plain text to
+    // one member of their team. Delivery reuses the same captain -> member
+    // queue path the model-facing tools use (deliverToMember).
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/prompt',
+      handler: async (req, res) => {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        let payload: Record<string, unknown>
+        try {
+          payload = await readJsonRequest(req)
+        } catch (error: unknown) {
+          res.writeHead(error instanceof RequestBodyError ? error.status : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'invalid request body' }))
+          return
+        }
+        const sessionId = typeof payload['sessionId'] === 'string' ? payload['sessionId'].trim() : ''
+        const teamId = typeof payload['teamId'] === 'string' ? payload['teamId'].trim() : ''
+        const member = typeof payload['member'] === 'string' ? payload['member'].trim() : ''
+        const text = typeof payload['text'] === 'string' ? payload['text'] : ''
+        if (sessionId === '' || teamId === '' || member === '' || text.trim() === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId, teamId, member, and text are required' }))
+          return
+        }
+        const captain = ctx.agents.get(sessionId as import('@deepseek-ai/dsh-session').SessionId)
+        if (captain === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'captain session is not attached' }))
+          return
+        }
+        const workspace = captain.session.header.cwd ?? process.cwd()
+        const stateRoot = join(workspace, resolved.stateDir)
+        const team = await findTeamByCaptain(stateRoot, captain.id, await leadIdentityOfAsync(ctx, captain.session))
+        if (team === undefined || team.id !== teamId) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'team not found for this captain' }))
+          return
+        }
+        const target = team.members.find((candidate) =>
+          (sanitizeKey(candidate.name) === sanitizeKey(member) || candidate.id === member) && candidate.status !== 'removed')
+        if (target === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: `no active member "${member}" in team "${team.name}"` }))
+          return
+        }
+        if (target.stopping === true) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: `member "${target.name}" is being stopped; retry after it settles` }))
+          return
+        }
+        if (target.id === '') {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: `member "${target.name}" has no session yet (never started)` }))
+          return
+        }
+        try {
+          const delivered = await deliverToMember(ctx, captain, target.id, text, new AbortController().signal, 'queue')
+          if (!delivered) {
+            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+            res.end(JSON.stringify({ error: 'failed to deliver the prompt to the member' }))
+            return
+          }
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ ok: true, member: target.id, delivered: true }))
+        } catch (error: unknown) {
+          ctx.logger.warn(`agent-teams: member prompt delivery failed for ${target.name}: ${String(error)}`)
+          res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'failed to deliver the prompt to the member' }))
+        }
+      },
+    }), 'agent-teams: member prompt route')
 
     ctx.effect(() => webServer.register({
       kind: 'exact',

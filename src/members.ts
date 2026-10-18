@@ -1075,6 +1075,36 @@ export async function deliverToMember(
   }
 }
 
+/** Structural view of the host typert agent lookup (dsh-typert-registry). */
+interface TypertAgentLookup {
+  resolve(id: string): Promise<Agent | undefined>
+}
+
+/**
+ * Resolve one member's live Agent for command execution, cold members included.
+ *
+ * Priority: the host typert lookup (`lookups.get('agent')`, configured by
+ * dsh-api-session-controller to `resolveAgent`) — it resumes a cold member,
+ * which is the intended behavior for issuing that member's own commands.
+ * Fallback: the process-local agent registry. Both miss ⇒ `undefined`; callers
+ * must surface a readable error instead of guessing.
+ */
+export async function resolveMemberAgent(ctx: Context, childId: string): Promise<Agent | undefined> {
+  const typert = (ctx as unknown as { get?: (name: string) => unknown }).get?.('typert') as
+    | { lookups?: { get?: (key: string) => TypertAgentLookup | undefined } }
+    | undefined
+  const lookup = typert?.lookups?.get?.('agent')
+  if (lookup !== undefined && typeof lookup.resolve === 'function') {
+    try {
+      const resolved = await lookup.resolve(childId)
+      if (resolved !== undefined) return resolved
+    } catch (error: unknown) {
+      ctx.logger.warn(`agent-teams: typert resolve of member ${childId} failed: ${String(error)}`)
+    }
+  }
+  return ctx.agents.get(brandedSessionId(childId))
+}
+
 /**
  * Request cancellation of one live member's current turn. Best effort, fire
  * and return; the target may keep running until it observes the signal.

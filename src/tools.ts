@@ -80,6 +80,7 @@ import {
   installMemberSelectionRuntime,
   installMemberDelegationGuard,
   memberActivity,
+  resolveMemberAgent,
   resolveMemberLlmSelection,
   spawnMember,
   steerCaptainReport,
@@ -89,6 +90,7 @@ import {
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 import { collectCompletedDependencyOutputs, formatDependencyOutputs, installTeamScheduler } from './scheduler.ts'
 import { installMailboxAdmission, isCurrentMail, mailboxContent, mailboxPrompt, readCurrentMailbox } from './mailbox.ts'
+import { AGENT_TEAMS_COMMAND } from './command.ts'
 import { resolveTeamProfile } from './profiles.ts'
 import { forkLineageNote, leadIdentityOf, leadIdentityOfAsync, nearestLiveLead, sessionLeadsTeam, sessionLeadsTeamAsync } from './lineage.ts'
 
@@ -122,6 +124,34 @@ export interface ToolsConfig {
    * accounting.
    */
   memberContext?: MemberContextConfig
+  /**
+   * Command names (without the leading slash) `agent_teams_run_command` may
+   * never issue into a member session. Default: this plugin's own
+   * agent-teams surface, so the captain cannot re-enter the activation
+   * command through a member.
+   */
+  memberCommandDeny?: string[]
+}
+
+/**
+ * The host's own slash-command grammar (`parseCommand` in dsh-commands): a
+ * command name is lowercase, starts with a letter, and the line must either
+ * end there or continue with one of the host's separators (`[\t\n\r ]`).
+ * Mirroring the host expression keeps this deny predicate from disagreeing
+ * with the name the command bus would actually dispatch — a hand-written
+ * `line === '/name' || line.startsWith('/name ')` predicate misses the
+ * TAB/LF/CR separators.
+ */
+const HOST_COMMAND_NAME = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u
+
+/**
+ * True when a command name — parsed from a line, or advertised by the member's
+ * catalog — is denied for members. An exact hit covers the command itself; the
+ * `<denied>-` prefix covers the alias family this plugin registers per profile
+ * (`agent-teams-<profile>`), so neither can re-enter the plugin's own surface.
+ */
+function isDeniedMemberCommand(name: string, deny: readonly string[]): boolean {
+  return deny.some((denied) => name === denied || name.startsWith(`${denied}-`))
 }
 
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
@@ -2317,6 +2347,102 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         from: prepared.from,
         to: prepared.recipient.name,
         delivered,
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'agent_teams_run_command',
+    description: 'Run one of a member\'s OWN registered slash commands inside that member\'s session (e.g. /compact), or list which commands that member sees. Captain-only: members cannot see this tool. A run dispatches the line as plain, attachment-free input on the Harness command bus — equivalent to the member typing that same single line (ctx.commands.execute on the member agent with an always-empty attachment list; cold members are resumed, so list first when unsure which commands a member supports). Lines containing CR or LF are refused. Use action="list" to see what the member supports; use action="run" to execute. member accepts the member\'s display name or its child session id. Denied for members by default: this plugin\'s own command name (agent-teams) and its whole <profile> alias prefix family (agent-teams-*); configure memberCommandDeny to override the deny list.',
+    parameters: {
+      member: { type: 'string', required: true, description: 'Member display name (captain view) or member child session id.' },
+      action: { type: 'string', required: true, enum: ['list', 'run'], description: 'list = which commands this member sees; run = execute `line` in the member session.' },
+      line: { type: 'string', description: 'Required for run: one command line, starting with "/", at most 512 characters (no CR or LF).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          member: { type: 'string', required: true },
+          commands: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { name: { type: 'string', required: true }, description: { type: 'string' }, hint: { type: 'string' }, attachments: { type: 'boolean' } } } },
+          line: { type: 'string' },
+          ok: { type: 'boolean' },
+          kind: { type: 'string' },
+          text: { type: 'string' },
+          command_id: { type: 'string' },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.commands !== undefined
+          ? `Member "${value.member}" sees ${value.commands.length} command(s):` + (value.commands.length === 0 ? '' : '\n' + value.commands.map((c: { name: string; description?: string }) => `  /${c.name}${c.description === undefined ? '' : ` — ${c.description}`}`).join('\n'))
+          : `${value.ok === true ? 'Ran' : 'Failed'} ${value.line} in member "${value.member}"${value.text === undefined ? '' : `: ${value.text}`}`,
+      }],
+    },
+    async execute(args, exec) {
+      const captain = requireCaptain(exec)
+      const workspace = workspaceOf(captain)
+      const stateRoot = stateRootOf(workspace, config)
+      const team = await requireCaptainTeam(ctx, workspace, config, captain)
+      const memberKey = sanitizeKey(args.member)
+      const member = team.members.find((candidate) =>
+        (sanitizeKey(candidate.name) === memberKey || candidate.id === args.member) && candidate.status !== 'removed')
+      if (member === undefined) {
+        throw new Error(`no active member named "${args.member}" in team "${team.name}" — use agent_teams_status to list members`)
+      }
+      if (member.stopping === true) {
+        throw new Error(`member "${member.name}" is being stopped (a handoff is draining); retry after it settles`)
+      }
+      if (member.id === '') {
+        throw new Error(`member "${member.name}" has no session yet (never started); run its first task before sending commands`)
+      }
+      const childId = member.id
+      if (args.action === 'list') {
+        const agent = await resolveMemberAgent(ctx, childId)
+        if (agent === undefined) throw new Error(`member agent is not resolvable: ${childId}`)
+        const descriptors = ctx.commands.list(agent)
+        const deniedNames = config.memberCommandDeny ?? [AGENT_TEAMS_COMMAND]
+        return {
+          member: member.name,
+          commands: descriptors
+            .filter((descriptor: { name: string }) => !isDeniedMemberCommand(descriptor.name, deniedNames))
+            .map((descriptor: { name: string; description?: string; input?: { hint?: string; attachments?: boolean } }) => ({
+              name: descriptor.name,
+              description: descriptor.description,
+              ...(descriptor.input?.hint === undefined ? {} : { hint: descriptor.input.hint }),
+              ...(descriptor.input?.attachments === undefined ? {} : { attachments: descriptor.input.attachments }),
+            })),
+        }
+      }
+      if (args.line === undefined || args.line === null) throw new Error('run requires `line` (a command line starting with "/")')
+      // One command per call: a CR/LF line could smuggle a second one past the
+      // name check before the bus ever sees it.
+      if (/[\r\n]/u.test(args.line)) throw new Error('line must be a single command line (CR and LF are not allowed)')
+      const line = args.line.trim()
+      if (line === '' || !line.startsWith('/')) throw new Error('line must start with "/" (a command line)')
+      if (line.length > 512) throw new Error(`line is too long (${line.length} > 512 characters)`)
+      const deniedNames = config.memberCommandDeny ?? [AGENT_TEAMS_COMMAND]
+      const commandName = HOST_COMMAND_NAME.exec(line)?.[1]
+      if (commandName !== undefined && isDeniedMemberCommand(commandName, deniedNames)) {
+        throw new Error(`command "/${commandName}" is denied for members by configuration (memberCommandDeny)`)
+      }
+      const agent = await resolveMemberAgent(ctx, childId)
+      if (agent === undefined) throw new Error(`member agent is not resolvable: ${childId}`)
+      // The official bus with a plain, attachment-free input: identical to the
+      // member typing this single line. undefined means no registered command
+      // claimed the line.
+      const outcome = await ctx.commands.execute(agent, line, [], exec.signal)
+      if (outcome === undefined) {
+        return { member: member.name, line, ok: false, kind: 'error', text: `no registered command handled "${line}" in member "${member.name}"; use action="list" to see what it supports` }
+      }
+      return {
+        member: member.name,
+        line,
+        ok: outcome.result.kind === 'success',
+        kind: outcome.result.kind,
+        ...(outcome.result.text === undefined ? {} : { text: outcome.result.text }),
+        ...(outcome.commandId === undefined ? {} : { command_id: outcome.commandId }),
       }
     },
   }))
