@@ -2246,3 +2246,108 @@
 .team[data-workspace-team] .dagOwner { white-space: nowrap; max-width: 105px; }
 /* The page scrolls as a whole; an overlay approval bar would cover form saves. */
 .team[data-workspace-team] .planApproveRow { position: static; }
+
+/* Member command bar (plan 01a): one inline row under each live member.
+   Wraps instead of overflowing, and each control keeps its own box so the
+   narrow docked panel and the wide workspace view share one implementation. */
+.memberCommands {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 6px 4px 60px;
+}
+
+.memberCommandsLabel {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 9.5px;
+  line-height: 14px;
+}
+
+.memberCommandSelect,
+.memberCommandInput {
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.memberCommandSelect {
+  flex: 1 1 128px;
+  max-width: 240px;
+}
+
+.memberCommandInput {
+  flex: 1 1 132px;
+}
+
+.memberCommandSelect:focus-visible,
+.memberCommandInput:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.memberCommandButton {
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-button-ghost-active-fill);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.memberCommandButton:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.memberCommandButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.memberCommandButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.memberCommandNotice,
+.memberCommandResult {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.memberCommandNotice {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.memberCommandResult {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.memberCommandResult[data-tone='success'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.memberCommandResult[data-tone='error'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+

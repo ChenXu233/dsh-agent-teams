@@ -19,6 +19,10 @@ import type { UsePanelInfo } from '@deepseek-ai/dsh-client-ui-layout/client'
 // provider/model/effort metadata without mutating the captain's own selection.
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+// Type-only: declares the generated remote command face on the client context.
+// ui-commands (host) resolves the same service, and the value import below is
+// erased at build time, so the bundle keeps its platform-only externals.
+import type {} from '@deepseek-ai/dsh-commands/remote'
 import { ActivitySurface, WorkspaceActivity, createWorkspaceBridge, TEAM_TAB_ID, TEAM_TAB_KIND } from './WorkspaceActivity.tsx'
 import { TeamChatEntry, TeamTurnCard } from './TeamChatEntry.tsx'
 import { createWorkspaceState } from './workspace-state.ts'
@@ -28,6 +32,7 @@ import {
   AGENT_TEAMS_LOCALE_NAMESPACE, en, zh, type AgentTeamsLocaleKey,
 } from './locales.ts'
 import { openAgentTeamMember, type AgentTeamsLayoutNavigator, type AgentTeamsWorkspaceNavigator } from './session-navigation.ts'
+import { provideMemberCommands } from './command-client.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -36,8 +41,15 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Required services: conversation nodes, slots, sessions navigation, and locale. */
-export const inject = ['uiConversation', 'slots', 'sessions', 'locale', 'modelDirectories', 'layout']
+/**
+ * Required services: conversation nodes, slots, sessions navigation, locale,
+ * and the browser remote face whose \`commands\` namespace runs a member's own
+ * registered commands (plan 01a). ui-commands declares the same service pair.
+ */
+export const inject = [
+  'uiConversation', 'slots', 'sessions', 'locale', 'modelDirectories', 'layout',
+  'remote.commands',
+]
 
 /** The host supplies this hook for the lifetime of a 0.1.5 root slot. */
 interface PanelNavigationProps {
@@ -56,6 +68,13 @@ function HiddenAgentTeamsCommand(): null {
  * monitor via a window event — the recovery path for an old session.
  */
 export function apply(ctx: ClientContext): void {
+  // Plan 01a: publish the host's remote-command face for the member command
+  // bars. The value crosses an untyped service boundary, so the client module
+  // verifies the shape and a host without the service simply disables them.
+  ctx.effect(() => {
+    provideMemberCommands(ctx.get('remote.commands'))
+    return () => { provideMemberCommands(undefined) }
+  }, 'agent-teams: member command face')
   const bridge = createWorkspaceBridge()
   const state = createWorkspaceState()
   ctx.effect(

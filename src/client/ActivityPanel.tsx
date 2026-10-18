@@ -59,6 +59,15 @@ import {
   type ActivityTask,
   type ActivityTeam,
 } from './activity-monitor.ts'
+import {
+  activeMemberCommands,
+  commandDraftFor,
+  commandLineFor,
+  createMemberCommandClient,
+  promptTextFor,
+  type MemberCommand,
+  type MemberCommandFailure,
+} from './command-client.ts'
 import { ACTION_ART, LEAD_ART, memberArtUrl } from './artwork.ts'
 import { OPEN_PANEL_EVENT } from './AgentTeamsCard.tsx'
 import { StagingPlanEditor } from './StagingPlanEditor.tsx'
@@ -287,6 +296,181 @@ function MemberContextBadges({ member, t }: {
         </span>
       )}
     </>
+  )
+}
+
+/** Locale rendering for one dispatch failure; the client module emits no prose. */
+function memberCommandFailureText(failure: MemberCommandFailure, t: AgentTeamsTranslate): string {
+  if (failure.kind === 'empty') return t('member.command.empty')
+  if (failure.kind === 'unclaimed') return t('member.command.unclaimed', { line: failure.line })
+  if (failure.kind === 'remote') {
+    return t('member.command.remoteError', {
+      code: failure.code,
+      message: failure.message === '' ? t('member.command.failed') : failure.message,
+    })
+  }
+  return t('member.command.transportError', { detail: failure.detail })
+}
+
+/**
+ * Inline command bar for one member row (plan 01a).
+ *
+ * The catalog always comes from this member session's own `commands/list`
+ * call, loaded lazily on first interaction so merely opening the panel never
+ * touches (or wakes) a cold member. The compact shortcut dispatches the
+ * ordinary `/compact` line through the same execute path, and whatever the
+ * member answers — including the busy-compaction error — is shown verbatim and
+ * never retried here.
+ */
+function MemberCommandBar({ team, member, t }: {
+  readonly team: ActivityTeam
+  readonly member: ActivityMember
+  readonly t: AgentTeamsTranslate
+}) {
+  const [commands, setCommands] = useState<readonly MemberCommand[]>([])
+  const [catalog, setCatalog] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
+  const [draft, setDraft] = useState('')
+  const [pending, setPending] = useState(false)
+  const [feedback, setFeedback] = useState<{ readonly tone: 'success' | 'error'; readonly text: string } | undefined>(undefined)
+  const port = activeMemberCommands()
+  const client = useMemo(
+    () => port === undefined
+      ? undefined
+      : createMemberCommandClient(port, {
+        sessionId: team.captainSessionId,
+        teamId: team.teamId,
+        member: member.name,
+        memberSessionId: member.id,
+      }),
+    [port, team.captainSessionId, team.teamId, member.name, member.id],
+  )
+  const loadCatalog = useCallback((): void => {
+    if (client === undefined || catalog === 'loading' || catalog === 'ready') return
+    setCatalog('loading')
+    void client.list().then((outcome) => {
+      if (outcome.kind === 'failure') {
+        setCatalog('failed')
+        setFeedback({ tone: 'error', text: memberCommandFailureText(outcome.failure, t) })
+        return
+      }
+      setCommands(outcome.commands)
+      setCatalog('ready')
+      setFeedback(undefined)
+    })
+  }, [catalog, client, t])
+  const dispatch = useCallback(async (line: string): Promise<void> => {
+    if (client === undefined) return
+    setPending(true)
+    setFeedback(undefined)
+    try {
+      const outcome = await client.run(line)
+      if (outcome.kind === 'failure') {
+        setFeedback({ tone: 'error', text: memberCommandFailureText(outcome.failure, t) })
+        return
+      }
+      if (outcome.result.kind === 'error') {
+        setFeedback({ tone: 'error', text: outcome.result.text.trim() === '' ? t('member.command.failed') : outcome.result.text })
+        return
+      }
+      setFeedback({
+        tone: 'success',
+        text: outcome.result.text === undefined || outcome.result.text.trim() === ''
+          ? t('member.command.success')
+          : outcome.result.text,
+      })
+    } finally {
+      setPending(false)
+    }
+  }, [client, t])
+  const disabled = client === undefined || pending
+  const runDraft = (): void => {
+    const line = commandLineFor(draft, commands)
+    if (line === '') {
+      setFeedback({ tone: 'error', text: t('member.command.empty') })
+      return
+    }
+    if (!line.startsWith('/')) {
+      setFeedback({ tone: 'error', text: t('member.command.notSlash') })
+      return
+    }
+    void dispatch(line)
+  }
+  const sendDraft = (): void => {
+    if (client === undefined) return
+    const text = promptTextFor(draft)
+    if (text === undefined) {
+      setFeedback({ tone: 'error', text: t('member.command.empty') })
+      return
+    }
+    setPending(true)
+    setFeedback(undefined)
+    void client.send(text).then((outcome) => {
+      setFeedback(outcome.kind === 'delivered'
+        ? { tone: 'success', text: t('member.command.delivered') }
+        : { tone: 'error', text: memberCommandFailureText(outcome.failure, t) })
+    }).finally(() => { setPending(false) })
+  }
+  const optionLabel = (command: MemberCommand): string => (
+    command.description === '' ? command.name : `${command.name} — ${command.description}`
+  )
+  return (
+    <div className={css.memberCommands} data-member-commands data-member={member.name}>
+      <span className={css.memberCommandsLabel}>{t('member.command.label')}</span>
+      <select
+        className={css.memberCommandSelect}
+        data-member-command-select
+        value=""
+        disabled={disabled}
+        aria-label={t('member.command.selectAria')}
+        onFocus={loadCatalog}
+        onPointerDown={loadCatalog}
+        onChange={(event) => {
+          const name = event.currentTarget.value
+          if (name !== '') setDraft(commandDraftFor(name))
+        }}
+      >
+        <option value="">{catalog === 'loading'
+          ? t('member.command.loading')
+          : catalog === 'ready' && commands.length === 0
+            ? t('member.command.emptyList')
+            : t('member.command.pick')}</option>
+        {commands.map((command) => (
+          <option key={command.name} value={command.name}>{optionLabel(command)}</option>
+        ))}
+      </select>
+      <input
+        className={css.memberCommandInput}
+        data-member-command-input
+        type="text"
+        value={draft}
+        disabled={disabled}
+        placeholder={t('member.command.placeholder')}
+        aria-label={t('member.command.textAria')}
+        onChange={(event) => { setDraft(event.currentTarget.value) }}
+      />
+      <button type="button" className={css.memberCommandButton} data-member-command-run disabled={disabled} onClick={runDraft}>
+        {pending ? t('member.command.busy') : t('member.command.run')}
+      </button>
+      <button type="button" className={css.memberCommandButton} data-member-command-send disabled={disabled} onClick={sendDraft}>
+        {t('member.command.send')}
+      </button>
+      <button type="button" className={css.memberCommandButton} data-member-command-compact disabled={disabled} onClick={() => { void dispatch('/compact') }}>
+        {t('member.command.compact')}
+      </button>
+      {client === undefined && (
+        <span className={css.memberCommandNotice}>{t('member.command.unavailable')}</span>
+      )}
+      {feedback !== undefined && (
+        <span
+          className={css.memberCommandResult}
+          data-tone={feedback.tone}
+          role={feedback.tone === 'error' ? 'alert' : 'status'}
+          aria-live={feedback.tone === 'error' ? 'assertive' : 'polite'}
+        >
+          {feedback.text}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -726,6 +910,10 @@ export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscar
                 {visibleMembers.map((member) => {
                   const owned = team.tasks.filter((task) => task.assignee === member.name)
                   const memberModel = memberRouteLabel(member)
+                  // Plan 01a: commands run on this member's own session, so the
+                  // bar is offered only while the row is live and addressable.
+                  const commandable = !historic && !discarded && !stopped
+                    && member.id !== '' && member.status !== 'removed'
                   return (
               <div key={member.id || member.name} className={css.memberBlock} data-activity={member.activity} data-selected-member={workspace && selectedAssignee === member.name || undefined}>
                 <span className={css.memberBranch} aria-hidden><span /></span>
@@ -814,6 +1002,9 @@ export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscar
                         })}
                   </span>
                 </div>
+                {commandable && (
+                  <MemberCommandBar key={member.id} team={team} member={member} t={t} />
+                )}
                   </div>
                 )
               })}
