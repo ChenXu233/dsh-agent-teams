@@ -58,10 +58,40 @@
 | `agent_teams_amend_task` | 队长专属：改写非终态质量任务的 objective/acceptance/verify/inScope/outOfScope（合同本身写错导致无法诚实完成时）；写入 revisions ledger，审查通过后冻结。成员不可用 |
 | `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱并唤醒对方（无队长转发；拒绝冒名 `from`） |
 | `agent_teams_status` | 团队全景：kind/round/verdict、coverage matrix、escalated、halt/resume 状态 |
+| `agent_teams_run_command` | 队长专属：在某个成员自己的会话里列举/执行已注册命令（`action: list\|run`）；命令行必须单行、`/` 开头、≤512 字符，默认 deny 掉 agent-teams 命名空间（见「成员命令面」） |
 | `agent_teams_resume` | 显式恢复 halted 团队，必须带非空 reason；不重建已取消任务 |
 | `agent_teams_delete` | 结束团队：打断成员，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
 
 `agent_teams_add_member` 默认不需要模型参数：成员沿用队长当前 LLM provider/model 时，会一并快照队长当前思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。provider 或 model 任一改变时，思考强度自动使用目标模型默认档；用户明确要求某个成员使用特定强度时，可以传入可选的 `reasoning_effort`（目标模型支持的档位 id，或 `"default"` 表示强制使用模型自身默认档）。插件不会为每个成员发起二次选择或弹窗。
+
+### 成员命令面（`agent_teams_run_command` + 面板成员命令栏）
+
+成员会话里的用户命令（`/compact` 等）有两个入口：队长用工具**下发**，或人在活动面板的成员行里**手点**。两者最终都走宿主的同一命令总线（在该成员 Agent 上执行 `ctx.commands.execute`），区别只在授权方是谁。
+
+**工具 `agent_teams_run_command`（队长专属，成员看不到这个工具）**
+
+| 参数 | 说明 |
+|---|---|
+| `member` | 成员显示名（队长视角）或成员子会话 id；必须是在队且未被移除的成员 |
+| `action` | `list` = 列该成员**自己的**命令目录；`run` = 在成员会话里执行 `line` |
+| `line` | `run` 必填：单行命令，必须以 `/` 开头，≤512 字符，**不允许 CR/LF** |
+
+- `list` → `{ member, commands: [{ name, description?, hint?, attachments? }] }`，按该成员会话自己的 scope 列举（不同成员可见命令集可能不同，不能拿队长的列表冒充）。冷成员会先被解析/唤醒（与 `run` 同一解析路径），不确定成员支持什么命令时先 `list`。
+- `run` → `{ member, line, ok, kind: 'success' | 'error', text?, command_id? }`；`text` 是命令自己的结果文案，原样返回。没有任何已注册命令认领该行（`execute` 返回 `undefined`）时返回 `ok: false, kind: 'error'` 与明确说明，不会静默成功。
+- 执行等价于成员**自己手打同一行**：`attachments` 恒为空（不携带附件，也不能用工具伪造附件）。
+- 守卫（全部是硬失败，不静默降级）：`line` 必须带前导斜杠、≤512 字符；**含 CR/LF 直接拒绝**（一次调用只允许一条命令行，防止用换行把第二条命令偷渡过命令名检查）。默认 **deny 掉本插件自己的命令名 `agent-teams` 及其 `<profile>` 别名前缀族**（即 `agent-teams` 与一切 `agent-teams-*`）；被拒的行**不会到达命令总线**，`list` 也不显示这一族。
+- 成员正在停止（draining）或从未启动（还没有会话）时拒绝，并提示重试时机；命令本身失败（例如压缩正在进行中返回 busy）按命令返回原样给出，**不自动重试**。
+- 配置 `memberCommandDeny?: string[]`（默认 `['agent-teams']`）是**字面替换**的安全开关：配 `[]` 等于关掉这道闸（连 `/agent-teams` 都能下发），请谨慎。
+  - 条目不做归一化：写 `['/compact']` 或 `['Compact']` 匹配不到宿主解析出的真实命令名（`compact`），会**静默 fail-open**——写不带斜杠的真实命令名。
+  - 前缀规则对每个条目生效：`['compact']` 会连带拒 `/compact-x`（偏安全，与「整个族」的直觉一致）。
+
+**面板入口（人手动下发，01a）**
+
+活动面板成员行的命令栏：命令下拉（该成员自己的 `list`）+ 文本框 + 「执行」（只接受 `/` 开头的命令）+ 「发送」（普通文本）+ 固定的「压缩上下文」（直接执行 `/compact`）。结果行原样显示命令返回的 `text`。普通文本经 `POST /plugins/dsh-agent-teams/member/prompt`（body `{ sessionId, teamId, member, text }`）投递到该成员邮箱，与队长给成员发消息走同一条队列（`deliverToMember`）；该路由对缺失字段 400、非 POST 405、队长会话未挂载 409、团队/成员不存在 404、投递失败 500。
+
+- **懒加载：打开面板不会唤醒冷成员。** 该成员的命令目录只在这一行的命令区**首次被交互**（聚焦文本框或按下下拉）时才拉取；仅打开面板/渲染成员行不产生这个副作用（`list` 会让宿主解析并 resume 冷成员会话）。控件本身始终渲染（保持可发现），宿主未提供命令服务（`remote.commands` 缺失）时禁用并给本地化提示。
+- 每个成员行各自持有状态、互不共享。
+- **有意的不对称**：面板路径（人点）**不套** `memberCommandDeny`——动手的就是操作者本人，即授权方；只有队长通过工具下发时才受 deny 约束。
 
 ## 配置
 
@@ -81,6 +111,8 @@
     fallback:                     # 主模型不可用时的第二选择
       provider: openai
       model: gpt-5.5
+    memberCommandDeny:            # 可选：agent_teams_run_command 不得下发给成员的命令族（默认 ['agent-teams']）
+      - agent-teams
     toolPolicies:                 # #59 部署方声明的可复用成员工具策略
       researcher:
         allow: [read, glob, grep] # 只保留这些全局工具（四个协调工具自动加入）
