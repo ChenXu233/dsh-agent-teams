@@ -81,9 +81,12 @@
 - 执行等价于成员**自己手打同一行**：`attachments` 恒为空（不携带附件，也不能用工具伪造附件）。
 - 守卫（全部是硬失败，不静默降级）：`line` 必须带前导斜杠、≤512 字符；**含 CR/LF 直接拒绝**（一次调用只允许一条命令行，防止用换行把第二条命令偷渡过命令名检查）。默认 **deny 掉本插件自己的命令名 `agent-teams` 及其 `<profile>` 别名前缀族**（即 `agent-teams` 与一切 `agent-teams-*`）；被拒的行**不会到达命令总线**，`list` 也不显示这一族。
 - 成员正在停止（draining）或从未启动（还没有会话）时拒绝，并提示重试时机；命令本身失败（例如压缩正在进行中返回 busy）按命令返回原样给出，**不自动重试**。
-- 配置 `memberCommandDeny?: string[]`（默认 `['agent-teams']`）是**字面替换**的安全开关：配 `[]` 等于关掉这道闸（连 `/agent-teams` 都能下发），请谨慎。
-  - 条目不做归一化：写 `['/compact']` 或 `['Compact']` 匹配不到宿主解析出的真实命令名（`compact`），会**静默 fail-open**——写不带斜杠的真实命令名。
-  - 前缀规则对每个条目生效：`['compact']` 会连带拒 `/compact-x`（偏安全，与「整个族」的直觉一致）。
+- 配置 `memberCommandDeny?: string[]`（默认 `['agent-teams']`）是**字面替换**的安全开关，只约束队长经工具下发的行（面板人手路径不受它约束，见下）。**写法规约**：
+  - **不带斜杠**：写宿主真实的命令名（`compact`），不要写 `/compact`。条目会先归一化——忽略首尾空白、忽略**任意个数**的前导斜杠、忽略大小写，所以 `compact`、`/Compact`、` /COMPACT ` 是同一个开关。（归一化前的版本会让这些写法静默 fail-open；N1 已修复，现在它们都会正确拒绝。）
+  - **前缀族**：每条条目同时拦它整个 `<entry>-*` 族——`deny: [review]` 也会拒 `/review-tools`。它比字面匹配更保守，是有意为之。
+  - **`[]` 的语义 = 什么都不拒**：显式写 `memberCommandDeny: []` 会**连同默认的 `agent-teams` 保护一起关掉**（`/agent-teams` 也能下发）。这个数组是**字面替换**而不是追加；要保留默认保护就不要写这个键。
+  - **非法条目 = 插件加载失败**：条目里没有可用的命令名（空串、`/`、`/ Compact`、`!!!`、数字、全角斜杠或零宽字符等）时，挂载阶段直接抛错，错误首句点明「AgentTeams 插件加载失败 … memberCommandDeny 非法」——工具与路由**都不会注册**，这不是命令执行错误。例外：绕过挂载直接调用 `registerAgentTeamsTools` 的调用方只收到一条 warn（记录差异，同名用例 M3 覆盖）。
+  - 合法的超长条目**不截断也不报错**（已核对无实际影响）。
 
 **面板入口（人手动下发，01a）**
 
@@ -111,8 +114,8 @@
     fallback:                     # 主模型不可用时的第二选择
       provider: openai
       model: gpt-5.5
-    memberCommandDeny:            # 可选：agent_teams_run_command 不得下发给成员的命令族（默认 ['agent-teams']）
-      - agent-teams
+    memberCommandDeny:            # 可选：agent_teams_run_command 的 deny 列表（默认 ['agent-teams']）
+      - agent-teams               # 写命令名，不带斜杠；每条同时拦 <entry>-*；显式写 [] 会连默认保护一起关掉
     toolPolicies:                 # #59 部署方声明的可复用成员工具策略
       researcher:
         allow: [read, glob, grep] # 只保留这些全局工具（四个协调工具自动加入）
