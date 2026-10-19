@@ -48,9 +48,30 @@ export interface ToolsConfig {
      * never issue into a member session. Default: this plugin's own
      * agent-teams surface, so the captain cannot re-enter the activation
      * command through a member.
+     *
+     * Entries are normalized (whitespace, any leading slashes and case are
+     * ignored) and each one also blocks its `<entry>-*` family; an explicit `[]`
+     * denies nothing at all, the built-in default included (literal
+     * replacement). Callers that bypass the mount must never silence an
+     * unusable entry.
      */
     memberCommandDeny?: string[];
 }
+/** Effective deny names plus the entries that carried no usable name. */
+export interface MemberCommandDenyResolution {
+    /** Normalized, de-duplicated names in configuration order. */
+    readonly names: readonly string[];
+    /** Entries that were unusable; callers must never ignore them silently. */
+    readonly dropped: readonly unknown[];
+}
+/**
+ * Resolve `memberCommandDeny` once, so `run` and `list` can never disagree
+ * about what is denied. `undefined` keeps the plugin's own agent-teams surface
+ * as the safe default; an explicitly empty array denies nothing — a deliberate
+ * literal replacement. Unusable entries are reported through `dropped` for the
+ * caller to surface (the host fails loudly at mount; direct callers warn).
+ */
+export declare function normalizeMemberCommandDeny(entries: readonly unknown[] | undefined): MemberCommandDenyResolution;
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
 export type StagedPlanMutation = {
     action: 'update_member';

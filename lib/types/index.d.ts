@@ -80,8 +80,17 @@ export interface Config {
     memberContext?: MemberContextConfig;
     /**
      * Command names `agent_teams_run_command` may never issue into a member
-     * session (default `["agent-teams"]`: this plugin's own activation surface).
-     * Override to widen or narrow the deny list.
+     * session. Default `["agent-teams"]`: this plugin's own activation surface.
+     *
+     * Write names WITHOUT the leading slash; entries are normalized (surrounding
+     * whitespace, any number of leading slashes and case are ignored), so
+     * `"compact"`, `"/compact"`, `"Compact"` and `" /COMPACT "` are the same
+     * switch. Every entry also blocks its whole `<entry>-*` family, so
+     * `"review"` denies `/review-tools` as well. An explicit `[]` denies
+     * NOTHING — the built-in `agent-teams` protection included — because the
+     * array is a literal replacement, not an addition. An entry that carries no
+     * usable command name fails the plugin load (see `parseMemberCommandDeny`)
+     * instead of silently denying nothing.
      */
     memberCommandDeny?: string[];
     /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
