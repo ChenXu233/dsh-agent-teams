@@ -30,6 +30,7 @@ import {
   haltTeamWork,
   stagedPlanApprovedContext,
   registerAgentTeamsTools,
+  normalizeMemberCommandDeny,
   type StagedPlanMutation,
   type ToolsConfig,
 } from './tools.ts'
@@ -118,8 +119,17 @@ export interface Config {
   memberContext?: MemberContextConfig
   /**
    * Command names `agent_teams_run_command` may never issue into a member
-   * session (default `["agent-teams"]`: this plugin's own activation surface).
-   * Override to widen or narrow the deny list.
+   * session. Default `["agent-teams"]`: this plugin's own activation surface.
+   *
+   * Write names WITHOUT the leading slash; entries are normalized (surrounding
+   * whitespace, any number of leading slashes and case are ignored), so
+   * `"compact"`, `"/compact"`, `"Compact"` and `" /COMPACT "` are the same
+   * switch. Every entry also blocks its whole `<entry>-*` family, so
+   * `"review"` denies `/review-tools` as well. An explicit `[]` denies
+   * NOTHING — the built-in `agent-teams` protection included — because the
+   * array is a literal replacement, not an addition. An entry that carries no
+   * usable command name fails the plugin load (see `parseMemberCommandDeny`)
+   * instead of silently denying nothing.
    */
   memberCommandDeny?: string[]
   /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
@@ -241,6 +251,23 @@ export function usageSectionText(toolNames: string, profilesText = ''): string {
 Tools: ${toolNames}${profilesText === '' ? '' : `\n\n${profilesText}`}`
 }
 
+/**
+ * Resolve `memberCommandDeny` once, at mount, and fail loudly when an entry
+ * carries no usable command name. Entries are normalized (surrounding
+ * whitespace, leading slashes and case are ignored), so `'/Compact'` cannot
+ * silently disable the switch. An explicitly empty array still denies nothing:
+ * that literal replacement is deliberate (N3).
+ */
+function parseMemberCommandDeny(entries: readonly string[] | undefined): string[] {
+  const { names, dropped } = normalizeMemberCommandDeny(entries)
+  if (dropped.length > 0) {
+    // The first sentence must read as a plugin LOAD failure: the mount never
+    // completes, so nothing is registered and no command can be issued at all.
+    throw new Error(`AgentTeams plugin failed to load: memberCommandDeny is invalid (an unusable entry fails the mount instead of silently denying nothing). memberCommandDeny contains ${dropped.length === 1 ? 'an entry' : 'entries'} with no usable command name (${dropped.map((entry) => JSON.stringify(entry)).join(', ')}); write names without the leading slash, e.g. "compact"`)
+  }
+  return [...names]
+}
+
 export function apply(ctx: Context, config: Config): void {
   const resolved: ToolsConfig = {
     stateDir: config.stateDir ?? '.agent-teams',
@@ -259,9 +286,11 @@ export function apply(ctx: Context, config: Config): void {
     // is absent, which keeps every downstream path on the previous behavior
     // (no watchdog, no accounting, no extra fields).
     memberContext: parseMemberContextConfig(config.memberContext),
-    // Command deny list for agent_teams_run_command; the plugin's own
-    // agent-teams surface is always the safe default.
-    memberCommandDeny: config.memberCommandDeny ?? ['agent-teams'],
+    // Command deny list for agent_teams_run_command, normalized once here so
+    // '/compact', 'Compact' and ' compact ' are the same switch and an unusable
+    // entry fails the mount instead of silently denying nothing. The plugin's
+    // own agent-teams surface stays the safe default.
+    memberCommandDeny: parseMemberCommandDeny(config.memberCommandDeny),
   }
 
   // Provider registration is a sibling plugin's effect (`subagent-spawn` /

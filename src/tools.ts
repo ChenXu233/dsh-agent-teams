@@ -129,6 +129,12 @@ export interface ToolsConfig {
    * never issue into a member session. Default: this plugin's own
    * agent-teams surface, so the captain cannot re-enter the activation
    * command through a member.
+   *
+   * Entries are normalized (whitespace, any leading slashes and case are
+   * ignored) and each one also blocks its `<entry>-*` family; an explicit `[]`
+   * denies nothing at all, the built-in default included (literal
+   * replacement). Callers that bypass the mount must never silence an
+   * unusable entry.
    */
   memberCommandDeny?: string[]
 }
@@ -145,10 +151,60 @@ export interface ToolsConfig {
 const HOST_COMMAND_NAME = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u
 
 /**
+ * The host's command-name grammar without the leading slash, used to decide
+ * whether a configured deny entry is a usable command name at all.
+ */
+const COMMAND_NAME = /^[a-z][a-z0-9_-]*$/u
+
+/** Effective deny names plus the entries that carried no usable name. */
+export interface MemberCommandDenyResolution {
+  /** Normalized, de-duplicated names in configuration order. */
+  readonly names: readonly string[]
+  /** Entries that were unusable; callers must never ignore them silently. */
+  readonly dropped: readonly unknown[]
+}
+
+/**
+ * Normalize one configured deny entry: surrounding whitespace is ignored, all
+ * leading slashes are stripped and the name is lowercased, so `'/compact'`,
+ * `'Compact'` and `' compact '` all mean the same switch as `'compact'`.
+ * Returns undefined when nothing usable remains.
+ */
+function normalizeDeniedCommandName(entry: unknown): string | undefined {
+  if (typeof entry !== 'string') return undefined
+  const name = entry.trim().replace(/^\/+/u, '').toLowerCase()
+  return COMMAND_NAME.test(name) ? name : undefined
+}
+
+/**
+ * Resolve `memberCommandDeny` once, so `run` and `list` can never disagree
+ * about what is denied. `undefined` keeps the plugin's own agent-teams surface
+ * as the safe default; an explicitly empty array denies nothing — a deliberate
+ * literal replacement. Unusable entries are reported through `dropped` for the
+ * caller to surface (the host fails loudly at mount; direct callers warn).
+ */
+export function normalizeMemberCommandDeny(entries: readonly unknown[] | undefined): MemberCommandDenyResolution {
+  if (entries === undefined) return { names: [AGENT_TEAMS_COMMAND], dropped: [] }
+  const names: string[] = []
+  const dropped: unknown[] = []
+  for (const entry of entries) {
+    const name = normalizeDeniedCommandName(entry)
+    if (name === undefined) {
+      dropped.push(entry)
+      continue
+    }
+    if (!names.includes(name)) names.push(name)
+  }
+  return { names, dropped }
+}
+
+/**
  * True when a command name — parsed from a line, or advertised by the member's
- * catalog — is denied for members. An exact hit covers the command itself; the
- * `<denied>-` prefix covers the alias family this plugin registers per profile
- * (`agent-teams-<profile>`), so neither can re-enter the plugin's own surface.
+ * catalog — is denied for members. An exact hit covers the command itself, and
+ * the `<denied>-` prefix expansion applies to **every** configured entry (not
+ * just `agent-teams`): denying `review` also denies `review-tools`. That is
+ * deliberately over-broad — a safety switch should refuse too much rather than
+ * let a prefixed alias slip past.
  */
 function isDeniedMemberCommand(name: string, deny: readonly string[]): boolean {
   return deny.some((denied) => name === denied || name.startsWith(`${denied}-`))
@@ -692,6 +748,15 @@ export function stagedPlanFeedbackContext(teamName: string): string {
  * @param config - resolved tool config.
  */
 export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): AgentTeamsRuntime {
+  // Resolve the deny switch once, here: `run` and `list` must never disagree,
+  // and an entry written '/Compact' or ' compact ' must never disable it
+  // silently. The host rejects unusable entries at mount; this warning covers
+  // direct callers that bypass the mount-time parser.
+  const memberCommandDeny = normalizeMemberCommandDeny(config.memberCommandDeny)
+  if (memberCommandDeny.dropped.length > 0) {
+    ctx.logger.warn(`agent-teams: memberCommandDeny ignores ${memberCommandDeny.dropped.length === 1 ? 'an entry' : 'entries'} with no usable command name (${memberCommandDeny.dropped.map((entry) => JSON.stringify(entry)).join(', ')}); write names without the leading slash, e.g. "compact"`)
+  }
+  const deniedCommandNames = memberCommandDeny.names
   installRetiredMemberGuard(ctx, config.stateDir)
   installMemberDelegationGuard(ctx, config.stateDir, config.memberMaxDepth ?? 0)
   installMailboxAdmission(ctx, config.stateDir)
@@ -2402,11 +2467,10 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         const agent = await resolveMemberAgent(ctx, childId)
         if (agent === undefined) throw new Error(`member agent is not resolvable: ${childId}`)
         const descriptors = ctx.commands.list(agent)
-        const deniedNames = config.memberCommandDeny ?? [AGENT_TEAMS_COMMAND]
         return {
           member: member.name,
           commands: descriptors
-            .filter((descriptor: { name: string }) => !isDeniedMemberCommand(descriptor.name, deniedNames))
+            .filter((descriptor: { name: string }) => !isDeniedMemberCommand(descriptor.name, deniedCommandNames))
             .map((descriptor: { name: string; description?: string; input?: { hint?: string; attachments?: boolean } }) => ({
               name: descriptor.name,
               description: descriptor.description,
@@ -2422,10 +2486,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       const line = args.line.trim()
       if (line === '' || !line.startsWith('/')) throw new Error('line must start with "/" (a command line)')
       if (line.length > 512) throw new Error(`line is too long (${line.length} > 512 characters)`)
-      const deniedNames = config.memberCommandDeny ?? [AGENT_TEAMS_COMMAND]
       const commandName = HOST_COMMAND_NAME.exec(line)?.[1]
-      if (commandName !== undefined && isDeniedMemberCommand(commandName, deniedNames)) {
-        throw new Error(`command "/${commandName}" is denied for members by configuration (memberCommandDeny)`)
+      if (commandName !== undefined && isDeniedMemberCommand(commandName, deniedCommandNames)) {
+        // The canonical name only: quoting '/name' here would invite deny
+        // entries written with the leading slash, which is exactly the
+        // fail-open spelling this list normalizes away.
+        throw new Error(`command "${commandName}" is denied for members (memberCommandDeny)`)
       }
       const agent = await resolveMemberAgent(ctx, childId)
       if (agent === undefined) throw new Error(`member agent is not resolvable: ${childId}`)

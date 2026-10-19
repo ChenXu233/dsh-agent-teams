@@ -13,7 +13,7 @@ import { mkdtemp, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
-import { registerAgentTeamsTools } from '../lib/tools.js'
+import { normalizeMemberCommandDeny, registerAgentTeamsTools } from '../lib/tools.js'
 import { apply } from '../lib/index.js'
 import { createTeamDir } from '../lib/state.js'
 import { TEAM_TOOL_NAMES, MEMBER_TOOL_NAMES, CAPTAIN_TOOL_NAMES } from '../lib/tool-names.js'
@@ -55,7 +55,7 @@ function makeFakeCtx(options = {}) {
   const registeredTools = new Map()
   const registeredRoutes = []
   const base = {
-    logger: { info() {}, warn() {}, error() {} },
+    logger: options.logger ?? { info() {}, warn() {}, error() {} },
     agents: { get: (id) => (options.agents?.[id] ?? undefined) },
     commands: {
       list: (agent) => (options.commandList ? options.commandList(agent) : []),
@@ -518,4 +518,87 @@ test('list hides the whole denied alias family, and a custom deny is prefix-awar
     await assert.rejects(() => custom.tool.execute({ member: 'writer', action: 'run', line: '/dev now' }, custom.exec), /memberCommandDeny/)
   } finally { await cleanup(custom.workspace) }
 })
+
+// ---- t30 (N1): memberCommandDeny entries are normalized, never fail-open ----
+// '/compact', 'Compact' and ' compact ' are the same switch as 'compact'; an
+// unusable entry fails the mount (host path) or warns once (direct callers).
+
+test('memberCommandDeny spellings are equivalent: /compact, Compact, " compact " and compact all deny /compact', async () => {
+  for (const spelling of [['/compact'], ['Compact'], [' compact '], ['compact']]) {
+    const calls = []
+    const suite = await setupSuite({
+      memberCommandDeny: spelling,
+      agents: { 'child-0001': fakeAgent('child-0001') },
+      commandExecute: async (agent, line) => {
+        calls.push(line)
+        return { commandId: 'c', result: { kind: 'success', text: 'ok' } }
+      },
+    })
+    try {
+      await assert.rejects(
+        () => suite.tool.execute({ member: 'writer', action: 'run', line: '/compact' }, suite.exec),
+        /command "compact" is denied for members \(memberCommandDeny\)/,
+        'spelling ' + JSON.stringify(spelling) + ' must deny /compact',
+      )
+      assert.equal(calls.length, 0, 'a denied line never reaches ctx.commands.execute')
+    } finally { await cleanup(suite.workspace) }
+  }
+})
+
+test('normalized deny entries filter list through the same predicate', async () => {
+  const suite = await setupSuite({
+    memberCommandDeny: [' /COMPACT '],
+    agents: { 'child-0001': fakeAgent('child-0001') },
+    commandList: () => [
+      { name: 'compact', description: 'x' },
+      { name: 'report', description: 'y' },
+    ],
+  })
+  try {
+    const value = await suite.tool.execute({ member: 'writer', action: 'list' }, suite.exec)
+    assert.deepEqual(value.commands.map((command) => command.name), ['report'])
+  } finally { await cleanup(suite.workspace) }
+})
+
+test('unusable memberCommandDeny entries warn once and never disable the valid ones', async () => {
+  const warnings = []
+  const calls = []
+  const suite = await setupSuite({
+    logger: { info() {}, warn(message) { warnings.push(message) }, error() {} },
+    memberCommandDeny: ['/compact', '', '/', '   ', 42, { name: 'x' }],
+    agents: { 'child-0001': fakeAgent('child-0001') },
+    commandExecute: async (agent, line) => {
+      calls.push(line)
+      return { commandId: 'c', result: { kind: 'success', text: 'ok' } }
+    },
+  })
+  try {
+    assert.equal(warnings.length, 1, 'exactly one warning at registration')
+    assert.match(warnings[0], /memberCommandDeny/)
+    assert.match(warnings[0], /no usable command name/)
+    await assert.rejects(
+      () => suite.tool.execute({ member: 'writer', action: 'run', line: '/compact' }, suite.exec),
+      /is denied for members/,
+    )
+    assert.equal(calls.length, 0)
+  } finally { await cleanup(suite.workspace) }
+})
+
+test('mount rejects unusable memberCommandDeny entries instead of silently denying nothing', () => {
+  const { ctx } = makeFakeCtx()
+  assert.throws(
+    () => apply(ctx, { memberCommandDeny: ['/compact', ''] }),
+    /memberCommandDeny contains an entry with no usable command name/,
+  )
+  assert.throws(() => apply(ctx, { memberCommandDeny: ['   '] }), /no usable command name/)
+  assert.throws(() => apply(ctx, { memberCommandDeny: [42] }), /no usable command name/)
+  // The shared normalizer both paths use: empty list denies nothing (literal
+  // replacement, N3), absent list keeps the plugin's own surface as default.
+  assert.deepEqual(normalizeMemberCommandDeny([]).names, [])
+  assert.deepEqual(normalizeMemberCommandDeny(undefined).names, [AGENT_TEAMS_COMMAND])
+  const mixed = normalizeMemberCommandDeny(['/Compact', '', 'review'])
+  assert.deepEqual(mixed.names, ['compact', 'review'])
+  assert.deepEqual(mixed.dropped, [''])
+})
+
 
