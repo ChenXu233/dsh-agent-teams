@@ -142,7 +142,7 @@ function accentOf(id: string): string {
   return ACCENTS[stableHash(id) % ACCENTS.length] ?? ACCENTS[0]
 }
 
-/** Badge text follows the raw task status (finer than the 4 visual states):
+/** Badge text follows the raw task status:
  * claimed/pending/failed/cancelled keep their own labels and colors. */
 const TASK_STATUS_LABEL: Record<string, AgentTeamsLocaleKey> = {
   pending: 'task.status.pending',
@@ -273,6 +273,7 @@ function taskSummary(team: ActivityTeam, t: AgentTeamsTranslate, discarded = fal
   const completed = team.tasks.filter((task) => task.status === 'completed')
   const cancelled = team.tasks.filter((task) => task.status === 'cancelled')
   const running = team.tasks.filter((task) => task.state === 'running')
+  const claimed = team.tasks.filter((task) => task.state === 'claimed')
   const blocked = team.tasks.filter((task) => task.state === 'blocked')
   const ready = team.tasks.filter((task) => task.state === 'open' && task.status !== 'completed' && task.status !== 'failed' && task.status !== 'cancelled')
   const failed = team.tasks.filter((task) => task.status === 'failed')
@@ -287,7 +288,7 @@ function taskSummary(team: ActivityTeam, t: AgentTeamsTranslate, discarded = fal
       failed: failed.length,
     })
   }
-  if (failed.length > 0 && running.length === 0 && ready.length === 0 && blocked.length === 0) {
+  if (failed.length > 0 && running.length === 0 && claimed.length === 0 && ready.length === 0 && blocked.length === 0) {
     return t('task.summary.failedSettled', { count: failed.length })
   }
   if (blocked.length > 0 && running.length > 0) {
@@ -297,6 +298,7 @@ function taskSummary(team: ActivityTeam, t: AgentTeamsTranslate, discarded = fal
     })
   }
   if (running.length > 0) return t('task.summary.running', { tasks: formatTaskIds(running.map((task) => task.id), t) })
+  if (claimed.length > 0) return t('task.summary.claimed', { tasks: formatTaskIds(claimed.map((task) => task.id), t) })
   if (ready.length > 0) return t('task.summary.ready', { tasks: formatTaskIds(ready.map((task) => task.id), t) })
   if (blocked.length > 0) return t('task.summary.blocked', { tasks: formatTaskIds(blocked.map((task) => task.id), t) })
   return t('task.summary.waitingSchedule')
@@ -304,6 +306,7 @@ function taskSummary(team: ActivityTeam, t: AgentTeamsTranslate, discarded = fal
 
 function ProgressOverview({ team, t, discarded = false }: { readonly team: ActivityTeam; readonly t: AgentTeamsTranslate; readonly discarded?: boolean }) {
   const running = discarded ? 0 : team.tasks.filter((task) => task.state === 'running').length
+  const claimed = discarded ? 0 : team.tasks.filter((task) => task.state === 'claimed').length
   const blocked = discarded ? 0 : team.tasks.filter((task) => task.state === 'blocked').length
   const completed = discarded ? 0 : team.tasks.filter((task) => task.status === 'completed').length
   const settled = !discarded && team.tasks.length > 0 && team.tasks.every((task) => (
@@ -320,6 +323,7 @@ function ProgressOverview({ team, t, discarded = false }: { readonly team: Activ
       ) : <span className={css.progressEmpty} />}
       <span className={css.progressLegend}>
         <span data-state="running">{t('progress.running', { count: running })}</span>
+        {claimed > 0 && <span data-state="claimed">{t('progress.claimed', { count: claimed })}</span>}
         <span data-state="blocked">{t('progress.blocked', { count: blocked })}</span>
         <span data-state="completed">{t('progress.delivered', { count: completed })}</span>
       </span>
@@ -381,6 +385,7 @@ function DependencyMap({ tasks, members, t, discarded = false, workspace = false
   if (tasks.length === 0) return null
   const fallbackTask = tasks.find((task) => task.state === 'blocked')
     ?? tasks.find((task) => task.state === 'running')
+    ?? tasks.find((task) => task.state === 'claimed')
     ?? tasks[0]!
   const detailTask = tasks.find((task) => task.id === focusedTaskId) ?? fallbackTask
   const detailModel = taskModelLabel(detailTask, members)
@@ -440,6 +445,7 @@ function DependencyMap({ tasks, members, t, discarded = false, workspace = false
                     <span className={css.dagNodeLabel}>
                       {workspace ? task.subject : compactTaskLabel(task.subject)}
                     </span>
+                    {!discarded && task.state === 'claimed' && <span className={css.dagClaimedState}>{t('task.status.claimed')}</span>}
                     {task.state === 'running' && (
                       <span className={css.dagRunningState} aria-label={t('task.runningAria')}>
                         <WorkGlyph active />
