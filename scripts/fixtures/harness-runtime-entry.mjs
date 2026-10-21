@@ -2,12 +2,12 @@
  * Tests transport and business behavior; it does not measure model intent accuracy.
  */
 import assert from 'node:assert/strict';
-import { createUserMessage } from '@deepseek-ai/dsh-llm';
+import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm';
 import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 export const name = 'runtime-lab-progressive-entry';
-export const inject = ['agents', 'sessions', 'commands', 'systemPrompt'];
+export const inject = ['agents', 'sessions', 'commands', 'systemPrompt', 'tools'];
 export function apply(ctx) {
     void (async () => {
         await ctx.get('loader').await();
@@ -97,6 +97,50 @@ export function apply(ctx) {
             appendFileSync(process.env.LAB_TRACE, JSON.stringify({ event: 'stable-prefix-passed', label, requests: budgets.length, precedingOrdinaryTurns: label === 'natural' ? 30 : 0, systemSha256: budgets[0].systemSha256, toolsSha256: budgets[0].toolsSha256 }) + '\n');
             appendFileSync(process.env.LAB_TRACE, JSON.stringify({ event: 'entry-case-passed', label, captain: agent.id, member: completed.members[0].id }) + '\n');
         }
+        // #234: exercise the real tool schema and persistence boundary. A
+        // materialized optional string must behave like an omitted field,
+        // while required inputs and owner-declared policies stay validated.
+        const optionalCases = [
+            ['omitted', {}, false],
+            ...['role', 'provider', 'model', 'reasoning_effort', 'tool_policy'].map(field => [`blank-${field}`, { [field]: '  ' }, false]),
+            ['all-blank', { role: '', provider: '', model: '', reasoning_effort: '', tool_policy: '' }, false],
+            ['explicit-route', { provider: 'runtime-lab', model: 'fixture-model', reasoning_effort: 'high' }, false],
+            ['unknown-policy', { tool_policy: 'not-configured' }, true],
+            ['provider-without-model', { provider: 'runtime-lab', model: '' }, true],
+            ['blank-name', { name: '' }, true],
+            ['wrong-type', { model: 23 }, true],
+        ];
+        const optionalObservations = [];
+        let callSeq = 0;
+        const execute = (agent, name, args) => ctx.tools.execute({ name: `agent_teams_${name}`, arguments: args,
+            callId: ToolCallId(`optional-member-${++callSeq}`), agent, signal: new AbortController().signal });
+        for (const mode of ['inline', 'add']) for (const [label, fields, expectedError] of optionalCases) {
+            const { agent, cwd } = await create(`optional-${mode}-${label}`);
+            const member = { name: 'worker', ...fields };
+            const statePath = join(cwd, '.agent-teams/optional/team.json');
+            if (mode === 'add') assert.equal((await execute(agent, 'create', { name: 'optional', approval: 'required' })).isError, false);
+            const before = existsSync(statePath) ? readFileSync(statePath, 'utf8') : undefined;
+            const result = await execute(agent, mode === 'inline' ? 'create' : 'add_member', mode === 'inline'
+                ? { name: 'optional', approval: 'required', plan: { members: [member], tasks: [{ id: 'work', subject: 'Verify optional fields', assignee: 'worker' }] } }
+                : member);
+            const after = existsSync(statePath) ? readFileSync(statePath, 'utf8') : undefined;
+            const state = after === undefined ? undefined : JSON.parse(after);
+            const passed = result.isError === expectedError && (expectedError ? after === before
+                : state?.phase === 'staged' && state.members.length === 1 && state.members[0].id === ''
+                    && state.members[0].provider === 'runtime-lab' && state.members[0].model === 'fixture-model'
+                    && state.members[0].toolPolicy === undefined
+                    && (label !== 'explicit-route' || state.members[0].reasoningEffort === 'high'));
+            const observation = { event: 'optional-member-input', mode, label, passed, expectedError, result };
+            optionalObservations.push(observation);
+            appendFileSync(process.env.LAB_TRACE, JSON.stringify(observation) + '\n');
+        }
+        const missing = await create('optional-missing-assignee');
+        const missingResult = await execute(missing.agent, 'create', { name: 'optional', approval: 'required',
+            plan: { members: [{ name: 'worker', model: '' }], tasks: [{ id: 'work', subject: 'Missing assignee' }] } });
+        assert.equal(missingResult.isError, true);
+        assert.match(JSON.stringify(missingResult), /missing an assignee/);
+        assert.equal(existsSync(join(missing.cwd, '.agent-teams/optional/team.json')), false);
+        assert.ok(optionalObservations.every(row => row.passed), JSON.stringify(optionalObservations.filter(row => !row.passed)));
         for (const agent of ctx.agents.list()) {
             await agent.whenIdle();
             // Best effort: a handle may close while this loop awaits an earlier

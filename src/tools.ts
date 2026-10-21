@@ -1331,11 +1331,11 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           throw new Error(`team "${fresh.name}" is at its member cap (${config.maxMembers})`)
         }
         const selection = await resolveMemberLlmSelection(ctx, captain, {
-          provider: args.provider,
-          model: args.model,
+          provider: trimmedOptional(args.provider),
+          model: trimmedOptional(args.model),
           defaultModel: config.memberModel,
           defaultProvider: config.memberLlmProvider,
-          reasoningEffort: args.reasoning_effort,
+          reasoningEffort: trimmedOptional(args.reasoning_effort),
           fallback: config.fallback,
         }, exec.signal)
         const toolSelection = memberToolSelection(config, captain, trimmedOptional(args.tool_policy))
@@ -2552,7 +2552,21 @@ async function initializeProfileTeam(input: {
   description?: string
   staged: boolean
 }): Promise<{ committed: true; state: TeamState }> {
-  const profile = resolveTeamProfile(input.inlinePlan === undefined ? input.config.profiles : { [input.profileName]: input.inlinePlan }, input.profileName, input.config.maxMembers)
+  // Tool gateways can materialize omitted optional strings as blanks (#234).
+  // Normalize only the tool-supplied roster; owner profile validation remains
+  // strict, and required fields, unknown policies and route pairing still fail.
+  const inlinePlan = input.inlinePlan === undefined ? undefined : {
+    ...input.inlinePlan,
+    members: input.inlinePlan.members.map(member => ({
+      ...member,
+      role: trimmedOptional(member.role),
+      provider: trimmedOptional(member.provider),
+      model: trimmedOptional(member.model),
+      reasoning_effort: trimmedOptional(member.reasoning_effort),
+      tool_policy: trimmedOptional(member.tool_policy),
+    })),
+  }
+  const profile = resolveTeamProfile(inlinePlan === undefined ? input.config.profiles : { [input.profileName]: inlinePlan }, input.profileName, input.config.maxMembers)
   const selections: Awaited<ReturnType<typeof resolveMemberLlmSelection>>[] = []
   for (const template of profile.members) {
     selections.push(await resolveMemberLlmSelection(input.ctx, input.captain, {
