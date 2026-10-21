@@ -118,6 +118,7 @@ export function apply(ctx) {
     } }));
     void (async () => {
         await ctx.get('loader').await();
+        await ctx.workspaceRegistry.create(process.cwd(), 'Web approval regression');
         const handle = await ctx.agents.create({ sessionId: 'session-' + randomUUID(), meta: { cwd: process.cwd() }, agentOptions: { provider: 'runtime-lab', model: 'fixture-model' } });
         ctx.effect(() => () => handle.dispose());
         const captain = handle.agent;
