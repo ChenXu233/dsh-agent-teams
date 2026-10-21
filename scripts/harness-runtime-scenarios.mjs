@@ -64,6 +64,8 @@ for (const scenario of selectedScenarios) {
   disabled: true
 - id: headless-runner
   disabled: true
+- id: credentials
+  disabled: false
 - insert:
     - id: runtime-lab-webserver
       name: '@deepseek-ai/dsh-host-webserver'
@@ -121,6 +123,9 @@ for (const scenario of selectedScenarios) {
 - id: agent-teams
   config:
     memberMaxDepth: 1
+    toolPolicies:
+      restricted:
+        deny: [lab_forbidden]
 - insert:
     - id: runtime-lab-stability
       name: ./fixture-stability.mjs
@@ -130,7 +135,7 @@ for (const scenario of selectedScenarios) {
     const result = await command([process.execPath, join(runtime, 'node_modules/@deepseek-ai/dsh/lib/bin.js'), '--profile', 'headless', 'Run the authorized deterministic AgentTeams fixture immediately.'], workspace, environment({ DSH_HOME: home, DSH_PERMISSION_MODE: 'danger-full-access', DSH_TELEMETRY_DISABLED: '1', LAB_TRACE: tracePath, LAB_TEAMS: '1', LAB_SCENARIO: scenario }), scenario, 90000);
     const trace = existsSync(tracePath) ? readFileSync(tracePath, 'utf8').trim().split('\n').filter(Boolean).map(s => JSON.parse(s)) : [];
     if (scenario === 'stability') {
-        const checks = ['lazy-start', 'running-plan-correction', 'steering', 'read-receipt-continuation', 'reassign', 'archive', 'batch-plan', 'terminal-evidence', 'report-retry', 'settlement-dedup'];
+        const checks = ['hmr', 'lazy-start', 'running-plan-correction', 'steering', 'read-receipt-continuation', 'reassign', 'archive', 'batch-plan', 'terminal-evidence', 'report-retry', 'settlement-dedup'];
         const assertions = { exit0: result.code === 0 && !result.timedOut, productMarker: result.stdout.includes('STABILITY_OK'), ...Object.fromEntries(checks.map(check => [check, trace.some(x => x.event === `stability-${check}-passed`)])) };
         runs.push({ scenario, passed: Object.values(assertions).every(Boolean), assertions, evidence: trace.filter(x => checks.some(check => x.event === `stability-${check}-passed`)), exit: { code: result.code, signal: result.signal, timedOut: result.timedOut } });
         continue;
@@ -156,14 +161,15 @@ for (const scenario of selectedScenarios) {
         const evidence = trace.find(x => x.event === 'web-approval-passed');
         const invalid = trace.find(x => x.event === 'web-http-invalid-team-rejected'), repeated = trace.find(x => x.event === 'web-http-repeat-rejected');
         const stable = trace.find(x => x.event === 'web-headers-stable');
-        const assertions = { exit0: result.code === 0 && !result.timedOut, productMarker: result.stdout.includes('WEB_APPROVAL_OK'), driverCompleted: Boolean(evidence), stagedBeforeApproval: Boolean(staged?.status === 'idle' && approved?.status === 200 && staged.order < approved.order), independentApprovalWake: Boolean(approvalWake && yielded?.status === 'idle' && released && approvalWake.order < yielded.order && yielded.order < released.order), reportWakeAfterYield: Boolean(released && reportWake && released.order < reportWake.order && reportWake.sessionId === staged?.sessionId), noPollingOrDuplicateApproval: !trace.some(x => x.event === 'web-model-tool-call' && ['agent_teams_approve', 'agent_teams_status'].includes(x.name)), oneUserMessageAndHttpApproval: trace.filter(x => x.event === 'web-driver-user-message').length === 1 && trace.filter(x => x.event === 'web-http-approval-start').length === 1, invalidTeamRejected: Boolean(invalid?.status === 404 && approved && invalid.order < approved.order), repeatApprovalRejected: Boolean(repeated?.status === 409 && yielded && released && yielded.order < repeated.order && repeated.order < released.order), stableCaptainHeaders: Boolean(stable?.systemSha256 && stable?.toolsSha256), memberFourTools: stable?.memberTeamToolCount === 4 && stable.memberRequests > 0, taskCompleted: evidence?.taskStatus === 'completed' };
+        const assertions = { claimedProjection: trace.some(x => x.event === 'web-claimed-projection' && x.taskStatus === 'claimed' && x.visualState === 'claimed' && x.memberActivity === 'working'), exit0: result.code === 0 && !result.timedOut, productMarker: result.stdout.includes('WEB_APPROVAL_OK'), driverCompleted: Boolean(evidence), stagedBeforeApproval: Boolean(staged?.status === 'idle' && approved?.status === 200 && staged.order < approved.order), independentApprovalWake: Boolean(approvalWake && yielded?.status === 'idle' && released && approvalWake.order < yielded.order && yielded.order < released.order), reportWakeAfterYield: Boolean(released && reportWake && released.order < reportWake.order && reportWake.sessionId === staged?.sessionId), noPollingOrDuplicateApproval: !trace.some(x => x.event === 'web-model-tool-call' && ['agent_teams_approve', 'agent_teams_status'].includes(x.name)), oneUserMessageAndHttpApproval: trace.filter(x => x.event === 'web-driver-user-message').length === 1 && trace.filter(x => x.event === 'web-http-approval-start').length === 1, invalidTeamRejected: Boolean(invalid?.status === 404 && approved && invalid.order < approved.order), repeatApprovalRejected: Boolean(repeated?.status === 409 && yielded && released && yielded.order < repeated.order && repeated.order < released.order), stableCaptainHeaders: Boolean(stable?.systemSha256 && stable?.toolsSha256), memberFourTools: stable?.memberTeamToolCount === 4 && stable.memberRequests > 0, taskCompleted: evidence?.taskStatus === 'completed' };
         runs.push({ scenario, passed: Object.values(assertions).every(Boolean), assertions, evidence, exit: { code: result.code, signal: result.signal, timedOut: result.timedOut } });
         continue;
     }
     const statePath = join(workspace, '.agent-teams/runtime-lab/team.json'), state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : undefined;
     const requests = trace.filter(x => x.event === 'request' && x.purpose === undefined), memberRequests = requests.filter(x => x.isMember);
     const isFailure = scenario === 'failure';
-    const assertions = { exit0: result.code === 0 && !result.timedOut, productMarker: result.stdout.includes(isFailure ? 'AGENTTEAMS_EXPECTED_FAILURE_OK' : scenario === 'captain-idle-wakeup' ? 'CAPTAIN_IDLE_WAKEUP_OK' : 'AGENTTEAMS_PRODUCT_TURN_OK'), pluginToolsVisible: requests.some(x => x.toolNames.includes('agent_teams_create')), memberExecuted: memberRequests.length > 0, explicitReasoning: memberRequests.length > 0 && memberRequests.some(x => x.model !== 'fixture-fallback') && memberRequests.filter(x => x.model !== 'fixture-fallback').every(x => x.reasoningEffort === 'high'), taskTerminal: state?.tasks?.find(t => t.id === 't1')?.status === (isFailure ? 'failed' : 'completed') };
+    const memberToolsRestricted = rows => rows.length > 0 && rows.every(x => !x.toolNames.includes('agent_teams_create') && x.toolNames.includes('agent_teams_claim_task'));
+    const assertions = { exit0: result.code === 0 && !result.timedOut, productMarker: result.stdout.includes(isFailure ? 'AGENTTEAMS_EXPECTED_FAILURE_OK' : scenario === 'captain-idle-wakeup' ? 'CAPTAIN_IDLE_WAKEUP_OK' : 'AGENTTEAMS_PRODUCT_TURN_OK'), pluginToolsVisible: requests.some(x => x.toolNames.includes('agent_teams_create')), memberExecuted: memberRequests.length > 0, memberToolsRestricted: memberToolsRestricted(memberRequests), explicitReasoning: memberRequests.length > 0 && memberRequests.some(x => x.model !== 'fixture-fallback') && memberRequests.filter(x => x.model !== 'fixture-fallback').every(x => x.reasoningEffort === 'high'), taskTerminal: state?.tasks?.find(t => t.id === 't1')?.status === (isFailure ? 'failed' : 'completed') };
     if (!isFailure && scenario !== 'captain-idle-wakeup')
         assertions.secondWake = memberRequests.some(x => x.userText.includes('SECOND_WAKE_FIXTURE'));
     if (scenario === 'captain-idle-wakeup') {
@@ -194,7 +200,7 @@ for (const scenario of selectedScenarios) {
         const cold = await command([process.execPath, join(runtime, 'node_modules/@deepseek-ai/dsh/lib/bin.js'), '--profile', 'headless'], workspace, environment({ DSH_HOME: home, DSH_PERMISSION_MODE: 'danger-full-access', DSH_TELEMETRY_DISABLED: '1', LAB_TRACE: coldTrace, LAB_TEAMS: '1', LAB_COLD: '1', LAB_SCENARIO: scenario, LAB_PARENT_SESSION: state.captainSessionId }), scenario + '-cold', 90000);
         const coldEvents = existsSync(coldTrace) ? readFileSync(coldTrace, 'utf8').trim().split('\n').filter(Boolean).map(s => JSON.parse(s)) : [];
         const coldMember = coldEvents.find(x => x.event === 'cold-member-completed');
-        const coldAssertions = { exit0: cold.code === 0 && !cold.timedOut, driverCompleted: cold.stdout.includes('COLD_RESTORE_DRIVER_DONE'), sameMemberRestored: coldMember?.sessionId === state.members.find(m => m.name === 'worker')?.id, routeRestored: coldMember?.model === (scenario === 'fallback' ? 'fixture-fallback' : 'fixture-model'), reasoningRestored: coldMember?.reasoningEffort === (scenario === 'fallback' ? 'low' : 'high') };
+        const coldAssertions = { memberToolsRestricted: memberToolsRestricted(coldEvents.filter(x => x.event === 'request' && x.isMember && x.purpose === undefined)), exit0: cold.code === 0 && !cold.timedOut, driverCompleted: cold.stdout.includes('COLD_RESTORE_DRIVER_DONE'), sameMemberRestored: coldMember?.sessionId === state.members.find(m => m.name === 'worker')?.id, routeRestored: coldMember?.model === (scenario === 'fallback' ? 'fixture-fallback' : 'fixture-model'), reasoningRestored: coldMember?.reasoningEffort === (scenario === 'fallback' ? 'low' : 'high') };
         runs.push({ scenario: scenario + '-cold-restore', passed: Object.values(coldAssertions).every(Boolean), assertions: coldAssertions, exit: { code: cold.code, signal: cold.signal, timedOut: cold.timedOut } });
     }
 }
