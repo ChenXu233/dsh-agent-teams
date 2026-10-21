@@ -665,6 +665,7 @@
 
 .progressLegend {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   color: var(--dsw-alias-label-tertiary);
   font-size: 9.5px;
@@ -2246,3 +2247,36 @@
 .team[data-workspace-team] .dagOwner { white-space: nowrap; max-width: 105px; }
 /* The page scrolls as a whole; an overlay approval bar would cover form saves. */
 .team[data-workspace-team] .planApproveRow { position: static; }
+
+/* Claimed owns an attempt but has not acknowledged in_progress yet. */
+.progressSegments > span[data-state='claimed'],
+.dagNode[data-state='claimed'] .dagNodeDot {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.progressLegend > span[data-state='claimed'] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.dagNode[data-state='claimed'] {
+  border-color: var(--dsw-alias-state-warn-primary);
+}
+
+.dagNode[data-state='claimed'] .dagNodeHead {
+  padding-right: 38px;
+}
+
+.dagClaimedState {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  color: var(--dsw-alias-state-warn-primary);
+  font-size: 8px;
+  line-height: 10px;
+}
+
+.assignmentChip[data-state='claimed'],
+.taskDetailBadge[data-state='claimed'] {
+  background: var(--dsw-alias-state-warn-primary);
+  color: var(--dsw-alias-label-primary-inverted);
+}
