@@ -24,6 +24,11 @@ export const zh = {
   'workspace.completed': '已完成',
   'workspace.focus': '查看团队',
   'workspace.noTasks': '等待队长拆解任务',
+  'workspace.inbox': '队长收件箱',
+  'workspace.inboxHint': '最近 5 条未读消息',
+  'workspace.inboxEmpty': '暂无未读消息。成员回报会在这里显示，队长读取后移出。',
+  'workspace.taskSummary': '任务完成情况',
+  'workspace.verdictStale': '结论已过期',
 
   'card.memberCount': '{count} 名成员',
   'action.openActivityPanel': '打开活动面板',
@@ -244,6 +249,11 @@ export const en = {
   'workspace.completed': 'completed',
   'workspace.focus': 'View team',
   'workspace.noTasks': 'Waiting for the captain to define tasks',
+  'workspace.inbox': 'Captain inbox',
+  'workspace.inboxHint': 'Up to 5 recent unread messages',
+  'workspace.inboxEmpty': 'No unread messages. Member reports appear here until the captain reads them.',
+  'workspace.taskSummary': 'Task completion summary',
+  'workspace.verdictStale': 'Verdict outdated',
 
   'card.memberCount': '{count} members',
   'action.openActivityPanel': 'Open activity panel',
