@@ -45,6 +45,7 @@ import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
 import { deliverToMember, resolveMemberAgent } from './members.ts'
 import { installTeamCapabilities } from './capabilities.ts'
+import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
 import { parseMemberContextConfig, type MemberContextConfig } from './member-context.ts'
 
@@ -781,7 +782,7 @@ export function apply(ctx: Context, config: Config): void {
             try {
               captain.steer(createUserMessage({
                 content: [{ type: 'text', text: stagedPlanApprovedContext(team.name) }],
-                source: { kind: 'agent-teams' },
+                source: agentTeamsSource({ kind: 'agent-teams' }, observedSessionFormatVersion(captain)),
               }))
             } catch (error) {
               // Approval is already committed. Do not report a failed approval
