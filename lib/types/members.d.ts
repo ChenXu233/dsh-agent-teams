@@ -14,10 +14,10 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type Agent } from '@deepseek-ai/dsh-agent';
 import type { Session } from '@deepseek-ai/dsh-session';
+import { type SessionFormatBearer } from './harness-compat.ts';
 import type { MemberToolFilter } from './tool-policies.ts';
 import { type TeamMember, type TeamState, type TeamTask } from './types.ts';
 import { type MemberContextConfig } from './member-context.ts';
-import { type MemberSessionKind } from './member-session.ts';
 /** Persona snapshot of a profile protocol; the full text lives on team.json. */
 export declare const PERSONA_PROTOCOL_MAX_CHARS = 400;
 /** Runtime knobs for member spawning, resolved from plugin config. */
@@ -33,11 +33,6 @@ export interface MemberRuntimeConfig {
         provider: string;
         model: string;
     };
-    /**
-     * How a member's conversation is carried (plan 09). `subagent` (the default)
-     * keeps the legacy continuable child; `session` creates an ordinary session.
-     */
-    memberSessions?: 'subagent' | 'session';
     /**
      * Plugin-level per-member context budget (plan 02); `undefined` when the
      * `memberContext` block is unconfigured, which installs nothing.
@@ -146,7 +141,7 @@ export declare function selectFallbackRoute(current: {
     };
 };
 /** Deliver a durable member report to the live captain at its next model step. */
-export declare function steerCaptainReport(captain: Pick<Agent, 'steer'>, from: string, content: string, receipt?: string): boolean;
+export declare function steerCaptainReport(captain: Pick<Agent, 'steer'> & SessionFormatBearer, from: string, content: string, receipt?: string): boolean;
 interface FailedMemberAttempt {
     readonly captainSessionId: string;
     readonly memberId: string;
@@ -294,15 +289,9 @@ export declare function spawnMember(ctx: Context, config: MemberRuntimeConfig, s
  * @param childId - the member's durable child session id.
  * @param text - the message content.
  * @param signal - caller cancellation, forwarded to the delivery.
- * @param mode - `queue` opens the next turn, `steer` folds into the running one.
- * @param options - `kind: 'session'` routes the prompt through the host
- *   prompt API because the member is an ordinary session (plan 09); absent
- *   keeps the legacy subagent delivery channel.
- * @returns whether the member accepted the message.
+ * @returns whether the member inbox accepted the message.
  */
-export declare function deliverToMember(ctx: Context, captain: Agent, childId: string, text: string, signal: AbortSignal, mode?: 'queue' | 'steer', options?: {
-    kind?: MemberSessionKind;
-}): Promise<boolean>;
+export declare function deliverToMember(ctx: Context, captain: Agent, childId: string, text: string, signal: AbortSignal, mode?: 'queue' | 'steer'): Promise<boolean>;
 /**
  * Resolve one member's live Agent for command execution, cold members included.
  *
