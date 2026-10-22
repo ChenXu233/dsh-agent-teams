@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { normalizeMemberCommandDeny, registerAgentTeamsTools } from '../lib/tools.js'
-import { apply } from '../lib/index.js'
+import { apply, inject } from '../lib/index.js'
 import { createTeamDir } from '../lib/state.js'
 import { TEAM_TOOL_NAMES, MEMBER_TOOL_NAMES, CAPTAIN_TOOL_NAMES } from '../lib/tool-names.js'
 import { AGENT_TEAMS_COMMAND } from '../lib/command.js'
@@ -599,6 +599,20 @@ test('mount rejects unusable memberCommandDeny entries instead of silently denyi
   const mixed = normalizeMemberCommandDeny(['/Compact', '', 'review'])
   assert.deepEqual(mixed.names, ['compact', 'review'])
   assert.deepEqual(mixed.dropped, [''])
+})
+
+/**
+ * The plugin must require exactly the upstream service list.
+ *
+ * Regression guard for the 2026-10-22 field failure: plan 02 added `tokenMeter`
+ * and `compaction` to `inject`, but the desktop profile disables the top-level
+ * `compaction-basic` and composes compaction INSIDE each agent preset. Cordis
+ * then parks the whole plugin as `pending (waiting for service: compaction)`,
+ * so no tool and no route is ever registered. Everything the budget needs is
+ * read structurally and may be absent; requiring it here IS the bug.
+ */
+test('inject requires only the upstream services', () => {
+  assert.deepEqual([...inject], ['tools', 'llm', 'subagents', 'systemPrompt', 'agents'])
 })
 
 
