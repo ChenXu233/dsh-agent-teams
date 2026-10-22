@@ -113,7 +113,6 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('conversation.composer', () => ctx.slots.register({
     name: 'conversation.composer',
     priority: -20,
-    locale: AGENT_TEAMS_LOCALE_NAMESPACE,
     select: (owner: {
       readonly session?: {
         readonly running?: boolean
