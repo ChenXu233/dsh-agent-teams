@@ -71,6 +71,10 @@ function makeFakeCtx(options = {}) {
     on() { return () => undefined },
   }
   base.get = (name) => {
+    // `commands` is deliberately NOT on the root inject (index.ts mounts it in a
+    // child scope), so the tool must reach it through this registry read — the
+    // fake ctx has to model that or it hides the real cordis guard.
+    if (name === 'commands') return base.commands
     if (name === 'typert') return options.typert
     if (name === 'webServer') return { register: (route) => registeredRoutes.push(route) }
     if (name === 'workspaceRegistry') return { list: () => [] }

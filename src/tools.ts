@@ -2468,10 +2468,23 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         throw new Error(`member "${member.name}" has no session yet (never started); run its first task before sending commands`)
       }
       const childId = member.id
+      // `commands` is NOT in this plugin's root `inject` (index.ts mounts the
+      // command surface lazily in a child scope), so a property read here hits
+      // cordis' guard: `cannot get property "commands" without inject`. Read the
+      // service through the unguarded registry instead — found live on
+      // 2026-10-22, after every fake-ctx test had passed.
+      const getService = (ctx as unknown as { get?: (name: string) => unknown }).get
+      const hostCommands = typeof getService === 'function'
+        ? getService.call(ctx, 'commands') as undefined | {
+          list: (agent: unknown) => readonly { name: string; description?: string; input?: { hint?: string; attachments?: boolean } }[]
+          execute: (agent: unknown, line: string, attachments: readonly unknown[], signal: AbortSignal) => Promise<undefined | { commandId: string; result: { kind: 'success' | 'error'; text?: string } }>
+        }
+        : undefined
+      if (hostCommands === undefined) throw new Error('the host command service is not composed in this deployment; member commands are unavailable')
       if (args.action === 'list') {
         const agent = await resolveMemberAgent(ctx, childId)
         if (agent === undefined) throw new Error(`member agent is not resolvable: ${childId}`)
-        const descriptors = ctx.commands.list(agent)
+        const descriptors = hostCommands.list(agent)
         return {
           member: member.name,
           commands: descriptors
@@ -2503,7 +2516,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       // The official bus with a plain, attachment-free input: identical to the
       // member typing this single line. undefined means no registered command
       // claimed the line.
-      const outcome = await ctx.commands.execute(agent, line, [], exec.signal)
+      const outcome = await hostCommands.execute(agent, line, [], exec.signal)
       if (outcome === undefined) {
         return { member: member.name, line, ok: false, kind: 'error', text: `no registered command handled "${line}" in member "${member.name}"; use action="list" to see what it supports` }
       }
