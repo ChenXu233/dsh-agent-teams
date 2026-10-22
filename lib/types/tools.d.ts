@@ -31,6 +31,8 @@ export interface ToolsConfig {
     fallback?: import('./profiles.ts').TeamModelFallbackConfig;
     /** Member delegation depth cap. */
     memberMaxDepth?: number;
+    /** How a member's conversation is carried (plan 09); default `subagent`. */
+    memberSessions?: 'subagent' | 'session';
     /** Team size cap (members). */
     maxMembers: number;
     /** Named team profiles from the active DSH profile. */

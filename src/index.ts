@@ -303,6 +303,7 @@ export function apply(ctx: Context, config: Config): void {
     executionPrompt: config.executionPrompt,
     fallback: config.fallback,
     memberMaxDepth: config.memberMaxDepth ?? 0,
+    memberSessions: config.memberSessions ?? 'subagent',
     maxMembers: config.maxMembers ?? 8,
     profiles: config.profiles ?? {},
     // Owner configuration is validated once, at mount: an empty or malformed
@@ -510,7 +511,8 @@ export function apply(ctx: Context, config: Config): void {
           return
         }
         try {
-          const delivered = await deliverToMember(ctx, captain, target.id, text, new AbortController().signal, 'queue')
+          const delivered = await deliverToMember(ctx, captain, target.id, text, new AbortController().signal, 'queue',
+            target.sessionKind === 'session' ? { kind: 'session' } : {})
           if (!delivered) {
             res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
             res.end(JSON.stringify({ error: 'failed to deliver the prompt to the member' }))
@@ -681,12 +683,17 @@ export function apply(ctx: Context, config: Config): void {
         }
         const stateRoot = join(root, resolved.stateDir)
         const teamIds = await readdir(stateRoot).catch(() => [] as string[])
-        let found: { teamId: string; captainId: string; memberName: string } | undefined
+        let found: { teamId: string; captainId: string; memberName: string; sessionKind?: 'session' } | undefined
         for (const teamId of teamIds) {
           const candidate = await readTeam(stateRoot, teamId)
           const memberEntry = candidate?.members.find((entry) => entry.id === memberSessionId)
           if (candidate !== undefined && memberEntry !== undefined) {
-            found = { teamId: candidate.id, captainId: candidate.captainSessionId, memberName: memberEntry.name }
+            found = {
+              teamId: candidate.id,
+              captainId: candidate.captainSessionId,
+              memberName: memberEntry.name,
+              ...memberEntry.sessionKind === undefined ? {} : { sessionKind: memberEntry.sessionKind },
+            }
             break
           }
         }
@@ -730,7 +737,8 @@ export function apply(ctx: Context, config: Config): void {
             res.end(JSON.stringify({ error: 'the captain session is not attached; plain text needs the parent to be online' }))
             return
           }
-          const delivered = await deliverToMember(ctx, captain, memberSessionId, line, new AbortController().signal, 'queue')
+          const delivered = await deliverToMember(ctx, captain, memberSessionId, line, new AbortController().signal, 'queue',
+            found.sessionKind === 'session' ? { kind: 'session' } : {})
           if (!delivered) {
             res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
             res.end(JSON.stringify({ error: 'failed to deliver the prompt to the member' }))

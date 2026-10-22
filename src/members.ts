@@ -27,6 +27,7 @@ import { appendTeamEvent, captainSessionOf } from './events.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 import { installMemberContextWatchdog, resolveMemberContextBudget, resolveMemberContextWindow, type MemberContextConfig } from './member-context.ts'
+import { createMemberSession, promptMemberSession, readMemberSessionServices, type MemberSessionKind } from './member-session.ts'
 
 /** Persona snapshot of a profile protocol; the full text lives on team.json. */
 export const PERSONA_PROTOCOL_MAX_CHARS = 400
@@ -91,6 +92,11 @@ export interface MemberRuntimeConfig {
   executionPrompt?: string
   /** Plugin-wide fallback route. */
   fallback?: { provider: string; model: string }
+  /**
+   * How a member's conversation is carried (plan 09). `subagent` (the default)
+   * keeps the legacy continuable child; `session` creates an ordinary session.
+   */
+  memberSessions?: 'subagent' | 'session'
   /**
    * Plugin-level per-member context budget (plan 02); `undefined` when the
    * `memberContext` block is unconfigured, which installs nothing.
@@ -982,6 +988,21 @@ export async function spawnMember(
   resolvedFilter?: MemberToolFilter,
   relaxableDeny?: readonly string[],
 ): Promise<void> {
+  // Plan 09 phase A: a session-mode member is an ordinary session, not a
+  // subagent frame. None of the provider checks below apply to it, so the
+  // branch stays above them; the legacy path is untouched.
+  if (config.memberSessions === 'session') {
+    const created = await createMemberSession(ctx, readMemberSessionServices(ctx), {
+      cwd: captain.session.header.cwd ?? process.cwd(),
+      persona: memberPersona(team, member, stateDir, config.executionPrompt),
+      toolFilter: resolvedFilter ?? memberToolFilter(config.maxDepth, restrictableToolNames(captain)),
+      selection: modelSelection(llmSelection),
+      prompt: initialPrompt ?? memberWelcome(team, member.name),
+    })
+    member.id = created.childId
+    member.sessionKind = 'session'
+    return
+  }
   // Fail loud at the first use: provider registration is a sibling plugin's
   // effect and may settle after this plugin mounts. Capability checks here
   // mirror what startContinuable would reject, with an actionable error.
@@ -1068,7 +1089,11 @@ export async function spawnMember(
  * @param childId - the member's durable child session id.
  * @param text - the message content.
  * @param signal - caller cancellation, forwarded to the delivery.
- * @returns whether the member inbox accepted the message.
+ * @param mode - `queue` opens the next turn, `steer` folds into the running one.
+ * @param options - `kind: 'session'` routes the prompt through the host
+ *   prompt API because the member is an ordinary session (plan 09); absent
+ *   keeps the legacy subagent delivery channel.
+ * @returns whether the member accepted the message.
  */
 export async function deliverToMember(
   ctx: Context,
@@ -1077,7 +1102,12 @@ export async function deliverToMember(
   text: string,
   signal: AbortSignal,
   mode: 'queue' | 'steer' = 'queue',
+  options: { kind?: MemberSessionKind } = {},
 ): Promise<boolean> {
+  if (options.kind === 'session') {
+    if (signal.aborted) return false
+    return promptMemberSession(ctx, readMemberSessionServices(ctx), childId, text, mode)
+  }
   try {
     const content = [{ type: 'text' as const, text }]
     if (mode === 'steer') await steerMemberPrompt(ctx.subagents, captain, brandedSessionId(childId), content, signal, ctx.agents.get(brandedSessionId(childId)))

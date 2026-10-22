@@ -276,8 +276,17 @@ export interface MemberContextUsage {
 
 /** One team member: a continuable subagent plus its team-side record. */
 export interface TeamMember {
-  /** Durable continuable subagent session id (empty until spawned). */
+  /** Durable member session id (empty until spawned). */
   id: string
+  /**
+   * How this member's conversation is carried (plan 09). Absent on legacy
+   * records, which means `subagent`: the member is a continuable child of the
+   * captain, owned by the host's subagent routing. `session` marks a member
+   * created as an ordinary session — the ownership guard does not apply to it,
+   * so the official composer, host commands and a cold resume all reach it
+   * directly.
+   */
+  sessionKind?: 'session'
   /** Unique display name inside the team. */
   name: string
   /** Role description, e.g. `researcher`, `engineer`, `reviewer`. */

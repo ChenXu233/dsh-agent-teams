@@ -336,7 +336,8 @@ export function installTeamScheduler(ctx: Context, config: SchedulerConfig): Tea
           const prompt = mailboxPrompt(team.id, member.name, unread)
           const signal = new AbortController().signal
           const accepted = config.dispatch === undefined
-            ? await deliverToMember(ctx, captain, member.id, prompt, signal, 'steer')
+            ? await deliverToMember(ctx, captain, member.id, prompt, signal, 'steer',
+              member.sessionKind === 'session' ? { kind: 'session' } : {})
             : await config.dispatch(captain, team.id, member.name, prompt, signal, 'steer')
           if (accepted) {
             await withTeamLock(teamLockKey(stateRoot, team.id), () => (
@@ -448,7 +449,8 @@ export function installTeamScheduler(ctx: Context, config: SchedulerConfig): Tea
         const prompt = assignmentPrompt(ticket, config.stateDir, team.id, workOrderStale)
         const signal = new AbortController().signal
         const accepted = config.dispatch === undefined
-          ? await deliverToMember(ctx, captain, ticket.memberId, prompt, signal)
+          ? await deliverToMember(ctx, captain, ticket.memberId, prompt, signal, 'queue',
+              team.members.find((item) => item.id === ticket.memberId)?.sessionKind === 'session' ? { kind: 'session' } : {})
           : await config.dispatch(captain, team.id, ticket.memberName, prompt, signal, 'queue', ticket.attemptId)
         if (accepted) return
 

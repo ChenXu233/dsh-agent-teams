@@ -93,6 +93,18 @@ export interface Config {
      * instead of silently denying nothing.
      */
     memberCommandDeny?: string[];
+    /**
+     * Session model for members (plan 09).
+     *
+     * `subagent` (default) keeps today's continuable-child behaviour: the host
+     * owns the child's turns, so every client-facing API call against it is
+     * rejected with `session/agent-busy` and the plugin carries its own command
+     * routes. `session` creates members as ordinary sessions, where the official
+     * composer, `remote.commands` and cold resume all work — the plugin then owns
+     * wake-up and result reporting. Rollout switch: a bad rollout is one config
+     * line away from the previous behaviour.
+     */
+    memberSessions?: 'subagent' | 'session';
     /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
     promptSectionOrder?: number;
     /**

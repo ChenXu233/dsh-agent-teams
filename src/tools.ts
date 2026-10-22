@@ -112,6 +112,8 @@ export interface ToolsConfig {
   fallback?: import('./profiles.ts').TeamModelFallbackConfig
   /** Member delegation depth cap. */
   memberMaxDepth?: number
+  /** How a member's conversation is carried (plan 09); default `subagent`. */
+  memberSessions?: 'subagent' | 'session'
   /** Team size cap (members). */
   maxMembers: number
   /** Named team profiles from the active DSH profile. */
@@ -794,7 +796,10 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         const member = team.members.find(item => item.name === memberName && item.status !== 'removed')
         if (member === undefined || member.stopping === true || team.tasks.some(task => task.reassigning === true && task.assignee === memberName)) return false
         if (attemptId !== undefined && !team.tasks.some(task => task.attemptId === attemptId && task.assignee === memberName && (task.status === 'claimed' || task.status === 'in_progress'))) return false
-        if (member.id !== '') return deliverToMember(ctx, captain, member.id, text, signal, mode)
+        if (member.id !== '') {
+          return deliverToMember(ctx, captain, member.id, text, signal, mode,
+            member.sessionKind === 'session' ? { kind: 'session' } : {})
+        }
         const selection = await resolveMemberLlmSelection(ctx, captain, {
           provider: member.provider, model: member.model, reasoningEffort: member.reasoningEffort, fallback: member.fallback,
         }, signal)
@@ -3075,6 +3080,7 @@ function memberRuntime(config: ToolsConfig): MemberRuntimeConfig {
     executionPrompt: config.executionPrompt,
     fallback: config.fallback,
     memberContext: config.memberContext,
+    ...config.memberSessions === undefined ? {} : { memberSessions: config.memberSessions },
   }
 }
 
