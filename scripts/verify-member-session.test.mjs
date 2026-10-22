@@ -134,7 +134,51 @@ test('creation still works from an explicit cwd when the workspace registry fail
   await createMemberSession(ctx, readMemberSessionServices(ctx), REQUEST)
 
   assert.deepEqual(created, [{ cwd: 'C:/ws' }])
-  assert.match(ctx.warnings.join('\n'), /could not resolve a workspace/)
+  assert.match(ctx.warnings.join('\n'), /could not create a workspace/)
+})
+
+test('member creation reuses the captain workspace instead of registering a new one', async () => {
+  const calls = []
+  const controller = { async create() { return { sessionId: 'sess-m1' } }, async prompt() { return { accepted: true } } }
+  const registry = {
+    list() { calls.push('list'); return [{ id: 'ws-captain', sessionIds: ['captain', 'other'] }] },
+    async resolveByPath() { calls.push('resolveByPath'); return { id: 'ws-path' } },
+    async create() { calls.push('create'); return { id: 'ws-new' } },
+  }
+  const ctx = fakeCtx({ controller, registry, agents: new Map([['sess-m1', fakeAgent('sess-m1')]]) })
+
+  await createMemberSession(ctx, readMemberSessionServices(ctx), { ...REQUEST, captainSessionId: 'captain' })
+
+  assert.deepEqual(calls, ['list'])
+})
+
+test('without the captain workspace the directory is probed by path before any create', async () => {
+  const calls = []
+  const controller = { async create() { return { sessionId: 'sess-m1' } }, async prompt() { return { accepted: true } } }
+  const registry = {
+    list() { calls.push('list'); return [] },
+    async resolveByPath(path) { calls.push(`resolveByPath:${path}`); return { id: 'ws-path' } },
+    async create(path, title) { calls.push(`create:${path}:${title}`); return { id: 'ws-new' } },
+  }
+  const ctx = fakeCtx({ controller, registry, agents: new Map([['sess-m1', fakeAgent('sess-m1')]]) })
+
+  await createMemberSession(ctx, readMemberSessionServices(ctx), { ...REQUEST, captainSessionId: 'captain' })
+
+  assert.deepEqual(calls, ['list', 'resolveByPath:C:/ws'])
+})
+
+test('an unowned directory creates one workspace titled after the folder', async () => {
+  const calls = []
+  const controller = { async create() { return { sessionId: 'sess-m1' } }, async prompt() { return { accepted: true } } }
+  const registry = {
+    async resolveByPath(path) { calls.push(`resolveByPath:${path}`); return undefined },
+    async create(path, title) { calls.push(`create:${path}:${title}`); return { id: 'ws-new' } },
+  }
+  const ctx = fakeCtx({ controller, registry, agents: new Map([['sess-m1', fakeAgent('sess-m1')]]) })
+
+  await createMemberSession(ctx, readMemberSessionServices(ctx), REQUEST)
+
+  assert.deepEqual(calls, ['resolveByPath:C:/ws', 'create:C:/ws:ws'])
 })
 
 test('a member without a route or filter installs neither, and still opens its turn', async () => {

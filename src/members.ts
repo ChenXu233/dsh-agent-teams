@@ -998,6 +998,7 @@ export async function spawnMember(
       toolFilter: resolvedFilter ?? memberToolFilter(config.maxDepth, restrictableToolNames(captain)),
       selection: modelSelection(llmSelection),
       prompt: initialPrompt ?? memberWelcome(team, member.name),
+      captainSessionId: captain.id,
     })
     member.id = created.childId
     member.sessionKind = 'session'

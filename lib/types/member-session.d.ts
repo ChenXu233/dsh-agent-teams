@@ -63,11 +63,27 @@ export interface MemberSessionController {
         accepted?: boolean;
     };
 }
-/** Structural view of the workspace registry used to group a member beside its captain. */
+/**
+ * Structural view of the workspace registry.
+ *
+ * Three calls matter and only the last one mutates:
+ * `list` finds the workspace that already holds the captain (so the member sits
+ * beside it), `resolveByPath` finds one by directory without creating anything,
+ * and `create` is create-or-reuse — it returns the existing entity for an
+ * already-registered canonical path and only writes a record when the directory
+ * has no workspace yet.
+ */
 export interface MemberSessionRegistry {
     create?: (path: string, title?: string) => Promise<{
         id?: string;
     }>;
+    resolveByPath?: (path: string) => Promise<{
+        id?: string;
+    } | undefined>;
+    list?: () => {
+        id?: string;
+        sessionIds?: readonly string[];
+    }[];
 }
 /** Optional services the session-mode member path needs. */
 export interface MemberSessionServices {
@@ -101,6 +117,8 @@ export interface CreateMemberSessionRequest {
     selection?: ModelSelection;
     /** First turn text (the welcome message). */
     prompt: string;
+    /** Captain session id; when given, the member joins the captain's own workspace. */
+    captainSessionId?: string;
 }
 /** Created member session identity. */
 export interface CreatedMemberSession {

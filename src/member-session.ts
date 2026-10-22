@@ -24,6 +24,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { randomUUID } from 'node:crypto'
+import { basename } from 'node:path'
 import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
 
@@ -60,9 +61,20 @@ export interface MemberSessionController {
   cancel?: (request: { sessionId: string }) => { accepted?: boolean }
 }
 
-/** Structural view of the workspace registry used to group a member beside its captain. */
+/**
+ * Structural view of the workspace registry.
+ *
+ * Three calls matter and only the last one mutates:
+ * `list` finds the workspace that already holds the captain (so the member sits
+ * beside it), `resolveByPath` finds one by directory without creating anything,
+ * and `create` is create-or-reuse — it returns the existing entity for an
+ * already-registered canonical path and only writes a record when the directory
+ * has no workspace yet.
+ */
 export interface MemberSessionRegistry {
   create?: (path: string, title?: string) => Promise<{ id?: string }>
+  resolveByPath?: (path: string) => Promise<{ id?: string } | undefined>
+  list?: () => { id?: string; sessionIds?: readonly string[] }[]
 }
 
 /** Optional services the session-mode member path needs. */
@@ -120,6 +132,8 @@ export interface CreateMemberSessionRequest {
   selection?: ModelSelection
   /** First turn text (the welcome message). */
   prompt: string
+  /** Captain session id; when given, the member joins the captain's own workspace. */
+  captainSessionId?: string
 }
 
 /** Created member session identity. */
@@ -153,6 +167,63 @@ function installMemberSessionSetup(agent: Agent, request: CreateMemberSessionReq
 }
 
 /**
+ * Resolve the workspace a member session belongs to, without inventing one.
+ *
+ * A member must appear beside its captain, and a team must never litter the
+ * sidebar with a workspace per spawn. In order:
+ *
+ * 1. the workspace that already holds the captain session — `list()` is a
+ *    read, and this is the only answer that guarantees "beside the captain"
+ *    even when the captain's directory spelling differs from ours;
+ * 2. `resolveByPath` — an existing workspace for this directory, still a read;
+ * 3. `create` — create-or-reuse: it returns the existing entity for an already
+ *    registered canonical path and only writes a record for an unowned
+ *    directory, titled after the directory rather than the full path.
+ *
+ * Every step degrades to the next, and `undefined` simply means the session is
+ * created from `cwd` without workspace grouping.
+ * @param ctx - the plugin context (logging only).
+ * @param registry - the optional workspace registry.
+ * @param request - cwd and optional captain session id.
+ * @returns the workspace id to attach to, when one can be resolved.
+ */
+async function resolveMemberWorkspaceId(
+  ctx: Context,
+  registry: MemberSessionRegistry | undefined,
+  request: CreateMemberSessionRequest,
+): Promise<string | undefined> {
+  if (registry === undefined) return undefined
+  const captainSessionId = request.captainSessionId
+  if (captainSessionId !== undefined && typeof registry.list === 'function') {
+    try {
+      const owned = registry.list().find((workspace) => workspace.sessionIds?.includes(captainSessionId) === true)
+      if (typeof owned?.id === 'string' && owned.id !== '') return owned.id
+    } catch (error: unknown) {
+      ctx.logger.warn(`agent-teams: could not list workspaces for member creation: ${String(error)}`)
+    }
+  }
+  if (typeof registry.resolveByPath === 'function') {
+    try {
+      const existing = await registry.resolveByPath(request.cwd)
+      if (typeof existing?.id === 'string' && existing.id !== '') return existing.id
+    } catch (error: unknown) {
+      ctx.logger.warn(`agent-teams: could not resolve the workspace for ${request.cwd}: ${String(error)}`)
+    }
+  }
+  if (typeof registry.create === 'function') {
+    try {
+      const created = await registry.create(request.cwd, basename(request.cwd))
+      if (typeof created.id === 'string' && created.id !== '') return created.id
+    } catch (error: unknown) {
+      // The workspace only groups the session in the UI; creation still works
+      // from an explicit cwd.
+      ctx.logger.warn(`agent-teams: could not create a workspace for member creation in ${request.cwd}: ${String(error)}`)
+    }
+  }
+  return undefined
+}
+
+/**
  * Create one member as an ordinary session and open its first turn.
  *
  * The session is attached to the captain's workspace when the registry can
@@ -172,16 +243,7 @@ export async function createMemberSession(
   const unavailable = memberSessionUnavailableReason(services)
   if (unavailable !== undefined) throw new Error(`agent-teams: ${unavailable}`)
   const controller = services.controller as MemberSessionController & { create: NonNullable<MemberSessionController['create']> }
-  let workspaceId: string | undefined
-  if (typeof services.registry?.create === 'function') {
-    try {
-      workspaceId = (await services.registry.create(request.cwd, request.cwd)).id
-    } catch (error: unknown) {
-      // The workspace only groups the session in the UI; creation still works
-      // from an explicit cwd.
-      ctx.logger.warn(`agent-teams: could not resolve a workspace for member creation in ${request.cwd}: ${String(error)}`)
-    }
-  }
+  const workspaceId = await resolveMemberWorkspaceId(ctx, services.registry, request)
   const created = workspaceId === undefined
     ? await controller.create({ cwd: request.cwd })
     : await controller.create({ workspaceId })
