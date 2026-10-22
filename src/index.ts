@@ -168,13 +168,21 @@ const toolPolicyConfig = z.union([
 // Plan-02 budget thresholds. `maxTokens` and `maxRatio` are alternatives; the
 // resolved budget takes the smaller of whichever are set, and a ratio without
 // a knowable model context window disables the watchdog instead of guessing.
-const memberContextConfig = z.object({
-  maxTokens: z.natural(),
-  maxRatio: z.number(),
-  cooldownMs: z.natural().default(60_000),
-  minTurnGap: z.natural().default(1),
-  onLimit: z.union([z.const('compact'), z.const('notify'), z.const('off')]).default('compact'),
-})
+// Same Schemastery trap as the fallback route: a bare `z.object()` for an
+// optional block materializes `{}` when the key is absent, and the parser then
+// rejects a block that the deployment never wrote. Model absence explicitly so
+// an unconfigured `memberContext` stays `undefined` (feature off, zero new
+// behavior) while a written block still needs a threshold.
+const memberContextConfig = z.union([
+  z.object({
+    maxTokens: z.natural(),
+    maxRatio: z.number(),
+    cooldownMs: z.natural().default(60_000),
+    minTurnGap: z.natural().default(1),
+    onLimit: z.union([z.const('compact'), z.const('notify'), z.const('off')]).default('compact'),
+  }),
+  z.const(undefined),
+])
 
 export const Config: z<Config> = z.object({
   stateDir: z.string().default('.agent-teams'),

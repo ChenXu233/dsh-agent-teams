@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { normalizeMemberCommandDeny, registerAgentTeamsTools } from '../lib/tools.js'
-import { apply, inject } from '../lib/index.js'
+import { Config, apply, inject } from '../lib/index.js'
 import { createTeamDir } from '../lib/state.js'
 import { TEAM_TOOL_NAMES, MEMBER_TOOL_NAMES, CAPTAIN_TOOL_NAMES } from '../lib/tool-names.js'
 import { AGENT_TEAMS_COMMAND } from '../lib/command.js'
@@ -613,6 +613,22 @@ test('mount rejects unusable memberCommandDeny entries instead of silently denyi
  */
 test('inject requires only the upstream services', () => {
   assert.deepEqual([...inject], ['tools', 'llm', 'subagents', 'systemPrompt', 'agents'])
+})
+
+/**
+ * An absent `memberContext` must stay absent after schema validation.
+ *
+ * Regression guard for the 2026-10-22 field failure: a bare `z.object()` for
+ * the optional block materialized `{}` (Schemastery's implicit object default),
+ * `parseMemberContextConfig` then rejected a block the deployment never wrote,
+ * and the whole plugin failed to mount with
+ * `memberContext requires a positive maxTokens or maxRatio threshold`.
+ */
+test('an absent memberContext stays undefined', () => {
+  const config = Config({ stateDir: '.agent-teams', memberProvider: 'spawn' })
+  assert.equal(config.memberContext, undefined)
+  const configured = Config({ memberContext: { maxTokens: 1000 } })
+  assert.equal(configured.memberContext.maxTokens, 1000)
 })
 
 
