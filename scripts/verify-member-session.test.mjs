@@ -11,6 +11,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Config } from '../lib/index.js'
 import { spawnMember } from '../lib/members.js'
+import { stopTeamMemberActivations } from '../lib/tools.js'
 import {
   cancelMemberSession,
   createMemberSession,
@@ -261,6 +262,37 @@ test('the legacy default still fails loud without a subagent provider', async ()
     ),
     /no subagent provider/,
   )
+})
+
+test('stopping a team cancels session-mode members and drains only legacy children', async () => {
+  const cancelled = []
+  const drained = []
+  const ctx = fakeCtx({ controller: { cancel(request) { cancelled.push(request) } } })
+  ctx.subagents = {
+    async drainChildren(parent, ids) { drained.push([...ids]) },
+    get drainContinuableChildren() { throw new Error('exact drain must win over the continuable fallback') },
+  }
+
+  await stopTeamMemberActivations(ctx, { id: 'captain' }, [
+    { id: 'sess-a', name: 'a', sessionKind: 'session', joinedAt: 0, status: 'idle' },
+    { id: 'child-b', name: 'b', joinedAt: 0, status: 'idle' },
+    { id: '', name: 'never-started', joinedAt: 0, status: 'idle' },
+  ], new AbortController().signal)
+
+  assert.deepEqual(cancelled, [{ sessionId: 'sess-a' }])
+  assert.deepEqual(drained, [['child-b']])
+})
+
+test('stopping only session-mode members never reads the subagent runtime', async () => {
+  const cancelled = []
+  const ctx = fakeCtx({ controller: { cancel(request) { cancelled.push(request) } } })
+  ctx.subagents = new Proxy({}, { get() { throw new Error('session-mode stop must not drain subagent children') } })
+
+  await stopTeamMemberActivations(ctx, {}, [
+    { id: 'sess-a', name: 'a', sessionKind: 'session', joinedAt: 0, status: 'idle' },
+  ], new AbortController().signal)
+
+  assert.deepEqual(cancelled, [{ sessionId: 'sess-a' }])
 })
 
 test('the rollout switch defaults to the legacy path', () => {

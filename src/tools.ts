@@ -1,4 +1,5 @@
 import { drainMemberChildren } from './harness-compat.ts'
+import { cancelMemberSession, readMemberSessionServices } from './member-session.ts'
 /**
  * The `agent_teams_*` model-facing tools.
  *
@@ -633,13 +634,27 @@ async function resumeLeadAnchor(ctx: Context, team: TeamState, caller: Agent): P
   }
 }
 
-async function stopTeamMemberActivations(
+export async function stopTeamMemberActivations(
   ctx: Context,
   captain: Agent,
   members: readonly TeamMember[],
   signal?: AbortSignal,
 ): Promise<void> {
-  const memberIds = members.filter(member => member.id !== '').map(member => member.id as SessionId)
+  // Plan 09: a session-mode member is an ordinary session, so the captain's
+  // child drain cannot see it. Cancel its active turn through the session
+  // controller instead, keeping the session and its queued work intact — the
+  // same "stop this turn, keep the teammate" semantic as the drain.
+  const sessionMembers = members.filter(member => member.id !== '' && member.sessionKind === 'session')
+  if (sessionMembers.length > 0) {
+    const services = readMemberSessionServices(ctx)
+    for (const member of sessionMembers) {
+      signal?.throwIfAborted()
+      cancelMemberSession(ctx, services, member.id)
+    }
+  }
+  const memberIds = members
+    .filter(member => member.id !== '' && member.sessionKind !== 'session')
+    .map(member => member.id as SessionId)
   if (memberIds.length === 0) return
   // Every supported exact host has targeted recursive drain. Unlike interrupt,
   // it closes admission and clears queued work before awaiting descendants.

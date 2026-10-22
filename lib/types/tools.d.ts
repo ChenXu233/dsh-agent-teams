@@ -13,7 +13,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import { type MemberToolPolicy } from './tool-policies.ts';
 import type { MemberContextConfig } from './member-context.ts';
 import type { ArtifactSnapshot } from './types.ts';
-import { type TeamState, type TeamTask } from './types.ts';
+import { type TeamMember, type TeamState, type TeamTask } from './types.ts';
 export { steerCaptainReport } from './members.ts';
 /** Resolved plugin config consumed by the tools. */
 export interface ToolsConfig {
@@ -125,6 +125,7 @@ export interface AgentTeamsRuntime {
         teamId: string;
     }>;
 }
+export declare function stopTeamMemberActivations(ctx: Context, captain: Agent, members: readonly TeamMember[], signal?: AbortSignal): Promise<void>;
 export declare function haltTeamWork(input: {
     ctx: Context;
     stateRoot: string;
