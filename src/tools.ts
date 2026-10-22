@@ -599,7 +599,12 @@ interface TokenMeterView {
 
 /** Read the host token meter when mounted; undefined keeps status display durable-only. */
 function optionalTeamTokenMeter(ctx: Context): TokenMeterView | undefined {
-  const meter = (ctx as unknown as { tokenMeter?: unknown }).tokenMeter
+  // `ctx.get` is the unguarded registry read: property access throws
+  // `cannot get property "tokenMeter" without inject` on compositions that do
+  // not provide it — exactly the deployment this view must tolerate.
+  const get = (ctx as unknown as { get?: (name: string) => unknown }).get
+  let meter: unknown
+  try { meter = typeof get === 'function' ? get.call(ctx, 'tokenMeter') : undefined } catch { meter = undefined }
   if (meter === undefined || meter === null) return undefined
   const measure = (meter as { measure?: unknown }).measure
   return typeof measure === 'function' ? { measure: measure.bind(meter) as TokenMeterView['measure'] } : undefined

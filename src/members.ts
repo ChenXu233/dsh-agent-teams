@@ -51,16 +51,30 @@ interface MeterView {
   measure(session: Session): { totalTokens: number }
 }
 
+/**
+ * Read an optional host service WITHOUT requiring it in `inject`.
+ *
+ * Property access (`ctx.tokenMeter`) is guarded by cordis: an undeclared service
+ * throws `cannot get property "x" without inject`, which aborted every member
+ * spawn in the field (2026-10-22). `ctx.get(name)` is the unguarded registry
+ * read and yields undefined when the composition does not provide the service.
+ */
+function readOptionalService(ctx: Context, name: string): unknown {
+  const get = (ctx as unknown as { get?: (name: string) => unknown }).get
+  if (typeof get !== 'function') return undefined
+  try { return get.call(ctx, name) } catch { return undefined }
+}
+
 /** Read the host token meter when mounted; undefined keeps the watchdog disabled. */
 function optionalMemberTokenMeter(ctx: Context): MeterView | undefined {
-  const meter = (ctx as unknown as { tokenMeter?: unknown }).tokenMeter
+  const meter = readOptionalService(ctx, 'tokenMeter')
   const measure = (meter as { measure?: unknown } | undefined)?.measure
   return typeof measure === 'function' ? { measure: measure.bind(meter) as MeterView['measure'] } : undefined
 }
 
 /** Read the host compaction engine when mounted; undefined keeps the watchdog disabled. */
 function optionalMemberCompaction(ctx: Context): CompactionView | undefined {
-  const engine = (ctx as unknown as { compaction?: unknown }).compaction
+  const engine = readOptionalService(ctx, 'compaction')
   const compactNow = (engine as { compactNow?: unknown } | undefined)?.compactNow
   return typeof compactNow === 'function'
     ? { compactNow: compactNow.bind(engine) as CompactionView['compactNow'] }
