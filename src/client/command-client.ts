@@ -289,3 +289,62 @@ export function createMemberCommandClient(
     },
   }
 }
+
+/** Route the panel bar and the member composer execute through. */
+export const MEMBER_COMMAND_URL = '/plugins/dsh-agent-teams/member/command'
+
+/**
+ * A command face backed by this plugin's own route.
+ *
+ * The host's client-facing command API refuses every subagent-owned session
+ * (`session/agent-busy: owned by subagent routing`), so a member session can
+ * never be driven through `remote.commands`. Our route resolves the same Agent
+ * in-process and calls `ctx.commands.execute`, which is the bus the member
+ * itself uses. Results are re-wrapped into the envelope this module already
+ * parses, so the panel component stays unchanged.
+ */
+export function createRouteCommandPort(
+  target: MemberCommandTarget,
+  fetchImpl: MemberCommandFetch = (init, body) => fetch(init, body),
+): MemberCommandsPort {
+  const post = async (body: Record<string, unknown>): Promise<unknown> => {
+    const response = await fetchImpl(MEMBER_COMMAND_URL, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: target.sessionId, teamId: target.teamId, member: target.member, ...body }),
+    })
+    let payload: unknown
+    try { payload = await response.json?.() } catch { payload = undefined }
+    if (!response.ok) {
+      const message = (payload as { error?: unknown } | undefined)?.error
+      return {
+        ok: false,
+        error: {
+          code: `http-${response.status}`,
+          message: typeof message === 'string' ? message : `member command route failed with ${response.status}`,
+        },
+      }
+    }
+    return payload
+  }
+  return {
+    async list(): Promise<unknown> {
+      const payload = await post({ action: 'list' }) as { ok?: unknown; commands?: unknown; error?: unknown } | undefined
+      if (payload?.ok !== true) {
+        return { ok: false, error: { code: 'route-error', message: typeof payload?.error === 'string' ? payload.error : 'listing the member command catalog failed' } }
+      }
+      return { ok: true, value: payload.commands ?? [] }
+    },
+    async execute(_sessionId: string, line: string): Promise<unknown> {
+      const payload = await post({ action: 'run', line }) as { kind?: unknown; text?: unknown; commandId?: unknown; error?: unknown } | undefined
+      if (payload === undefined || payload.kind === undefined) {
+        return { ok: false, error: { code: 'route-error', message: typeof payload?.error === 'string' ? payload.error : 'running the command failed' } }
+      }
+      const result = typeof payload.kind === 'string'
+        ? { kind: payload.kind, ...(payload.text === undefined ? {} : { text: payload.text }) }
+        : undefined
+      return { ok: true, value: { commandId: payload.commandId, result } }
+    },
+  }
+}

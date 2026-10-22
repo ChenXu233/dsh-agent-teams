@@ -60,13 +60,14 @@ import {
   type ActivityTeam,
 } from './activity-monitor.ts'
 import {
-  activeMemberCommands,
+  createRouteCommandPort,
   commandDraftFor,
   commandLineFor,
   createMemberCommandClient,
   promptTextFor,
   type MemberCommand,
   type MemberCommandFailure,
+  type MemberCommandTarget,
 } from './command-client.ts'
 import { ACTION_ART, LEAD_ART, memberArtUrl } from './artwork.ts'
 import { OPEN_PANEL_EVENT } from './AgentTeamsCard.tsx'
@@ -332,18 +333,15 @@ function MemberCommandBar({ team, member, t }: {
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [feedback, setFeedback] = useState<{ readonly tone: 'success' | 'error'; readonly text: string } | undefined>(undefined)
-  const port = activeMemberCommands()
-  const client = useMemo(
-    () => port === undefined
-      ? undefined
-      : createMemberCommandClient(port, {
-        sessionId: team.captainSessionId,
-        teamId: team.teamId,
-        member: member.name,
-        memberSessionId: member.id,
-      }),
-    [port, team.captainSessionId, team.teamId, member.name, member.id],
-  )
+  const target = useMemo<MemberCommandTarget>(() => ({
+    sessionId: team.captainSessionId,
+    teamId: team.teamId,
+    member: member.name,
+    memberSessionId: member.id,
+  }), [team.captainSessionId, team.teamId, member.name, member.id])
+  // The host's client-facing command face refuses subagent-owned sessions, so
+  // the bar drives the plugin's own route (in-process execute) instead.
+  const client = useMemo(() => createMemberCommandClient(createRouteCommandPort(target), target), [target])
   const loadCatalog = useCallback((): void => {
     if (client === undefined || catalog === 'loading' || catalog === 'ready') return
     setCatalog('loading')

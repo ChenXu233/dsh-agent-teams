@@ -163,3 +163,16 @@ export declare function transportDetail(error: unknown): string;
  * members can never see each other's catalog.
  */
 export declare function createMemberCommandClient(port: MemberCommandsPort, target: MemberCommandTarget, fetchImpl?: MemberCommandFetch): MemberCommandClient;
+/** Route the panel bar and the member composer execute through. */
+export declare const MEMBER_COMMAND_URL = "/plugins/dsh-agent-teams/member/command";
+/**
+ * A command face backed by this plugin's own route.
+ *
+ * The host's client-facing command API refuses every subagent-owned session
+ * (`session/agent-busy: owned by subagent routing`), so a member session can
+ * never be driven through `remote.commands`. Our route resolves the same Agent
+ * in-process and calls `ctx.commands.execute`, which is the bus the member
+ * itself uses. Results are re-wrapped into the envelope this module already
+ * parses, so the panel component stays unchanged.
+ */
+export declare function createRouteCommandPort(target: MemberCommandTarget, fetchImpl?: MemberCommandFetch): MemberCommandsPort;

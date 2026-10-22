@@ -33,6 +33,7 @@ import {
 } from './locales.ts'
 import { openAgentTeamMember, type AgentTeamsLayoutNavigator, type AgentTeamsWorkspaceNavigator } from './session-navigation.ts'
 import { provideMemberCommands } from './command-client.ts'
+import { MemberComposer } from './MemberComposer.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -104,6 +105,29 @@ export function apply(ctx: ClientContext): void {
   }
   // Optional service scope keeps legacy hosts working and removes every native
   // contribution when the host provider disappears (including HMR).
+  // Plan 01b: claim the composer inside an AgentTeams member's own conversation.
+  // The chain slot elects the FIRST contribution whose `select` returns non-null
+  // (renderer lib/client.js:1183-1201) and restores the official placeholder when
+  // nobody is elected, so a lower priority number takes over cleanly and this
+  // registration can be removed without side effects.
+  ctx.slots.inject('conversation.composer', () => ctx.slots.register({
+    name: 'conversation.composer',
+    priority: -20,
+    locale: AGENT_TEAMS_LOCALE_NAMESPACE,
+    select: (owner: {
+      readonly session?: {
+        readonly running?: boolean
+        readonly subagent?: { readonly address?: { readonly mode?: string }; readonly parentAvailable?: boolean } | null
+      }
+    }): { readonly reason: string } | null => {
+      const subagent = owner.session?.subagent
+      if (subagent === undefined || subagent === null) return null
+      if (subagent.address?.mode !== 'continuable') return null
+      if (subagent.parentAvailable !== false) return null
+      if (owner.session?.running === true) return null
+      return { reason: 'agent-teams-member' }
+    },
+  }, MemberComposer))
   ctx.inject(['sidebarRight', 'sidebarRightTabs'], (native) => {
     const t = native.locale.bind(AGENT_TEAMS_LOCALE_NAMESPACE)
     native.effect(() => native.sidebarRightTabs.register({
