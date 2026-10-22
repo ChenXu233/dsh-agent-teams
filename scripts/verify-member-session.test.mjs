@@ -43,7 +43,7 @@ function fakeAgent(id) {
   }
 }
 
-function fakeCtx({ controller, registry, agents = new Map() } = {}) {
+function fakeCtx({ controller, registry, agents = new Map(), sessions } = {}) {
   const warnings = []
   return {
     warnings,
@@ -52,6 +52,7 @@ function fakeCtx({ controller, registry, agents = new Map() } = {}) {
       get(id) { return agents.get(id) },
       list() { return [...agents.values()] },
     },
+    ...sessions === undefined ? {} : { sessions: { get(id) { return sessions.get(id) } } },
     get(name) {
       if (name === 'sessionController') return controller
       if (name === 'workspaceRegistry') return registry
@@ -194,6 +195,30 @@ test('prompt delivery carries the mode, mints a request id, and never throws', a
   assert.match(broken.warnings.join('\n'), /prompt delivery to member session sess-m1 failed/)
 
   assert.equal(await promptMemberSession(fakeCtx(), {}, 'sess-m1', 'x'), false)
+})
+
+test('prompt authoring follows the live session format, not the resolved module (#236)', async () => {
+  const seen = []
+  const controller = { async prompt(request, source) { seen.push(source); return { accepted: true } } }
+  const agent = fakeAgent('sess-m1')
+  // A pre-v3 host persists plugin-authored messages through the retired wrapper.
+  agent.session.header.version = 0
+  const ctx = fakeCtx({ controller, agents: new Map([['sess-m1', agent]]) })
+  await promptMemberSession(ctx, readMemberSessionServices(ctx), 'sess-m1', 'x')
+  assert.equal(seen[0].kind, 'plugin')
+
+  // A current host mints the producer-owned kind.
+  agent.session.header.version = 4
+  await promptMemberSession(ctx, readMemberSessionServices(ctx), 'sess-m1', 'x')
+  assert.equal(seen[1].kind, 'agent-teams')
+
+  // A cold session is still observed from its attached header.
+  const cold = fakeCtx({
+    controller,
+    sessions: new Map([['sess-cold', { header: { version: 4 } }]]),
+  })
+  await promptMemberSession(cold, readMemberSessionServices(cold), 'sess-cold', 'x')
+  assert.equal(seen[2].kind, 'agent-teams')
 })
 
 test('cancel is best effort and never throws into a halt path', () => {

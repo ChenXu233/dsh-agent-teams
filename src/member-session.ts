@@ -24,7 +24,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { randomUUID } from 'node:crypto'
-import { agentTeamsSource } from './harness-compat.ts'
+import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
 
 /** How a member's conversation is carried: legacy subagent frame or ordinary session. */
@@ -202,6 +202,27 @@ export async function createMemberSession(
 }
 
 /**
+ * Stored session format generation of the session this prompt lands in.
+ *
+ * Upstream #236: the resolved `@deepseek-ai/dsh-session` copy can belong to a
+ * different host generation than the process that persists the message, and a
+ * wrong generation selects the retired `plugin` wrapper that the host's own
+ * admission check rejects. The live session header is authoritative, so prefer
+ * it and fall back to the module constant only when nothing is attached.
+ * @param ctx - the plugin context.
+ * @param sessionId - the member's ordinary session id.
+ * @returns the observed generation, or undefined when only the module says.
+ */
+function memberSessionFormatVersion(ctx: Context, sessionId: string): number | undefined {
+  const live = ctx.agents.get(sessionId as SessionId)
+  if (live !== undefined) return observedSessionFormatVersion(live)
+  const attached: { header?: { version?: unknown } } | undefined = (ctx as unknown as {
+    sessions?: { get?: (id: SessionId) => { header?: { version?: unknown } } | undefined }
+  }).sessions?.get?.(sessionId as SessionId)
+  return attached === undefined ? undefined : observedSessionFormatVersion({ session: attached })
+}
+
+/**
  * Queue one prompt on an ordinary member session.
  *
  * Delivery goes through the host controller's prompt call, which admits the
@@ -231,7 +252,7 @@ export async function promptMemberSession(
       content: [{ type: 'text', text }],
       mode,
       requestId: randomUUID(),
-    }, agentTeamsSource({ kind: 'agent-teams' }))
+    }, agentTeamsSource({ kind: 'agent-teams' }, memberSessionFormatVersion(ctx, sessionId)))
     return accepted?.accepted !== false
   } catch (error: unknown) {
     ctx.logger.warn(`agent-teams: prompt delivery to member session ${sessionId} failed: ${String(error)}`)
