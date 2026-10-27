@@ -119,6 +119,10 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('conversation.composer', () => ctx.slots.register({
     name: 'conversation.composer',
     priority: -20,
+    // The model selector reads the host catalog through the same per-session
+    // directory the host composer uses. Switching still goes through the
+    // plugin's own route: the host's `selectModel` refuses subagent sessions.
+    inject: () => ({ modelDirectories: ctx.modelDirectories }),
     select: (owner: ComposerOwnerView & {
       readonly session?: {
         readonly running?: boolean

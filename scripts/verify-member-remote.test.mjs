@@ -11,6 +11,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { memberViewOf, queueViewOf, remoteAddressError } from '../lib/member-remote.js'
 import { MemberAddressError } from '../lib/member-address.js'
+import { parkMember } from '../lib/member-residency.js'
+import { applyMemberRoute, dropMemberRoute, registerMemberRoute } from '../lib/member-route-registry.js'
 
 function liveAgent(overrides = {}) {
   return {
@@ -75,3 +77,51 @@ test('remoteAddressError keeps the domain code and its address detail', () => {
   const passthrough = new Error('boom')
   assert.equal(remoteAddressError(passthrough, { captainSessionId: 'c', memberSessionId: 'm' }), passthrough)
 })
+
+function parkableAgent() {
+  const nextTurn = []
+  const nextStep = []
+  const agent = {
+    id: 'child-1',
+    status: 'idle',
+    options: { provider: 'deepseek', model: 'deepseek-v4' },
+    session: { header: { cwd: '/tmp', version: 4 } },
+    inbox: {
+      get nextTurn() { return nextTurn },
+      get nextStep() { return nextStep },
+      get hasPending() { return nextTurn.length > 0 || nextStep.length > 0 },
+      append(target, message) { (target === 'next-turn' ? nextTurn : nextStep).push(message) },
+      remove(id) {
+        for (const list of [nextTurn, nextStep]) {
+          const index = list.findIndex(message => message.id === id)
+          if (index >= 0) { list.splice(index, 1); return true }
+        }
+        return false
+      },
+    },
+    inject(message) { agent.inbox.append('next-step', message) },
+  }
+  return agent
+}
+
+test('memberViewOf hides the residency placeholder from the queue', () => {
+  const agent = parkableAgent()
+  parkMember(agent)
+  const view = memberViewOf({ member: { name: 'alpha', id: 'child-1' }, team: { id: 'demo' } }, agent)
+  assert.equal(view.queued, 0)
+  assert.deepEqual(queueViewOf(agent).items, [])
+})
+
+test('memberViewOf reports the applied model switch over the spawn route', () => {
+  const agent = parkableAgent()
+  const address = { member: { name: 'alpha', id: 'child-1' }, team: { id: 'demo' } }
+  assert.deepEqual(memberViewOf(address, agent).model, { provider: 'deepseek', model: 'deepseek-v4' })
+
+  registerMemberRoute('child-1', () => {})
+  assert.equal(applyMemberRoute('child-1', { provider: 'other', model: 'pro' }), true)
+  assert.deepEqual(memberViewOf(address, agent).model, { provider: 'other', model: 'pro' })
+
+  dropMemberRoute('child-1')
+  assert.deepEqual(memberViewOf(address, agent).model, { provider: 'deepseek', model: 'deepseek-v4' })
+})
+

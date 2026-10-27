@@ -21,13 +21,22 @@ export type MemberRouteSetter = (route: MemberRoute) => void
 const setters = new Map<string, MemberRouteSetter>()
 
 /**
+ * Last route applied through the registry. `agent.options` keeps the SPAWN
+ * route (the selection only feeds the request waterfall), so this is the only
+ * handle on "what model will the next turn use".
+ */
+const applied = new Map<string, MemberRoute>()
+
+/**
  * Register the setter for one live member; a second registration replaces the
- * first, which is what a cold resume does.
+ * first, which is what a cold resume does. A fresh activation starts from its
+ * spawn route, so any remembered switch is dropped.
  * @param childId - member child session id.
  * @param setter - applies a route to that member's live selection.
  */
 export function registerMemberRoute(childId: string, setter: MemberRouteSetter): void {
   setters.set(childId, setter)
+  applied.delete(childId)
 }
 
 /**
@@ -40,12 +49,24 @@ export function applyMemberRoute(childId: string, route: MemberRoute): boolean {
   const setter = setters.get(childId)
   if (setter === undefined) return false
   setter(route)
+  applied.set(childId, route)
   return true
+}
+
+/**
+ * The route a live member was last switched to.
+ * @param childId - member child session id.
+ * @returns undefined before the first switch (or after teardown), meaning the
+ * member still runs its spawn route.
+ */
+export function memberRoute(childId: string): MemberRoute | undefined {
+  return applied.get(childId)
 }
 
 /** Drop one member's setter when its activation ends. */
 export function dropMemberRoute(childId: string): void {
   setters.delete(childId)
+  applied.delete(childId)
 }
 
 /** Whether a live setter is registered for this member. */

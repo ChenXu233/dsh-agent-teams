@@ -17,7 +17,8 @@ export interface MemberRoute {
 export type MemberRouteSetter = (route: MemberRoute) => void;
 /**
  * Register the setter for one live member; a second registration replaces the
- * first, which is what a cold resume does.
+ * first, which is what a cold resume does. A fresh activation starts from its
+ * spawn route, so any remembered switch is dropped.
  * @param childId - member child session id.
  * @param setter - applies a route to that member's live selection.
  */
@@ -29,6 +30,13 @@ export declare function registerMemberRoute(childId: string, setter: MemberRoute
  * @returns false when the member has no live setter (cold or torn down).
  */
 export declare function applyMemberRoute(childId: string, route: MemberRoute): boolean;
+/**
+ * The route a live member was last switched to.
+ * @param childId - member child session id.
+ * @returns undefined before the first switch (or after teardown), meaning the
+ * member still runs its spawn route.
+ */
+export declare function memberRoute(childId: string): MemberRoute | undefined;
 /** Drop one member's setter when its activation ends. */
 export declare function dropMemberRoute(childId: string): void;
 /** Whether a live setter is registered for this member. */

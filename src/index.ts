@@ -42,11 +42,12 @@ import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.t
 import { findTeamByCaptain, sanitizeKey } from './state.ts'
 import { findTeamByMemberSession } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand } from './member-command.ts'
-import { MemberRemoteService } from './member-remote.ts'
+import { MemberRemoteService, memberViewOf } from './member-remote.ts'
+import { applyMemberRoute } from './member-route-registry.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
-import { deliverToMember, liveMemberAgent, resolveMemberAgent } from './members.ts'
+import { deliverToMember, interruptMember, liveMemberAgent, resolveMemberAgent } from './members.ts'
 import { installTeamCapabilities } from './capabilities.ts'
 import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
@@ -671,6 +672,10 @@ export function apply(ctx: Context, config: Config): void {
         }
         const memberSessionId = typeof payload['memberSessionId'] === 'string' ? payload['memberSessionId'].trim() : ''
         const line = typeof payload['line'] === 'string' ? payload['line'].trim() : ''
+        // A running member can be steered into its current step; an idle one
+        // queues the line as its next turn. The client picks the mode from the
+        // live state it just read, and an unknown value stays the safe default.
+        const mode = payload['mode'] === 'steer' ? 'steer' as const : 'queue' as const
         if (memberSessionId === '' || line === '') {
           res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
           res.end(JSON.stringify({ error: 'memberSessionId and line are required' }))
@@ -730,7 +735,7 @@ export function apply(ctx: Context, config: Config): void {
             res.end(JSON.stringify({ error: 'the captain session is not attached; plain text needs the parent to be online' }))
             return
           }
-          const delivered = await deliverToMember(ctx, captain, memberSessionId, line, new AbortController().signal, 'queue')
+          const delivered = await deliverToMember(ctx, captain, memberSessionId, line, new AbortController().signal, mode)
           if (!delivered) {
             res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
             res.end(JSON.stringify({ error: 'failed to deliver the prompt to the member' }))
@@ -831,6 +836,145 @@ export function apply(ctx: Context, config: Config): void {
         }))
       },
     }), 'agent-teams: member commands route')
+
+    // Live state of one member, for that member's own composer (plan 10, task
+    // 8). The member page cannot read team state, so this is how the model
+    // label, the stop control and the queue badge learn what to render. It
+    // reports the residency placeholder as absent: that item is the keep-alive,
+    // not queued work.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/state',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId')?.trim() ?? ''
+        if (sessionId === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        const view = memberViewOf(located, liveMemberAgent(ctx, sessionId))
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ ok: true, view }))
+      },
+    }), 'agent-teams: member state route')
+
+    // Model switch for a resident member (plan 10, task 8). The host's
+    // `session.selectModel` Remote refuses subagent-owned sessions, so this
+    // applies the route to the live selection the member setup owns. A cold
+    // member is refused instead of resumed: switching a model is not a reason
+    // to spend a model turn.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/model',
+      handler: async (req, res) => {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        let payload: Record<string, unknown>
+        try {
+          payload = await readJsonRequest(req)
+        } catch (error: unknown) {
+          res.writeHead(error instanceof RequestBodyError ? error.status : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'invalid request body' }))
+          return
+        }
+        const sessionId = typeof payload['sessionId'] === 'string' ? payload['sessionId'].trim() : ''
+        const provider = typeof payload['provider'] === 'string' ? payload['provider'].trim() : ''
+        const model = typeof payload['model'] === 'string' ? payload['model'].trim() : ''
+        const reasoningEffort = typeof payload['reasoningEffort'] === 'string' ? payload['reasoningEffort'].trim() : ''
+        if (sessionId === '' || provider === '' || model === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId, provider, and model are required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        if (located.team.halted === true) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'this team is halted; its members cannot take a new model' }))
+          return
+        }
+        if (liveMemberAgent(ctx, sessionId) === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'member agent is not resident' }))
+          return
+        }
+        const applied = applyMemberRoute(sessionId, {
+          provider,
+          model,
+          ...(reasoningEffort === '' ? {} : { reasoningEffort }),
+        })
+        if (!applied) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'this member has no live model selection to switch' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ ok: true, provider, model }))
+      },
+    }), 'agent-teams: member model route')
+
+    // Stop the member's current turn (plan 10, task 8). Interrupting needs the
+    // live captain: it is the member's direct parent, and the host's subagent
+    // manager authorizes the interruption through it.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/stop',
+      handler: async (req, res) => {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        let payload: Record<string, unknown>
+        try {
+          payload = await readJsonRequest(req)
+        } catch (error: unknown) {
+          res.writeHead(error instanceof RequestBodyError ? error.status : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'invalid request body' }))
+          return
+        }
+        const sessionId = typeof payload['sessionId'] === 'string' ? payload['sessionId'].trim() : ''
+        if (sessionId === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        const captain = ctx.agents.get(located.team.captainSessionId as import('@deepseek-ai/dsh-session').SessionId)
+        if (captain === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'the captain session is not attached' }))
+          return
+        }
+        interruptMember(ctx, captain, sessionId)
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ ok: true, accepted: true }))
+      },
+    }), 'agent-teams: member stop route')
 
     ctx.effect(() => webServer.register({
       kind: 'exact',

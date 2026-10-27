@@ -16,7 +16,8 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import { MemberAddressError, resolveMemberAddress, type MemberAddress } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand, isDeniedMemberCommand } from './member-command.ts'
 import { deliverToMember, interruptMember } from './members.ts'
-import { applyMemberRoute } from './member-route-registry.ts'
+import { applyMemberRoute, memberRoute, type MemberRoute } from './member-route-registry.ts'
+import { parkedMessageId } from './member-residency.ts'
 
 /** Wire namespace of the member surface. */
 export const MEMBER_REMOTE_NAMESPACE = 'agentTeams'
@@ -111,11 +112,47 @@ interface HostCommands {
 /** Bounded idempotency window for request ids. */
 const REQUEST_WINDOW = 128
 
-/** Build the membership view from one resolved address and its live Agent. */
-export function memberViewOf(resolved: { member: { name: string }; team: { id: string; halted?: boolean } }, agent: Agent | undefined): MemberView {
-  const model = agent?.options.provider !== undefined && agent.options.model !== undefined
+/** The subset of a resolved address the views read. */
+export interface MemberViewSource {
+  readonly member: { readonly name: string; readonly id?: string }
+  readonly team: { readonly id: string; readonly halted?: boolean }
+}
+
+/** Structural view of one queued inbox message. */
+interface PendingMessage {
+  readonly id: string
+  readonly content: readonly { readonly type: string; readonly text?: string }[]
+}
+
+/**
+ * Pending messages that are real work: the residency placeholder is an
+ * internal keep-alive, never something a person queued.
+ * @param agent - live member Agent.
+ */
+function pendingMessages(agent: Agent): readonly PendingMessage[] {
+  const placeholder = parkedMessageId(agent)
+  const keep = (message: { readonly id: string }): boolean => message.id !== placeholder
+  const queued: readonly PendingMessage[] = [
+    ...agent.inbox.nextTurn.filter(keep),
+    ...agent.inbox.nextStep.filter(keep),
+  ]
+  return queued
+}
+
+/**
+ * Build the membership view from one resolved address and its live Agent.
+ * @param resolved - the resolved team/member pair.
+ * @param agent - the live member Agent, or undefined when cold.
+ * @param route - an explicit route override; defaults to the last switch.
+ */
+export function memberViewOf(resolved: MemberViewSource, agent: Agent | undefined, route?: MemberRoute | null): MemberView {
+  const switched = route ?? (resolved.member.id === undefined ? undefined : memberRoute(resolved.member.id))
+  const spawn = agent?.options.provider !== undefined && agent.options.model !== undefined
     ? { provider: agent.options.provider, model: agent.options.model }
-    : null
+    : undefined
+  const model = switched !== undefined
+    ? { provider: switched.provider, model: switched.model }
+    : spawn ?? null
   return {
     member: resolved.member.name,
     teamId: resolved.team.id,
@@ -123,14 +160,14 @@ export function memberViewOf(resolved: { member: { name: string }; team: { id: s
     running: agent?.status === 'running',
     archived: resolved.team.halted === true,
     model,
-    queued: agent === undefined ? 0 : agent.inbox.nextTurn.length + agent.inbox.nextStep.length,
+    queued: agent === undefined ? 0 : pendingMessages(agent).length,
   }
 }
 
 /** Build the pending-input view from one live Agent. */
 export function queueViewOf(agent: Agent | undefined): MemberQueueView {
   if (agent === undefined) return { running: false, items: [] }
-  const items = [...agent.inbox.nextTurn, ...agent.inbox.nextStep].map((message) => ({
+  const items = pendingMessages(agent).map((message) => ({
     id: message.id,
     preview: message.content
       .map((block) => (block.type === 'text' ? block.text : `[${block.type}]`))

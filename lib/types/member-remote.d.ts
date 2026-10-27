@@ -13,6 +13,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { type MemberAddress } from './member-address.ts';
+import { type MemberRoute } from './member-route-registry.ts';
 /** Wire namespace of the member surface. */
 export declare const MEMBER_REMOTE_NAMESPACE = "agentTeams";
 /** Stable failure codes this service adds to the host map. */
@@ -93,16 +94,24 @@ export interface MemberRemoteOptions {
     readonly stateDir: string;
     readonly deny: readonly string[];
 }
-/** Build the membership view from one resolved address and its live Agent. */
-export declare function memberViewOf(resolved: {
-    member: {
-        name: string;
+/** The subset of a resolved address the views read. */
+export interface MemberViewSource {
+    readonly member: {
+        readonly name: string;
+        readonly id?: string;
     };
-    team: {
-        id: string;
-        halted?: boolean;
+    readonly team: {
+        readonly id: string;
+        readonly halted?: boolean;
     };
-}, agent: Agent | undefined): MemberView;
+}
+/**
+ * Build the membership view from one resolved address and its live Agent.
+ * @param resolved - the resolved team/member pair.
+ * @param agent - the live member Agent, or undefined when cold.
+ * @param route - an explicit route override; defaults to the last switch.
+ */
+export declare function memberViewOf(resolved: MemberViewSource, agent: Agent | undefined, route?: MemberRoute | null): MemberView;
 /** Build the pending-input view from one live Agent. */
 export declare function queueViewOf(agent: Agent | undefined): MemberQueueView;
 /** Translate one address failure into the wire failure the client expects. */
