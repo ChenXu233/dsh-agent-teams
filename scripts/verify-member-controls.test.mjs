@@ -168,7 +168,7 @@ async function mountHarness(options = {}) {
   await mkdir(stateRoot, { recursive: true })
   await createTeamDir(stateRoot, {
     name: 'demo', id: 'demo', captainSessionId: CAPTAIN, createdAt: 1, taskSeq: 0,
-    members: [{ id: MEMBER, name: 'alpha', role: 'a', joinedAt: 1, status: 'idle' }],
+    members: [{ id: MEMBER, name: 'alpha', role: 'a', joinedAt: 1, status: options.removed === true ? 'removed' : 'idle' }],
     tasks: [],
     ...(options.halted === true ? { halted: true } : {}),
   })
@@ -383,7 +383,26 @@ test('B6. the relay honours the delivery mode the composer sends', async (t) => 
   assert.equal(harness.deliveries[0].childId, MEMBER)
 })
 
-test('B7. the relay refuses bad input and sessions outside the team', async (t) => {
+test('B7. a removed member keeps its transcript but loses write access', async (t) => {
+  const harness = await mountHarness({ removed: true })
+  t.after(() => harness.close())
+
+  // The composer seat is elected from the membership probe, so the probe must
+  // already report the read-only state: a removed member cannot be written to.
+  const membership = await harness.get(`/plugins/dsh-agent-teams/member/membership?sessionId=${encodeURIComponent(MEMBER)}`)
+  assert.equal(membership.status, 200)
+  assert.equal(membership.body.archived, true)
+
+  const state = await harness.state()
+  assert.equal(state.body.view.archived, true)
+  const switched = await harness.post('/plugins/dsh-agent-teams/member/model', {
+    sessionId: MEMBER, provider: 'other', model: 'pro',
+  })
+  assert.equal(switched.status, 409)
+  assert.match(switched.body.error, /archived/u)
+})
+
+test('B8. the relay refuses bad input and sessions outside the team', async (t) => {
   const harness = await mountHarness()
   t.after(() => harness.close())
 

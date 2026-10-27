@@ -114,8 +114,17 @@ const REQUEST_WINDOW = 128
 
 /** The subset of a resolved address the views read. */
 export interface MemberViewSource {
-  readonly member: { readonly name: string; readonly id?: string }
+  readonly member: { readonly name: string; readonly id?: string; readonly status?: string }
   readonly team: { readonly id: string; readonly halted?: boolean }
+}
+
+/**
+ * Whether this member can still accept work: a halted team is archived, and a
+ * removed member keeps its transcript but is no longer addressable.
+ * @param resolved - the resolved team/member pair.
+ */
+export function memberArchived(resolved: MemberViewSource): boolean {
+  return resolved.team.halted === true || resolved.member.status === 'removed'
 }
 
 /** Structural view of one queued inbox message. */
@@ -158,7 +167,7 @@ export function memberViewOf(resolved: MemberViewSource, agent: Agent | undefine
     teamId: resolved.team.id,
     live: agent !== undefined,
     running: agent?.status === 'running',
-    archived: resolved.team.halted === true,
+    archived: memberArchived(resolved),
     model,
     queued: agent === undefined ? 0 : pendingMessages(agent).length,
   }

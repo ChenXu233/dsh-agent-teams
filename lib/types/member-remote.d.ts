@@ -99,12 +99,19 @@ export interface MemberViewSource {
     readonly member: {
         readonly name: string;
         readonly id?: string;
+        readonly status?: string;
     };
     readonly team: {
         readonly id: string;
         readonly halted?: boolean;
     };
 }
+/**
+ * Whether this member can still accept work: a halted team is archived, and a
+ * removed member keeps its transcript but is no longer addressable.
+ * @param resolved - the resolved team/member pair.
+ */
+export declare function memberArchived(resolved: MemberViewSource): boolean;
 /**
  * Build the membership view from one resolved address and its live Agent.
  * @param resolved - the resolved team/member pair.

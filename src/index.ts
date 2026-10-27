@@ -42,7 +42,7 @@ import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.t
 import { findTeamByCaptain } from './state.ts'
 import { findTeamByMemberSession } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand } from './member-command.ts'
-import { MemberRemoteService, memberViewOf } from './member-remote.ts'
+import { MemberRemoteService, memberArchived, memberViewOf } from './member-remote.ts'
 import { applyMemberRoute } from './member-route-registry.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
@@ -587,7 +587,7 @@ export function apply(ctx: Context, config: Config): void {
         res.end(JSON.stringify({
           member: located.member.name,
           teamId: located.team.id,
-          archived: located.team.halted === true,
+          archived: memberArchived(located),
         }))
       },
     }), 'agent-teams: member membership route')
@@ -714,9 +714,9 @@ export function apply(ctx: Context, config: Config): void {
           res.end(JSON.stringify({ error: 'not a member session' }))
           return
         }
-        if (located.team.halted === true) {
+        if (memberArchived(located)) {
           res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'this team is halted; its members cannot take a new model' }))
+          res.end(JSON.stringify({ error: 'this member is archived (halted team or removed member); it cannot take a new model' }))
           return
         }
         if (liveMemberAgent(ctx, sessionId) === undefined) {
