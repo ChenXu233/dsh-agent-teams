@@ -46,7 +46,7 @@ import { MemberRemoteService } from './member-remote.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
-import { deliverToMember, resolveMemberAgent } from './members.ts'
+import { deliverToMember, liveMemberAgent, resolveMemberAgent } from './members.ts'
 import { installTeamCapabilities } from './capabilities.ts'
 import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
@@ -745,6 +745,92 @@ export function apply(ctx: Context, config: Config): void {
         }
       },
     }), 'agent-teams: member relay route')
+
+    // Membership probe for the member composer seat (plan 10, §4.4): the client
+    // cannot read team state, so it asks which subagent conversations belong to
+    // an AgentTeams team before claiming the composer.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/membership',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId')?.trim() ?? ''
+        if (sessionId === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({
+          member: located.member.name,
+          teamId: located.team.id,
+          archived: located.team.halted === true,
+        }))
+      },
+    }), 'agent-teams: member membership route')
+
+    // Command catalog for the member composer's `/` menu (plan 10, §5.2). The
+    // host's `commands/list` refuses subagent sessions, so the plugin reads the
+    // member's own session on the in-process bus. Human-driven: the deny list
+    // protects the model-facing tool, not a person typing in the conversation.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/commands',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId')?.trim() ?? ''
+        if (sessionId === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        const agent = liveMemberAgent(ctx, sessionId)
+        if (agent === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'member agent is not resident' }))
+          return
+        }
+        const commands = (ctx as unknown as { get?: (name: string) => unknown }).get?.('commands') as
+          | undefined
+          | { list: (agent: unknown) => readonly { name: string; description?: string; input?: { hint?: string; attachments?: boolean } }[] }
+        if (commands === undefined) {
+          res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'the host command service is not composed' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({
+          commands: commands.list(agent).map((descriptor) => ({
+            name: descriptor.name,
+            ...(descriptor.description === undefined ? {} : { description: descriptor.description }),
+            ...(descriptor.input?.hint === undefined ? {} : { hint: descriptor.input.hint }),
+            ...(descriptor.input?.attachments === undefined ? {} : { attachments: descriptor.input.attachments }),
+          })),
+        }))
+      },
+    }), 'agent-teams: member commands route')
 
     ctx.effect(() => webServer.register({
       kind: 'exact',
