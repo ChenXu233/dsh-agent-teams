@@ -382,3 +382,17 @@ test('B6. the relay honours the delivery mode the composer sends', async (t) => 
   assert.equal(harness.deliveries.length, 1)
   assert.equal(harness.deliveries[0].childId, MEMBER)
 })
+
+test('B7. the relay refuses bad input and sessions outside the team', async (t) => {
+  const harness = await mountHarness()
+  t.after(() => harness.close())
+
+  const wrongMethod = await harness.get('/plugins/dsh-agent-teams/member/relay')
+  assert.equal(wrongMethod.status, 405)
+  const incomplete = await harness.post('/plugins/dsh-agent-teams/member/relay', { memberSessionId: MEMBER })
+  assert.equal(incomplete.status, 400)
+  // Unknown session: never attached, so it cannot be a member of any team.
+  const foreign = await harness.post('/plugins/dsh-agent-teams/member/relay', { memberSessionId: 'child-9', line: 'hi' })
+  assert.equal(foreign.status, 404)
+  assert.equal(harness.deliveries.length, 0)
+})

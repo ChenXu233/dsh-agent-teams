@@ -32,7 +32,6 @@ import {
   AGENT_TEAMS_LOCALE_NAMESPACE, en, zh, type AgentTeamsLocaleKey,
 } from './locales.ts'
 import { openAgentTeamMember, type AgentTeamsLayoutNavigator, type AgentTeamsWorkspaceNavigator } from './session-navigation.ts'
-import { provideMemberCommands } from './command-client.ts'
 import { MemberComposer } from './MemberComposer.tsx'
 import { decideComposerOwner, ownerSessionId, type ComposerOwnerView } from './member-select.ts'
 import { ensureMembership, membershipOf } from './member-membership.ts'
@@ -45,13 +44,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /**
- * Required services: conversation nodes, slots, sessions navigation, locale,
- * and the browser remote face whose \`commands\` namespace runs a member's own
- * registered commands (plan 01a). ui-commands declares the same service pair.
+ * Required services: conversation nodes, slots, sessions navigation, locale
+ * and the per-session model directories the member composer reads.
  */
 export const inject = [
   'uiConversation', 'slots', 'sessions', 'locale', 'modelDirectories', 'layout',
-  'remote.commands',
 ]
 
 /** The host supplies this hook for the lifetime of a 0.1.5 root slot. */
@@ -71,13 +68,6 @@ function HiddenAgentTeamsCommand(): null {
  * monitor via a window event — the recovery path for an old session.
  */
 export function apply(ctx: ClientContext): void {
-  // Plan 01a: publish the host's remote-command face for the member command
-  // bars. The value crosses an untyped service boundary, so the client module
-  // verifies the shape and a host without the service simply disables them.
-  ctx.effect(() => {
-    provideMemberCommands(ctx.get('remote.commands'))
-    return () => { provideMemberCommands(undefined) }
-  }, 'agent-teams: member command face')
   const bridge = createWorkspaceBridge()
   const state = createWorkspaceState()
   ctx.effect(

@@ -8,9 +8,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     }
 }
 /**
- * Required services: conversation nodes, slots, sessions navigation, locale,
- * and the browser remote face whose \`commands\` namespace runs a member's own
- * registered commands (plan 01a). ui-commands declares the same service pair.
+ * Required services: conversation nodes, slots, sessions navigation, locale
+ * and the per-session model directories the member composer reads.
  */
 export declare const inject: string[];
 /**
