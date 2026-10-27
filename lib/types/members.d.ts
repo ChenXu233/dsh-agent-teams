@@ -301,6 +301,8 @@ export declare function deliverToMember(ctx: Context, captain: Agent, childId: s
  * Fallback: the process-local agent registry. Both miss ⇒ `undefined`; callers
  * must surface a readable error instead of guessing.
  */
+/** Live member Agent from the process registry, or undefined when it is cold. */
+export declare function liveMemberAgent(ctx: Context, childId: string): Agent | undefined;
 export declare function resolveMemberAgent(ctx: Context, childId: string): Promise<Agent | undefined>;
 /**
  * Request cancellation of one live member's current turn. Best effort, fire

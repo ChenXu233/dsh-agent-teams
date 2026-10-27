@@ -79,6 +79,7 @@ import {
   installRetiredMemberGuard,
   installMemberSelectionRuntime,
   installMemberDelegationGuard,
+  liveMemberAgent,
   memberActivity,
   resolveMemberAgent,
   resolveMemberLlmSelection,
@@ -87,6 +88,7 @@ import {
   validateMemberLlmSelections,
   type MemberRuntimeConfig,
 } from './members.ts'
+import { unparkMember } from './member-residency.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 import { collectCompletedDependencyOutputs, formatDependencyOutputs, installTeamScheduler } from './scheduler.ts'
 import { installMailboxAdmission, isCurrentMail, mailboxContent, mailboxPrompt, readCurrentMailbox } from './mailbox.ts'
@@ -665,6 +667,13 @@ async function stopTeamMemberActivations(
 ): Promise<void> {
   const memberIds = members.filter(member => member.id !== '').map(member => member.id as SessionId)
   if (memberIds.length === 0) return
+  // Residency: drop the parked placeholder first, or the drain would keep
+  // waiting on a member that is deliberately holding itself resident.
+  for (const member of members) {
+    if (member.id === '') continue
+    const live = liveMemberAgent(ctx, member.id)
+    if (live !== undefined) unparkMember(live)
+  }
   // Every supported exact host has targeted recursive drain. Unlike interrupt,
   // it closes admission and clears queued work before awaiting descendants.
   signal?.throwIfAborted()

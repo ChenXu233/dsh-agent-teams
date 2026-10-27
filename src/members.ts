@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import { agentTeamsSource, observedSessionFormatVersion, type SessionFormatBearer, guardSubagentCreation, startMember, usesManagedActivations, guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, startMemberWithLenientFilter, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
+import { parkMember, parkedMessageId, unparkMember } from './member-residency.ts'
 import { nearestLiveLead } from './lineage.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
@@ -1080,6 +1081,23 @@ export async function deliverToMember(
 ): Promise<boolean> {
   try {
     const content = [{ type: 'text' as const, text }]
+    // A parked member is live. Append the real message and drop the residency
+    // placeholder in one synchronous block: the settlement observer never sees
+    // an empty inbox, and the member loop never claims the marker as context.
+    const live = ctx.agents.get(brandedSessionId(childId))
+    if (live !== undefined) {
+      const placeholder = parkedMessageId(live)
+      if (placeholder !== undefined) {
+        const message = createUserMessage({
+          content,
+          source: agentTeamsSource({ kind: 'agent-teams' }, observedSessionFormatVersion(live)),
+        })
+        if (mode === 'steer') live.steer(message)
+        else live.followup(message)
+        unparkMember(live, placeholder)
+        return true
+      }
+    }
     if (mode === 'steer') await steerMemberPrompt(ctx.subagents, captain, brandedSessionId(childId), content, signal, ctx.agents.get(brandedSessionId(childId)))
     else await queueMemberPrompt(ctx.subagents, captain, brandedSessionId(childId), content, signal)
     return true
@@ -1103,6 +1121,11 @@ interface TypertAgentLookup {
  * Fallback: the process-local agent registry. Both miss ⇒ `undefined`; callers
  * must surface a readable error instead of guessing.
  */
+/** Live member Agent from the process registry, or undefined when it is cold. */
+export function liveMemberAgent(ctx: Context, childId: string): Agent | undefined {
+  return ctx.agents.get(brandedSessionId(childId))
+}
+
 export async function resolveMemberAgent(ctx: Context, childId: string): Promise<Agent | undefined> {
   const typert = (ctx as unknown as { get?: (name: string) => unknown }).get?.('typert') as
     | { lookups?: { get?: (key: string) => TypertAgentLookup | undefined } }
@@ -1290,6 +1313,11 @@ function installMemberContextGuard(input: {
 
     const disposeWatchdog = installMemberContextWatchdog({
       onStatus: (handler) => childCtx.on('agent/status', (payload: { agent: Agent; status: string }) => {
+        // Residency (plan 10, appendix A): park synchronously on the idle edge.
+        // The host settlement observer re-checks in a later microtask, so the
+        // placeholder is already pending when it looks and the activation stays
+        // resident instead of being disposed.
+        if (payload.status === 'idle') parkMember(payload.agent)
         // Thin adapter for the frozen deps shape: the host payload carries the
         // Agent while deps want the id; the watchdog filters and counts turns.
         handler({ agentId: payload.agent.id, status: payload.status })
