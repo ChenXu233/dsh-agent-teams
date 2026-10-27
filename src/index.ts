@@ -42,6 +42,7 @@ import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.t
 import { findTeamByCaptain, sanitizeKey } from './state.ts'
 import { findTeamByMemberSession } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand } from './member-command.ts'
+import { MemberRemoteService } from './member-remote.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
@@ -316,6 +317,19 @@ export function apply(ctx: Context, config: Config): void {
   // settled, rather than here.
 
   const agentTeamsRuntime = registerAgentTeamsTools(ctx, resolved)
+  // Plugin-owned Remote namespace (plan 10): the host Session Remote refuses
+  // every subagent-owned session, so the member composer talks to this service
+  // instead. The Gateway discovers it through the `typertRemote` binding.
+  // A Remote service registers through the Cordis service registry; fake
+  // contexts used by the plugin's own tests have no reflector, so the surface
+  // is mounted only on a real Host context.
+  const cordis = ctx as unknown as { reflect?: unknown; root?: unknown }
+  if (cordis.reflect !== undefined && cordis.root !== undefined) {
+    ctx.effect(() => {
+      new MemberRemoteService(ctx, { stateDir: resolved.stateDir, deny: resolved.memberCommandDeny ?? [] })
+      return () => undefined
+    }, 'agent-teams: member remote namespace')
+  }
   installTeamCapabilities(ctx, {
     stateDir: resolved.stateDir,
     isPendingMember: agentTeamsRuntime.isPendingMember,
