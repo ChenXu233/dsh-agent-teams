@@ -35,11 +35,12 @@ import {
   type ToolsConfig,
 } from './tools.ts'
 import { installAgentTeamsGestureBoundary, registerAgentTeamsCommand } from './command.ts'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
-import { findTeamByCaptain, readTeam, sanitizeKey } from './state.ts'
+import { findTeamByCaptain, sanitizeKey } from './state.ts'
+import { findTeamByMemberSession } from './member-address.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
@@ -667,17 +668,10 @@ export function apply(ctx: Context, config: Config): void {
           res.end(JSON.stringify({ error: `no attached session "${memberSessionId}"` }))
           return
         }
-        const stateRoot = join(root, resolved.stateDir)
-        const teamIds = await readdir(stateRoot).catch(() => [] as string[])
-        let found: { teamId: string; captainId: string; memberName: string } | undefined
-        for (const teamId of teamIds) {
-          const candidate = await readTeam(stateRoot, teamId)
-          const memberEntry = candidate?.members.find((entry) => entry.id === memberSessionId)
-          if (candidate !== undefined && memberEntry !== undefined) {
-            found = { teamId: candidate.id, captainId: candidate.captainSessionId, memberName: memberEntry.name }
-            break
-          }
-        }
+        const located = await findTeamByMemberSession(ctx, memberSessionId, resolved.stateDir)
+        const found = located === undefined
+          ? undefined
+          : { teamId: located.team.id, captainId: located.team.captainSessionId, memberName: located.member.name }
         if (found === undefined) {
           res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
           res.end(JSON.stringify({ error: 'this session is not a member of any team in this workspace' }))
