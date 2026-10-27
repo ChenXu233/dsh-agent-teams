@@ -89,6 +89,7 @@ import {
   type MemberRuntimeConfig,
 } from './members.ts'
 import { unparkMember } from './member-residency.ts'
+import { MemberCommandError, executeMemberCommand, isDeniedMemberCommand } from './member-command.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 import { collectCompletedDependencyOutputs, formatDependencyOutputs, installTeamScheduler } from './scheduler.ts'
 import { installMailboxAdmission, isCurrentMail, mailboxContent, mailboxPrompt, readCurrentMailbox } from './mailbox.ts'
@@ -150,7 +151,7 @@ export interface ToolsConfig {
  * `line === '/name' || line.startsWith('/name ')` predicate misses the
  * TAB/LF/CR separators.
  */
-const HOST_COMMAND_NAME = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u
+// Command-line validation and execution live in ./member-command.ts.
 
 /**
  * The host's command-name grammar without the leading slash, used to decide
@@ -208,9 +209,7 @@ export function normalizeMemberCommandDeny(entries: readonly unknown[] | undefin
  * deliberately over-broad — a safety switch should refuse too much rather than
  * let a prefixed alias slip past.
  */
-function isDeniedMemberCommand(name: string, deny: readonly string[]): boolean {
-  return deny.some((denied) => name === denied || name.startsWith(`${denied}-`))
-}
+// isDeniedMemberCommand lives in ./member-command.ts with the execution path.
 
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
 export type StagedPlanMutation =
@@ -2549,29 +2548,35 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       const line = args.line.trim()
       if (line === '' || !line.startsWith('/')) throw new Error('line must start with "/" (a command line)')
       if (line.length > 512) throw new Error(`line is too long (${line.length} > 512 characters)`)
-      const commandName = HOST_COMMAND_NAME.exec(line)?.[1]
-      if (commandName !== undefined && isDeniedMemberCommand(commandName, deniedCommandNames)) {
-        // The canonical name only: quoting '/name' here would invite deny
-        // entries written with the leading slash, which is exactly the
-        // fail-open spelling this list normalizes away.
-        throw new Error(`command "${commandName}" is denied for members (memberCommandDeny)`)
-      }
       const agent = await resolveMemberAgent(ctx, childId)
       if (agent === undefined) throw new Error(`member agent is not resolvable: ${childId}`)
-      // The official bus with a plain, attachment-free input: identical to the
-      // member typing this single line. undefined means no registered command
-      // claimed the line.
-      const outcome = await hostCommands.execute(agent, line, [], exec.signal)
-      if (outcome === undefined) {
-        return { member: member.name, line, ok: false, kind: 'error', text: `no registered command handled "${line}" in member "${member.name}"; use action="list" to see what it supports` }
-      }
-      return {
-        member: member.name,
-        line,
-        ok: outcome.result.kind === 'success',
-        kind: outcome.result.kind,
-        ...(outcome.result.text === undefined ? {} : { text: outcome.result.text }),
-        ...(outcome.commandId === undefined ? {} : { command_id: outcome.commandId }),
+      // One execution path shared with the Remote surface and the relay route;
+      // only the human-facing error text differs here.
+      try {
+        const outcome = await executeMemberCommand({
+          commands: hostCommands,
+          agent,
+          line,
+          signal: exec.signal,
+          deny: deniedCommandNames,
+          subject: member.name,
+        })
+        return {
+          member: member.name,
+          line,
+          ok: outcome.ok,
+          kind: outcome.kind,
+          ...(outcome.text === undefined ? {} : { text: outcome.text }),
+          ...(outcome.commandId === undefined ? {} : { command_id: outcome.commandId }),
+        }
+      } catch (error: unknown) {
+        if (error instanceof MemberCommandError) {
+          if (error.code === 'command/denied' && error.commandName !== undefined) {
+            throw new Error(`command "${error.commandName}" is denied for members (memberCommandDeny)`)
+          }
+          throw new Error(error.message)
+        }
+        throw error
       }
     },
   }))

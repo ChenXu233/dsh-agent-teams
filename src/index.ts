@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
 import { findTeamByCaptain, sanitizeKey } from './state.ts'
 import { findTeamByMemberSession } from './member-address.ts'
+import { MemberCommandError, executeMemberCommand } from './member-command.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
@@ -693,18 +694,21 @@ export function apply(ctx: Context, config: Config): void {
               res.end(JSON.stringify({ error: `member agent is not resolvable: ${memberSessionId}` }))
               return
             }
-            const outcome = await commands.execute(agent, line, [], new AbortController().signal)
-            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-            if (outcome === undefined) {
-              res.end(JSON.stringify({ ok: false, kind: 'error', text: `no registered command handles "${line}" in this session` }))
+            try {
+              // Human-driven: the deny list protects the model-facing tool, not a
+              // person typing in the member's own conversation.
+              const result = await executeMemberCommand({ commands, agent, line, signal: new AbortController().signal })
+              res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+              res.end(JSON.stringify(result))
               return
+            } catch (error: unknown) {
+              if (error instanceof MemberCommandError) {
+                res.writeHead(error.code === 'command/denied' ? 403 : 422, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+                res.end(JSON.stringify({ error: error.message }))
+                return
+              }
+              throw error
             }
-            res.end(JSON.stringify({
-              ok: outcome.result.kind === 'success',
-              kind: outcome.result.kind,
-              ...(outcome.result.text === undefined ? {} : { text: outcome.result.text }),
-            }))
-            return
           }
           const captain = ctx.agents.get(found.captainId as import('@deepseek-ai/dsh-session').SessionId)
           if (captain === undefined) {
