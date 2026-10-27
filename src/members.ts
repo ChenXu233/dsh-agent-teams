@@ -23,6 +23,7 @@ import { agentTeamsSource, observedSessionFormatVersion, type SessionFormatBeare
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
 import { parkMember, parkedMessageId, unparkMember } from './member-residency.ts'
+import { dropMemberRoute, registerMemberRoute } from './member-route-registry.ts'
 import { nearestLiveLead } from './lineage.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
@@ -812,6 +813,15 @@ export function installMemberSelectionRuntime(
     if (selection === undefined) return () => { disposeWatchdog(); disposeFailure(); cleanupAdmission() }
     const selectionRef = { current: modelSelection(selection), assembled: undefined as ModelSelection | undefined }
     const disposeSelection = installModelSelection(childCtx, selectionRef)
+    // The Remote surface switches a member's model through this setter: it is
+    // the only handle on the live selection the setup closure owns.
+    registerMemberRoute(child.id, (route) => {
+      selectionRef.current = {
+        provider: route.provider,
+        model: route.model,
+        ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(route.reasoningEffort) }),
+      }
+    })
     const fallback = selection.fallback
     let switched = false
     const disposeFallback = childCtx.on('agent/request-error', async (payload, next) => {
@@ -835,6 +845,7 @@ export function installMemberSelectionRuntime(
       return next()
     })
     return () => {
+      dropMemberRoute(child.id)
       disposeFallback()
       disposeSelection()
       disposeWatchdog()

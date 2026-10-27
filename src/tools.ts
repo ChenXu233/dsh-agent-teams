@@ -89,6 +89,7 @@ import {
   type MemberRuntimeConfig,
 } from './members.ts'
 import { unparkMember } from './member-residency.ts'
+import { dropMemberRoute } from './member-route-registry.ts'
 import { MemberCommandError, executeMemberCommand, isDeniedMemberCommand } from './member-command.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 import { collectCompletedDependencyOutputs, formatDependencyOutputs, installTeamScheduler } from './scheduler.ts'
@@ -672,6 +673,7 @@ async function stopTeamMemberActivations(
     if (member.id === '') continue
     const live = liveMemberAgent(ctx, member.id)
     if (live !== undefined) unparkMember(live)
+    dropMemberRoute(member.id)
   }
   // Every supported exact host has targeted recursive drain. Unlike interrupt,
   // it closes admission and clears queued work before awaiting descendants.

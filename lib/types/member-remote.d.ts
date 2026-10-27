@@ -126,7 +126,7 @@ export declare class MemberRemoteService extends TypertRemoteService {
     /** Deliver one plain-text prompt through the captain's channel. */
     prompt(captainSessionId: string, memberSessionId: string, text: string, mode?: 'queue' | 'steer', requestId?: string): Promise<MemberPromptOutcome>;
     /** Install a new model selection on a resident member. */
-    selectModel(captainSessionId: string, memberSessionId: string, provider: string, model: string): Promise<MemberModelOutcome>;
+    selectModel(captainSessionId: string, memberSessionId: string, provider: string, model: string, reasoningEffort?: string): Promise<MemberModelOutcome>;
     /** Interrupt the member's current turn. */
     interrupt(captainSessionId: string, memberSessionId: string): Promise<MemberInterruptOutcome>;
     /** Pending input of one member. */

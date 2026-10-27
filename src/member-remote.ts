@@ -16,6 +16,7 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import { MemberAddressError, resolveMemberAddress, type MemberAddress } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand, isDeniedMemberCommand } from './member-command.ts'
 import { deliverToMember, interruptMember } from './members.ts'
+import { applyMemberRoute } from './member-route-registry.ts'
 
 /** Wire namespace of the member surface. */
 export const MEMBER_REMOTE_NAMESPACE = 'agentTeams'
@@ -288,12 +289,19 @@ export class MemberRemoteService extends TypertRemoteService {
     memberSessionId: string,
     provider: string,
     model: string,
+    reasoningEffort?: string,
   ): Promise<MemberModelOutcome> {
     await this.#resolve(captainSessionId, memberSessionId)
     this.#live(memberSessionId)
-    // Task 5 installs the child-context registry that makes this real; until
-    // then the surface reports the same code a cold member would.
-    throw new RemoteError('member/cold', `member "${memberSessionId}" has no registered child context`, { memberSessionId })
+    const applied = applyMemberRoute(memberSessionId, {
+      provider,
+      model,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    })
+    if (!applied) {
+      throw new RemoteError('member/cold', `member "${memberSessionId}" has no live model selection`, { memberSessionId })
+    }
+    return { provider, model }
   }
 
   /** Interrupt the member's current turn. */
