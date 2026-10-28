@@ -36,7 +36,7 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
 
 ## Releases
 
-[v0.1.26](./release-notes/v0.1.26.md) refreshes the team workspace with completion and inbox cards, preserves the distinct claimed state, and fixes optional tool inputs and live host session-format detection. This stable plugin release uses npm `latest`; the recommended Harness host is `0.2.1-rc.4`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
+[v0.2.0](./release-notes/v0.2.0.md) is the fork's first release: the member page owns the member conversation (model switch, queue, stop, commands, read-only once archived), settled members stay resident, and the package takes its own identity with a single Harness floor of `0.2.1-rc.2`. The previous upstream-synced release stays at [v0.1.26](./release-notes/v0.1.26.md). This stable plugin release uses npm `latest`; the recommended Harness host is `0.2.1-rc.4`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
 
 ## Why AgentTeams?
 
@@ -55,13 +55,13 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Recommended pair: DeepSeek Harness `0.2.1-rc.4` + AgentTeams `0.1.26`. Every host at or above `0.2.1-rc.2` is accepted; the host remains an RC.**
+**Recommended pair: DeepSeek Harness `0.2.1-rc.4` + AgentTeams `0.2.0`. Every host at or above `0.2.1-rc.2` is accepted; the host remains an RC.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| **Recommended** | **`0.2.1-rc.4`** | **`0.1.26`** |
-| Also tested (identical suite results) | `0.2.1-rc.3`, `0.2.1-rc.2` | `0.1.26` |
-| Any newer release, RC or prerelease | `>=0.2.1-rc.2` | `0.1.26` |
+| **Recommended** | **`0.2.1-rc.4`** | **`0.2.0`** |
+| Also tested (identical suite results) | `0.2.1-rc.3`, `0.2.1-rc.2` | `0.2.0` |
+| Any newer release, RC or prerelease | `>=0.2.1-rc.2` | `0.2.0` |
 
 ### Desktop app
 
@@ -71,7 +71,7 @@ In the app sidebar, open **Plugins → Add plugin** and enter the npm package sp
 @chenxu233/dsh-agent-teams
 ```
 
-The package name resolves npm `latest`. To pin a version, append `@0.1.26`. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
+The package name resolves npm `latest`. To pin a version, append `@0.2.0`. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
 The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Check the embedded core against the compatibility list. Harness `0.2.1-rc.4` is the newest published target; the floor stays `0.2.1-rc.2` and the RC status is unchanged. The earlier source-only `0.2.0` prediction is no longer a support declaration. The peer declaration is a floor (`>=0.2.1-rc.2`), so a desktop build that embeds any later host installs without a version exemption; `0.2.1-rc.2`, `rc.3` and `rc.4` report identical suite results. See the [release migration evidence](./docs/harness-0.2.1-rc.2/README.md).
 
@@ -86,7 +86,7 @@ Skip this if you already run this version. Alpha is opt-in: select an exact Alph
 
 ### CLI / Web: 2. Install the AgentTeams plugin
 
-Install or upgrade from npm using the package name (resolves npm `latest`, currently `0.1.26`):
+Install or upgrade from npm using the package name (resolves npm `latest`, currently `0.2.0`):
 
 ```sh
 dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams
