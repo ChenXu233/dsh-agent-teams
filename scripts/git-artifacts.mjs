@@ -17,7 +17,12 @@ function files(root, directory) {
 }
 function digest(root, paths, prefix = '') {
   const hash = createHash('sha256').update(prefix)
-  for (const path of [...paths].sort()) hash.update(path).update('\0').update(readFileSync(join(root, path))).update('\0')
+  for (const path of [...paths].sort()) {
+    // Normalize line endings: a Windows checkout (CRLF) and a Linux checkout (LF)
+    // must produce the same digest, otherwise the committed stamp is platform-specific.
+    const content = readFileSync(join(root, path), 'utf8').replace(/\r\n/g, '\n')
+    hash.update(path).update('\0').update(content).update('\0')
+  }
   return hash.digest('hex')
 }
 function current(root) {
