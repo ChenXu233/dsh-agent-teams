@@ -1347,20 +1347,20 @@ const overriddenSelection = await resolveMemberLlmSelection(selectionContext, ca
   model: 'other-model',
 })
 check(
-  'cross-provider route uses the target model default instead of captain effort',
+  'cross-provider route leaves effort to the target model default',
   overriddenSelection.provider === 'other-provider'
     && overriddenSelection.model === 'other-model'
-    && overriddenSelection.reasoningEffort === 'low'
+    && overriddenSelection.reasoningEffort === undefined
     && resolvedCalls.at(-1)?.reasoningEffort === undefined,
 )
 const defaultedSelection = await resolveMemberLlmSelection(selectionContext, captain, {
   defaultModel: 'configured-member-model',
 })
 check(
-  'plugin memberModel route uses that target model default effort',
+  'plugin memberModel route is not pinned to the target model default',
   defaultedSelection.provider === 'captain-provider'
     && defaultedSelection.model === 'configured-member-model'
-    && defaultedSelection.reasoningEffort === 'medium'
+    && defaultedSelection.reasoningEffort === undefined
     && resolvedCalls.at(-1)?.reasoningEffort === undefined,
 )
 const explicitEffortSelection = await resolveMemberLlmSelection(selectionContext, captain, {
@@ -1380,7 +1380,27 @@ check(
   'default sentinel opts out of same-route captain effort inheritance',
   forcedDefaultSelection.provider === 'captain-provider'
     && forcedDefaultSelection.model === 'captain-model'
-    && forcedDefaultSelection.reasoningEffort === 'high'
+    && forcedDefaultSelection.reasoningEffort === undefined
+    && resolvedCalls.at(-1)?.reasoningEffort === undefined,
+)
+// The host materializes an adapter default into the header config and marks it
+// in adapterDefaults. That is the model's default, not a captain choice, so a
+// member must not inherit it as though the user had picked it.
+const defaultedCaptain = {
+  ...captain,
+  session: {
+    requestHeader: () => ({
+      config: { provider: 'captain-provider', model: 'captain-model', reasoningEffort: 'high' },
+      adapterDefaults: { reasoningEffort: true },
+    }),
+  },
+}
+const unpinnedFromDefaultedCaptain = await resolveMemberLlmSelection(selectionContext, defaultedCaptain, {})
+check(
+  'an adapter-materialized captain effort is not inherited as a member choice',
+  unpinnedFromDefaultedCaptain.provider === 'captain-provider'
+    && unpinnedFromDefaultedCaptain.model === 'captain-model'
+    && unpinnedFromDefaultedCaptain.reasoningEffort === undefined
     && resolvedCalls.at(-1)?.reasoningEffort === undefined,
 )
 let providerWithoutModelRejected = false
@@ -1546,12 +1566,36 @@ await selectionRuntime.withPending(
 )
 const freshRoute = await routedConfig(freshChild)
 check(
-  'fresh child request receives the resolved reasoning effort',
+  'fresh child request leaves an unpinned effort to the model default',
   freshRoute.provider === 'other-provider'
     && freshRoute.model === 'other-model'
-    && freshRoute.reasoningEffort === 'low',
+    && freshRoute.reasoningEffort === undefined,
 )
 disposeFresh()
+
+// A pinned effort still reaches the child's own request untouched.
+const pinnedChild = fakeChildContext({
+  label: 'agent-teams:fresh-team:pinned',
+  parentSessionId: 'captain-session',
+  cwd: process.cwd(),
+})
+let disposePinned
+await selectionRuntime.withPending(
+  'captain-session',
+  'agent-teams:fresh-team:pinned',
+  explicitEffortSelection,
+  async () => {
+    disposePinned = setupMemberSelection(pinnedChild.context)
+  },
+)
+const pinnedRoute = await routedConfig(pinnedChild)
+check(
+  'fresh child request receives a pinned reasoning effort',
+  pinnedRoute.provider === 'other-provider'
+    && pinnedRoute.model === 'other-model'
+    && pinnedRoute.reasoningEffort === 'high',
+)
+disposePinned()
 
 const restoreWorkspace = await mkdtemp(join(tmpdir(), 'dsh-agent-teams-selection-'))
 try {

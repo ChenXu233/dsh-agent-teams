@@ -62,7 +62,7 @@
 | `agent_teams_resume` | 显式恢复 halted 团队，必须带非空 reason；不重建已取消任务 |
 | `agent_teams_delete` | 结束团队：打断成员，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
 
-`agent_teams_add_member` 默认不需要模型参数：成员沿用队长当前 LLM provider/model 时，会一并快照队长当前思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。provider 或 model 任一改变时，思考强度自动使用目标模型默认档；用户明确要求某个成员使用特定强度时，可以传入可选的 `reasoning_effort`（目标模型支持的档位 id，或 `"default"` 表示强制使用模型自身默认档）。插件不会为每个成员发起二次选择或弹窗。
+`agent_teams_add_member` 默认不需要模型参数：成员沿用队长当前 LLM provider/model 时，会一并快照队长**显式选定**的思考强度（队长只是跟随模型默认档时不算选定）。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。provider 或 model 任一改变时，思考强度保持未指定、始终跟随目标模型自己的默认档；用户明确要求某个成员使用特定强度时，可以传入可选的 `reasoning_effort`（目标模型支持的档位 id，或 `"default"` 表示强制使用模型自身默认档）。插件不会为每个成员发起二次选择或弹窗。
 
 ### 成员命令面（`agent_teams_run_command` + 成员详情页 composer）
 
@@ -141,7 +141,7 @@
 
 `toolPolicies` 的 id 由部署方声明，成员只能按 id 选择：`agent_teams_add_member` 的 `tool_policy`、内联 `plan` 的成员行，或 profile 成员行的 `tool_policy`。队长模型不能提交原始 allow/deny 列表，也不能在运行时新建策略。队长专属工具始终被拒绝且无法通过 allow 列表重新打开；四个协调工具（`agent_teams_claim_task`、`agent_teams_update_task`、`agent_teams_send_message`、`agent_teams_status`）始终可用，策略也不允许拒绝它们。未知 id、空策略或空列表会在挂载时或写入成员前直接失败，不会留下成员或可恢复的孤儿会话。生效的策略 id 与解析后的过滤器会写入 `team.json`（`toolPolicy` / `toolFilter`），`agent_teams_status` 显示策略 id；重启后由子会话持久 descriptor 重新应用同一过滤器。未配置策略的成员保持原有工具集与记录结构。该能力是全局工具的模型可见性与调用限制，不是 OS 沙箱或授权边界。
 
-最终优先级为：成员显式 `provider` + `model` / `model` → `memberModel` → 队长当前路由。成员沿用队长当前 provider/model 时继承队长的思考强度；provider 或 model 任一改变时自动使用目标模型的默认档。显式 `reasoning_effort`（目标模型支持的档位 id，或 `"default"`）优先，并在目标 provider/model 上创建前校验；不兼容时成员创建会明确失败。最终生效的 provider/model/思考强度会写入 `team.json`，供状态查询和成员冷恢复使用。
+最终优先级为：成员显式 `provider` + `model` / `model` → `memberModel` → 队长当前路由。成员沿用队长当前 provider/model 且队长显式选过强度时继承该强度；provider 或 model 任一改变、或队长跟随模型默认档时，成员强度保持未指定并跟随目标模型默认档。显式 `reasoning_effort`（目标模型支持的档位 id，或 `"default"`）优先，并在目标 provider/model 上创建前校验；不兼容时成员创建会明确失败。写入 `team.json` 的是 provider/model 与**已钉住**的思考强度；未钉住的成员不落值，冷恢复后继续跟随模型默认档。
 
 ### 成员上下文预算（memberContext）
 

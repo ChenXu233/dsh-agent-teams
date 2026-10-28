@@ -106,7 +106,10 @@ export interface MemberLlmSelection {
   provider: string
   /** Provider-owned model id. */
   model: string
-  /** Adapter-owned reasoning effort, absent when the target has no explicit/default effort. */
+  /**
+   * Pinned adapter-owned reasoning effort. Absent when the member follows the
+   * target model's own default, which the host re-resolves on every request.
+   */
   reasoningEffort?: string
   /** Configured second-choice route. */
   fallback?: { provider: string; model: string }
@@ -122,7 +125,10 @@ export interface MemberLlmSelectionRequest {
   defaultModel?: string
   /** Configured member LLM provider, paired with `defaultModel` (issue #189). */
   defaultProvider?: string
-  /** Explicit reasoning effort; "default" selects the target model's default effort. */
+  /**
+   * Explicit reasoning effort; "default" unpins the same-route captain
+   * inheritance so the target model's own default applies.
+   */
   reasoningEffort?: string
   /** Configured fallback route. */
   fallback?: { provider: string; model: string }
@@ -496,12 +502,19 @@ function modelSelection(selection: MemberLlmSelection): ModelSelection {
 
 /**
  * Resolve one member's complete model selection. Ordinary members snapshot the
- * captain's current request route and reasoning effort. When provider or model
- * changes, effort is intentionally omitted so the target model materializes
- * its own default instead of receiving an adapter-owned id from another route.
- * An explicit effort overrides either policy; the sentinel "default" also
- * selects the target model's default. The final effort is validated against
- * the target model before a child is created.
+ * captain's current request route, and inherit the captain's effort only when
+ * that effort is a real choice on the same route. An effort the host
+ * materialized from the adapter's own default (`adapterDefaults`) is not a
+ * choice, and a member on another route never receives an id owned by a
+ * different model.
+ *
+ * Only a pinned effort is reported back. When the caller leaves the effort to
+ * the target model, the selection carries none and the host resolves that
+ * model's default on every request; reporting the materialized default instead
+ * would freeze today's value into `team.json` and show every member as if the
+ * user had chosen it (usually "high"). An explicit effort overrides either
+ * policy, while the sentinel "default" unpins the same-route inheritance. A
+ * pinned effort is validated against the target model before a child exists.
  *
  * A configured `memberModel` is a route preference, not a blind model-id
  * override: it is paired with `memberLlmProvider` (or its own `provider/model`
@@ -545,7 +558,8 @@ export async function resolveMemberLlmSelection(
     throw new Error('an explicit member LLM provider requires an explicit member model')
   }
 
-  const current = captain.session.requestHeader()?.config
+  const header = captain.session.requestHeader()
+  const current = header?.config
   const currentProvider = current?.provider ?? captain.options.provider
   const currentModel = current?.model ?? captain.options.model
   if (currentProvider === undefined || currentModel === undefined) {
@@ -571,15 +585,20 @@ export async function resolveMemberLlmSelection(
     ? await resolveMemberModelOwner(ctx, currentProvider, composed.model.value, signal)
     : composed.provider.value
 
-  // Effort ids belong to one exact provider/model capability. Preserve the
-  // captain's effort only on the same route; a changed route must resolve its
-  // own default. Explicit effort still wins, while "default" forces that
-  // target-default behavior even when the route did not change.
   const model = composed.model.value
   const sameRoute = provider === currentProvider && model === currentModel
-  const reasoningEffort = explicitEffort === undefined
+  // A header effort the host materialized from the adapter's own default is the
+  // model's default, not a captain choice: inheriting it would pin every member
+  // at today's default (usually "high") as though the user had picked it.
+  const captainEffort = header?.adapterDefaults?.reasoningEffort === true
+    ? undefined
+    : current?.reasoningEffort
+  // Effort ids belong to one exact provider/model capability, so only a real
+  // choice is pinned: an explicit id, or the captain's own effort on the same
+  // route. Everything else stays absent and keeps following the target model.
+  const requestedEffort = explicitEffort === undefined
     ? sameRoute
-      ? current?.reasoningEffort
+      ? captainEffort
       : undefined
     : explicitEffort === 'default'
       ? undefined
@@ -589,9 +608,9 @@ export async function resolveMemberLlmSelection(
     resolved = await ctx.llm.resolveCallConfig({
       provider,
       model,
-      ...reasoningEffort === undefined
+      ...requestedEffort === undefined
         ? {}
-        : { reasoningEffort },
+        : { reasoningEffort: requestedEffort },
     }, signal)
   } catch (error: unknown) {
     throw new Error(describeMemberRouteFailure(provider, model, error), { cause: error })
@@ -599,9 +618,12 @@ export async function resolveMemberLlmSelection(
   return {
     provider: resolved.provider,
     model: resolved.model,
-    ...resolved.reasoningEffort === undefined
+    // Echo the pinned effort only. resolveCallConfig materializes the adapter
+    // default into its result, which is exactly the value that must not be
+    // persisted as the member's own choice.
+    ...requestedEffort === undefined
       ? {}
-      : { reasoningEffort: String(resolved.reasoningEffort) },
+      : { reasoningEffort: String(resolved.reasoningEffort ?? requestedEffort) },
     ...fallback === undefined ? {} : { fallback },
   }
 }
