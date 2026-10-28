@@ -32,8 +32,9 @@ import {
   AGENT_TEAMS_LOCALE_NAMESPACE, en, zh, type AgentTeamsLocaleKey,
 } from './locales.ts'
 import { openAgentTeamMember, type AgentTeamsLayoutNavigator, type AgentTeamsWorkspaceNavigator } from './session-navigation.ts'
-import { provideMemberCommands } from './command-client.ts'
 import { MemberComposer } from './MemberComposer.tsx'
+import { decideComposerOwner, ownerSessionId, type ComposerOwnerView } from './member-select.ts'
+import { ensureMembership, membershipOf } from './member-membership.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -43,13 +44,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /**
- * Required services: conversation nodes, slots, sessions navigation, locale,
- * and the browser remote face whose \`commands\` namespace runs a member's own
- * registered commands (plan 01a). ui-commands declares the same service pair.
+ * Required services: conversation nodes, slots, sessions navigation, locale
+ * and the per-session model directories the member composer reads.
  */
 export const inject = [
   'uiConversation', 'slots', 'sessions', 'locale', 'modelDirectories', 'layout',
-  'remote.commands',
 ]
 
 /** The host supplies this hook for the lifetime of a 0.1.5 root slot. */
@@ -69,13 +68,6 @@ function HiddenAgentTeamsCommand(): null {
  * monitor via a window event — the recovery path for an old session.
  */
 export function apply(ctx: ClientContext): void {
-  // Plan 01a: publish the host's remote-command face for the member command
-  // bars. The value crosses an untyped service boundary, so the client module
-  // verifies the shape and a host without the service simply disables them.
-  ctx.effect(() => {
-    provideMemberCommands(ctx.get('remote.commands'))
-    return () => { provideMemberCommands(undefined) }
-  }, 'agent-teams: member command face')
   const bridge = createWorkspaceBridge()
   const state = createWorkspaceState()
   ctx.effect(
@@ -105,26 +97,38 @@ export function apply(ctx: ClientContext): void {
   }
   // Optional service scope keeps legacy hosts working and removes every native
   // contribution when the host provider disappears (including HMR).
-  // Plan 01b: claim the composer inside an AgentTeams member's own conversation.
+  // Plan 10: claim the composer inside an AgentTeams member's own conversation.
   // The chain slot elects the FIRST contribution whose `select` returns non-null
   // (renderer lib/client.js:1183-1201) and restores the official placeholder when
   // nobody is elected, so a lower priority number takes over cleanly and this
   // registration can be removed without side effects.
+  //
+  // Membership is proven by the plugin (the client cannot read team state): the
+  // cache starts empty, an unknown answer never claims the seat, and the probe
+  // fills the cache for the next election. Archived members get a read-only seat.
   ctx.slots.inject('conversation.composer', () => ctx.slots.register({
     name: 'conversation.composer',
     priority: -20,
-    select: (owner: {
+    // The model selector reads the host catalog through the same per-session
+    // directory the host composer uses. Switching still goes through the
+    // plugin's own route: the host's `selectModel` refuses subagent sessions.
+    inject: () => ({ modelDirectories: ctx.modelDirectories }),
+    select: (owner: ComposerOwnerView & {
       readonly session?: {
         readonly running?: boolean
         readonly subagent?: { readonly address?: { readonly mode?: string }; readonly parentAvailable?: boolean } | null
-      }
+      } | null
     }): { readonly reason: string } | null => {
-      const subagent = owner.session?.subagent
-      if (subagent === undefined || subagent === null) return null
-      if (subagent.address?.mode !== 'continuable') return null
-      if (subagent.parentAvailable !== false) return null
-      if (owner.session?.running === true) return null
-      return { reason: 'agent-teams-member' }
+      const sessionId = ownerSessionId(owner)
+      if (sessionId === undefined) return null
+      const seat = decideComposerOwner(owner, membershipOf(sessionId))
+      if (seat === null) {
+        // Unknown membership never claims the seat; a non-member answer is cached
+        // too, so the host composer keeps the conversation.
+        void ensureMembership(sessionId)
+        return null
+      }
+      return { reason: seat === 'readonly' ? 'agent-teams-member-archived' : 'agent-teams-member' }
     },
   }, MemberComposer))
   ctx.inject(['sidebarRight', 'sidebarRightTabs'], (native) => {

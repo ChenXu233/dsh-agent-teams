@@ -22,6 +22,8 @@ import { join } from 'node:path'
 import { agentTeamsSource, observedSessionFormatVersion, type SessionFormatBearer, guardSubagentCreation, startMember, usesManagedActivations, guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, startMemberWithLenientFilter, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
+import { parkMember, parkedMessageId, unparkMember } from './member-residency.ts'
+import { dropMemberRoute, registerMemberRoute } from './member-route-registry.ts'
 import { nearestLiveLead } from './lineage.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
@@ -104,7 +106,10 @@ export interface MemberLlmSelection {
   provider: string
   /** Provider-owned model id. */
   model: string
-  /** Adapter-owned reasoning effort, absent when the target has no explicit/default effort. */
+  /**
+   * Pinned adapter-owned reasoning effort. Absent when the member follows the
+   * target model's own default, which the host re-resolves on every request.
+   */
   reasoningEffort?: string
   /** Configured second-choice route. */
   fallback?: { provider: string; model: string }
@@ -120,7 +125,10 @@ export interface MemberLlmSelectionRequest {
   defaultModel?: string
   /** Configured member LLM provider, paired with `defaultModel` (issue #189). */
   defaultProvider?: string
-  /** Explicit reasoning effort; "default" selects the target model's default effort. */
+  /**
+   * Explicit reasoning effort; "default" unpins the same-route captain
+   * inheritance so the target model's own default applies.
+   */
   reasoningEffort?: string
   /** Configured fallback route. */
   fallback?: { provider: string; model: string }
@@ -494,12 +502,19 @@ function modelSelection(selection: MemberLlmSelection): ModelSelection {
 
 /**
  * Resolve one member's complete model selection. Ordinary members snapshot the
- * captain's current request route and reasoning effort. When provider or model
- * changes, effort is intentionally omitted so the target model materializes
- * its own default instead of receiving an adapter-owned id from another route.
- * An explicit effort overrides either policy; the sentinel "default" also
- * selects the target model's default. The final effort is validated against
- * the target model before a child is created.
+ * captain's current request route, and inherit the captain's effort only when
+ * that effort is a real choice on the same route. An effort the host
+ * materialized from the adapter's own default (`adapterDefaults`) is not a
+ * choice, and a member on another route never receives an id owned by a
+ * different model.
+ *
+ * Only a pinned effort is reported back. When the caller leaves the effort to
+ * the target model, the selection carries none and the host resolves that
+ * model's default on every request; reporting the materialized default instead
+ * would freeze today's value into `team.json` and show every member as if the
+ * user had chosen it (usually "high"). An explicit effort overrides either
+ * policy, while the sentinel "default" unpins the same-route inheritance. A
+ * pinned effort is validated against the target model before a child exists.
  *
  * A configured `memberModel` is a route preference, not a blind model-id
  * override: it is paired with `memberLlmProvider` (or its own `provider/model`
@@ -543,7 +558,8 @@ export async function resolveMemberLlmSelection(
     throw new Error('an explicit member LLM provider requires an explicit member model')
   }
 
-  const current = captain.session.requestHeader()?.config
+  const header = captain.session.requestHeader()
+  const current = header?.config
   const currentProvider = current?.provider ?? captain.options.provider
   const currentModel = current?.model ?? captain.options.model
   if (currentProvider === undefined || currentModel === undefined) {
@@ -569,15 +585,20 @@ export async function resolveMemberLlmSelection(
     ? await resolveMemberModelOwner(ctx, currentProvider, composed.model.value, signal)
     : composed.provider.value
 
-  // Effort ids belong to one exact provider/model capability. Preserve the
-  // captain's effort only on the same route; a changed route must resolve its
-  // own default. Explicit effort still wins, while "default" forces that
-  // target-default behavior even when the route did not change.
   const model = composed.model.value
   const sameRoute = provider === currentProvider && model === currentModel
-  const reasoningEffort = explicitEffort === undefined
+  // A header effort the host materialized from the adapter's own default is the
+  // model's default, not a captain choice: inheriting it would pin every member
+  // at today's default (usually "high") as though the user had picked it.
+  const captainEffort = header?.adapterDefaults?.reasoningEffort === true
+    ? undefined
+    : current?.reasoningEffort
+  // Effort ids belong to one exact provider/model capability, so only a real
+  // choice is pinned: an explicit id, or the captain's own effort on the same
+  // route. Everything else stays absent and keeps following the target model.
+  const requestedEffort = explicitEffort === undefined
     ? sameRoute
-      ? current?.reasoningEffort
+      ? captainEffort
       : undefined
     : explicitEffort === 'default'
       ? undefined
@@ -587,9 +608,9 @@ export async function resolveMemberLlmSelection(
     resolved = await ctx.llm.resolveCallConfig({
       provider,
       model,
-      ...reasoningEffort === undefined
+      ...requestedEffort === undefined
         ? {}
-        : { reasoningEffort },
+        : { reasoningEffort: requestedEffort },
     }, signal)
   } catch (error: unknown) {
     throw new Error(describeMemberRouteFailure(provider, model, error), { cause: error })
@@ -597,9 +618,12 @@ export async function resolveMemberLlmSelection(
   return {
     provider: resolved.provider,
     model: resolved.model,
-    ...resolved.reasoningEffort === undefined
+    // Echo the pinned effort only. resolveCallConfig materializes the adapter
+    // default into its result, which is exactly the value that must not be
+    // persisted as the member's own choice.
+    ...requestedEffort === undefined
       ? {}
-      : { reasoningEffort: String(resolved.reasoningEffort) },
+      : { reasoningEffort: String(resolved.reasoningEffort ?? requestedEffort) },
     ...fallback === undefined ? {} : { fallback },
   }
 }
@@ -811,6 +835,32 @@ export function installMemberSelectionRuntime(
     if (selection === undefined) return () => { disposeWatchdog(); disposeFailure(); cleanupAdmission() }
     const selectionRef = { current: modelSelection(selection), assembled: undefined as ModelSelection | undefined }
     const disposeSelection = installModelSelection(childCtx, selectionRef)
+    // A deployment-level policy plugin can rewrite every subagent request from a
+    // global `agent/request` listener registered at boot — for example a
+    // "thinking effort" plugin that forces all subagents to one level. A
+    // member's own pinned route is the narrower decision, so re-assert it from a
+    // prepended listener: listeners run outermost-first, and a prepended one is
+    // the outermost, so it post-processes after that policy and wins.
+    const disposeRouteGuard = childCtx.on('agent/request', async (_payload, next) => {
+      const resolved = await next()
+      const selected = selectionRef.assembled ?? selectionRef.current
+      if (selected === undefined) return resolved
+      return {
+        ...resolved,
+        provider: selected.provider,
+        model: selected.model,
+        ...selected.reasoningEffort === undefined ? {} : { reasoningEffort: selected.reasoningEffort },
+      }
+    }, { prepend: true })
+    // The Remote surface switches a member's model through this setter: it is
+    // the only handle on the live selection the setup closure owns.
+    registerMemberRoute(child.id, (route) => {
+      selectionRef.current = {
+        provider: route.provider,
+        model: route.model,
+        ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(route.reasoningEffort) }),
+      }
+    })
     const fallback = selection.fallback
     let switched = false
     const disposeFallback = childCtx.on('agent/request-error', async (payload, next) => {
@@ -834,7 +884,9 @@ export function installMemberSelectionRuntime(
       return next()
     })
     return () => {
+      dropMemberRoute(child.id)
       disposeFallback()
+      disposeRouteGuard()
       disposeSelection()
       disposeWatchdog()
       disposeFailure()
@@ -1080,6 +1132,23 @@ export async function deliverToMember(
 ): Promise<boolean> {
   try {
     const content = [{ type: 'text' as const, text }]
+    // A parked member is live. Append the real message and drop the residency
+    // placeholder in one synchronous block: the settlement observer never sees
+    // an empty inbox, and the member loop never claims the marker as context.
+    const live = ctx.agents.get(brandedSessionId(childId))
+    if (live !== undefined) {
+      const placeholder = parkedMessageId(live)
+      if (placeholder !== undefined) {
+        const message = createUserMessage({
+          content,
+          source: agentTeamsSource({ kind: 'agent-teams' }, observedSessionFormatVersion(live)),
+        })
+        if (mode === 'steer') live.steer(message)
+        else live.followup(message)
+        unparkMember(live, placeholder)
+        return true
+      }
+    }
     if (mode === 'steer') await steerMemberPrompt(ctx.subagents, captain, brandedSessionId(childId), content, signal, ctx.agents.get(brandedSessionId(childId)))
     else await queueMemberPrompt(ctx.subagents, captain, brandedSessionId(childId), content, signal)
     return true
@@ -1103,6 +1172,11 @@ interface TypertAgentLookup {
  * Fallback: the process-local agent registry. Both miss ⇒ `undefined`; callers
  * must surface a readable error instead of guessing.
  */
+/** Live member Agent from the process registry, or undefined when it is cold. */
+export function liveMemberAgent(ctx: Context, childId: string): Agent | undefined {
+  return ctx.agents.get(brandedSessionId(childId))
+}
+
 export async function resolveMemberAgent(ctx: Context, childId: string): Promise<Agent | undefined> {
   const typert = (ctx as unknown as { get?: (name: string) => unknown }).get?.('typert') as
     | { lookups?: { get?: (key: string) => TypertAgentLookup | undefined } }
@@ -1290,6 +1364,11 @@ function installMemberContextGuard(input: {
 
     const disposeWatchdog = installMemberContextWatchdog({
       onStatus: (handler) => childCtx.on('agent/status', (payload: { agent: Agent; status: string }) => {
+        // Residency (plan 10, appendix A): park synchronously on the idle edge.
+        // The host settlement observer re-checks in a later microtask, so the
+        // placeholder is already pending when it looks and the activation stays
+        // resident instead of being disposed.
+        if (payload.status === 'idle') parkMember(payload.agent)
         // Thin adapter for the frozen deps shape: the host payload carries the
         // Agent while deps want the id; the watchdog filters and counts turns.
         handler({ agentId: payload.agent.id, status: payload.status })

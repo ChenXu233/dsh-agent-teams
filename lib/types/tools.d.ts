@@ -72,6 +72,14 @@ export interface MemberCommandDenyResolution {
  * caller to surface (the host fails loudly at mount; direct callers warn).
  */
 export declare function normalizeMemberCommandDeny(entries: readonly unknown[] | undefined): MemberCommandDenyResolution;
+/**
+ * True when a command name — parsed from a line, or advertised by the member's
+ * catalog — is denied for members. An exact hit covers the command itself, and
+ * the `<denied>-` prefix expansion applies to **every** configured entry (not
+ * just `agent-teams`): denying `review` also denies `review-tools`. That is
+ * deliberately over-broad — a safety switch should refuse too much rather than
+ * let a prefixed alias slip past.
+ */
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
 export type StagedPlanMutation = {
     action: 'update_member';

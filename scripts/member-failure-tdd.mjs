@@ -16,8 +16,12 @@ const modernHarness = deliveryHarness || process.argv.includes('--modern-harness
 const hostQueue = Symbol.for(deliveryHarness ? 'dsh.subagent.deliverPrompt' : 'dsh.subagent.queuePrompt')
 
 async function eventually(predicate) {
-  for (let i = 0; i < 100; i++) {
-    if (await predicate()) return
+  for (let i = 0; i < 200; i++) {
+    // The plugin rewrites team.json under its team lock; this poller reads
+    // without holding it, so a concurrent write can expose a torn read. Retry
+    // instead of failing on the transient parse error.
+    const settled = await Promise.resolve().then(predicate).then(value => value === true, () => false)
+    if (settled) return
     await delay(10)
   }
   assert.fail('terminal failure did not settle')

@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@nanmicoder/dsh-agent-teams"><img src="https://img.shields.io/npm/v/@nanmicoder/dsh-agent-teams?style=flat-square&amp;color=5B4CF0" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@chenxu233/dsh-agent-teams"><img src="https://img.shields.io/npm/v/@chenxu233/dsh-agent-teams?style=flat-square&amp;color=5B4CF0" alt="npm version"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-0B7285?style=flat-square" alt="MIT license"></a>
   <a href="./cordis.patch.yml"><img src="https://img.shields.io/badge/DSH-Web%20%2B%20Headless-5B4CF0?style=flat-square" alt="DSH Web and Headless"></a>
 </p>
@@ -36,7 +36,7 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
 
 ## Releases
 
-[v0.1.26](./release-notes/v0.1.26.md) refreshes the team workspace with completion and inbox cards, preserves the distinct claimed state, and fixes optional tool inputs and live host session-format detection. This stable plugin release uses npm `latest`; the recommended Harness host remains `0.2.1-rc.2`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
+[v0.1.26](./release-notes/v0.1.26.md) refreshes the team workspace with completion and inbox cards, preserves the distinct claimed state, and fixes optional tool inputs and live host session-format detection. This stable plugin release uses npm `latest`; the recommended Harness host is `0.2.1-rc.4`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
 
 ## Why AgentTeams?
 
@@ -55,33 +55,30 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Recommended pair: DeepSeek Harness `0.2.1-rc.2` + AgentTeams `0.1.26`. The host remains an RC.**
+**Recommended pair: DeepSeek Harness `0.2.1-rc.4` + AgentTeams `0.1.26`. Every host at or above `0.2.1-rc.2` is accepted; the host remains an RC.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| **Recommended** | **`0.2.1-rc.2`** | **`0.1.26`** |
-| Previous recommended RC | `0.2.1-rc.1`, `0.2.0-rc.2`, `0.1.7-rc.2` | `0.1.26` |
-| Legacy RC | `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.5-rc.3` | `0.1.26` |
-| Retaining an older RC | `0.1.2-rc.1` | `0.1.26` |
-| Developer Alpha testing | `0.1.2-alpha.5` | `0.1.26` |
-| Retaining an older Alpha | `0.1.2-alpha.2` | `0.1.26` |
+| **Recommended** | **`0.2.1-rc.4`** | **`0.1.26`** |
+| Also tested (identical suite results) | `0.2.1-rc.3`, `0.2.1-rc.2` | `0.1.26` |
+| Any newer release, RC or prerelease | `>=0.2.1-rc.2` | `0.1.26` |
 
 ### Desktop app
 
 In the app sidebar, open **Plugins → Add plugin** and enter the npm package spec:
 
 ```text
-@nanmicoder/dsh-agent-teams
+@chenxu233/dsh-agent-teams
 ```
 
 The package name resolves npm `latest`. To pin a version, append `@0.1.26`. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
-The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile in `0.2.1-rc.2`. Check the embedded core against the compatibility list. Harness `0.2.1-rc.2` is now the exact published target; its RC status is unchanged. The earlier source-only `0.2.0` prediction is no longer a support declaration. See the [release migration evidence](./docs/harness-0.2.1-rc.2/README.md).
+The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Check the embedded core against the compatibility list. Harness `0.2.1-rc.4` is the newest published target; the floor stays `0.2.1-rc.2` and the RC status is unchanged. The earlier source-only `0.2.0` prediction is no longer a support declaration. The peer declaration is a floor (`>=0.2.1-rc.2`), so a desktop build that embeds any later host installs without a version exemption; `0.2.1-rc.2`, `rc.3` and `rc.4` report identical suite results. See the [release migration evidence](./docs/harness-0.2.1-rc.2/README.md).
 
 ### CLI / Web: 1. Install DeepSeek Harness
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.2.1-rc.2
+npm install --global @deepseek-ai/dsh@0.2.1-rc.4
 dsh --version
 ```
 
@@ -92,7 +89,7 @@ Skip this if you already run this version. Alpha is opt-in: select an exact Alph
 Install or upgrade from npm using the package name (resolves npm `latest`, currently `0.1.26`):
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams
+dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams
 ```
 
 For a CLI-managed installation, replace `web` with your active CLI profile. **Stop and restart that profile's Harness process, then refresh the browser.** Installing the plugin does not upgrade Harness; the host and plugin have independent `latest` channels.
@@ -126,7 +123,7 @@ Team and task content starts immediately: wide panes use columns and narrow pane
 
 Team state is stored under `<workspace>/.agent-teams/`; the Web panel reads that disk truth and combines it with live sub-agent activity.
 
-Member creation is zero-interaction by default: a member on the captain's current LLM route snapshots that provider, model, and reasoning effort, while a member on a requested alternative route snapshots the target model's default effort; later continuations restore the resolved snapshot. Only an explicit heterogeneous-team request (for example, “backend on provider A/model X, frontend on provider B/model Y”) supplies a member-specific `provider` + `model`; there is no per-member model or reasoning prompt.
+Member creation is zero-interaction by default: a member on the captain's current LLM route snapshots that provider, model, and the captain's chosen reasoning effort, while a member on any other route keeps following that model's own default effort; later continuations restore the pinned selection. Only an explicit heterogeneous-team request (for example, “backend on provider A/model X, frontend on provider B/model Y”) supplies a member-specific `provider` + `model`; there is no per-member model or reasoning prompt.
 
 Captain sessions keep the concise core protocol and all 15 native team tools (the original 14 plus `agent_teams_run_command`) from their first request. All business tools are directly available; no loading tool or extra activation call is needed. Configured profiles retain their bounded directory in the fixed system prompt. Creating, approving, continuing or ending a team does not rewrite the system prompt or tool schemas. Core rules remain available after history compaction or discarded code-mode tool results. Members receive four team tools, fixed member instructions, and their ordinary coding/research tools. Web approval wakes the captain with a control message; later member reports wake it again. See the [fixed protocol and benchmark contract](./docs/progressive-loading.md).
 
@@ -199,7 +196,7 @@ This is model tool visibility and invocation policy for global tools, not an OS 
 
 `memberContext` gives each member a plugin-level context budget: when a member is **idle** and its measured context usage reaches the threshold, the plugin compacts it once and records the event. `maxTokens` (absolute) and `maxRatio` (a share of the member model's `contextWindow`; without a known window the ratio is ignored rather than guessed) — give at least one, and the smaller budget wins when both apply. `cooldownMs` (default `60000`) and `minTurnGap` (default `1`) debounce repeats; `onLimit` (default `compact`) also accepts `notify` (logs only, never compacts) or `off`. **With the whole `memberContext` block absent the feature is fully off** (no watchdog, no new fields) and behavior matches previous versions; to restore the old behavior either remove the block or keep a threshold and set `onLimit: off` (the block still needs at least one `maxTokens`/`maxRatio`, otherwise mounting fails). A member-level `context_max_tokens` (on a profile member row, an inline `plan` member row, `agent_teams_add_member`, or `agent_teams_edit_plan` `update_member`; pass `null` to clear; the pre-run plan review panel's member card also edits it directly — the input prefills the member's declared value, and saving it blank/cleared sends `null` to fall back to the plugin default) joins the same resolution — the smallest of the member value, the plugin `maxTokens`, and the window-derived ratio wins, so it only makes that member compact earlier and never loosens the plugin bound. A busy member or one with queued waking input is skipped and re-evaluated at the next idle boundary. `agent_teams_status` members can carry `context { tokens, limit, ratio, compactions, measured_at }` plus `context_live`, and the activity panel shows each member's usage/limit and compaction count. See [docs/usage.md](./docs/usage.md) for details.
 
-`memberProvider` is the sub-agent runtime backend (`spawn` / `fork`), not an LLM provider. Cross-LLM-provider routing uses the optional `provider` + `model` fields of `agent_teams_add_member`; `memberModel` is only a model default for all members. A member on the captain's current provider/model inherits the captain's reasoning effort, while a changed provider or model automatically uses the target model's default. To request a particular effort, pass the optional `reasoning_effort` field — one of the target model's supported effort ids, or `"default"` to force the model's own default.
+`memberProvider` is the sub-agent runtime backend (`spawn` / `fork`), not an LLM provider. Cross-LLM-provider routing uses the optional `provider` + `model` fields of `agent_teams_add_member`; `memberModel` is only a model default for all members. A member on the captain's current provider/model inherits the captain's reasoning effort when the captain actually chose one; a changed provider or model — or a captain running on its model's own default — leaves the effort unpinned, so the member keeps following the target model's default instead of freezing today's value into `team.json`. To request a particular effort, pass the optional `reasoning_effort` field — one of the target model's supported effort ids, or `"default"` to force the model's own default.
 
 `slashCommand: false` disables the deterministic `/agent-teams` activation surfaces (slash command and gesture boundary), leaving the natural-language trigger as the only entry point.
 
@@ -265,7 +262,7 @@ profiles:
         dependencies: [requirements]
 ```
 
-Use an explicit profile flag: `/agent-teams --profile demo-delivery implement the feature`. The first ordinary token is never treated as an implicit profile. Normal command runs call `agent_teams_create({ profile, approval: "required" })`: the roster and seed/Captain-designed DAG remain staged, no child session is created, and no task is claimed. Edit the plan in the activity panel using the host model catalog, return to chat so the Captain asks what to revise and then atomically updates the same draft, discard it, or click **Approve & Run**. Return/discard actions cancel any planning turn still running; discard also parks model-facing context that forbids silently creating a replacement team. Approval resolves the final provider/model/reasoning choices, commits the roster, and creates each member session only when its first task is ready. A running team is stopped from its own panel header through a confirmation dialog rather than from the composer. Direct tool clients may pass `approval: "automatic"` for the legacy immediate path. Failed review/test tasks do not unlock downstream work; automatic repair/review tasks do not depend on the failed review.
+Use an explicit profile flag: `/agent-teams --profile demo-delivery implement the feature`. The first ordinary token is never treated as an implicit profile. Normal command runs call `agent_teams_create({ profile, approval: "required" })`: the roster and seed/Captain-designed DAG remain staged, no child session is created, and no task is claimed. Edit the plan in the activity panel using the host model catalog, return to chat so the Captain asks what to revise and then atomically updates the same draft, discard it, or click **Approve & Run**. Return/discard actions cancel any planning turn still running; discard also parks model-facing context that forbids silently creating a replacement team. Approval resolves the final provider/model and any pinned reasoning choice, commits the roster, and creates each member session only when its first task is ready. A running team is stopped from its own panel header through a confirmation dialog rather than from the composer. Direct tool clients may pass `approval: "automatic"` for the legacy immediate path. Failed review/test tasks do not unlock downstream work; automatic repair/review tasks do not depend on the failed review.
 
 ## License
 

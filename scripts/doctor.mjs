@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { policy, serverRuntimePeers, validatePolicy } from './compatibility.mjs'
+import { atLeast, policy, serverRuntimePeers, validatePolicy } from './compatibility.mjs'
 
 function manifest(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -49,10 +49,11 @@ export function inspectInstallation(hostRoot, profileRoot, support = policy) {
     }
   }
   walk(hostPath)
+  const policyPackage = manifest(new URL('../package.json', import.meta.url))
   let plugin
   if (profileRoot) {
-    const path = locatePackage('@nanmicoder/dsh-agent-teams', resolve(profileRoot))
-    if (!path) missing.push('@nanmicoder/dsh-agent-teams (profile)')
+    const path = locatePackage(policyPackage.name, resolve(profileRoot))
+    if (!path) missing.push(`${policyPackage.name} (profile)`)
     else {
       const pkg = manifest(path)
       plugin = { version: pkg.version, path: dirname(path) }
@@ -68,12 +69,11 @@ export function inspectInstallation(hostRoot, profileRoot, support = policy) {
   }
   const mixed = packages.filter(pkg => pkg.version !== host.version)
   const problems = []
-  const sourceCandidate = support.sourceCandidates?.find(candidate => candidate.version === host.version)
-  const policyPackage = manifest(new URL('../package.json', import.meta.url))
+  const aboveFloor = atLeast(host.version, support.minimumHost)
   if (plugin && plugin.version !== policyPackage.version) {
     problems.push(`Installed plugin ${plugin.version} differs from this policy's plugin ${policyPackage.version}; verify its own host compatibility`)
   }
-  if (!allowed.includes(host.version) && !sourceCandidate) problems.push(`Unsupported host ${host.version}; recommended target is ${support.recommendedHost}`)
+  if (!aboveFloor) problems.push(`Unsupported host ${host.version}; this plugin requires dsh >= ${support.minimumHost}`)
   if (mixed.length) problems.push(`${mixed.length} resolved DSH packages differ from host ${host.version}`)
   if (missing.length) problems.push(`Missing packages: ${[...new Set(missing)].join(', ')}`)
   const identities = new Map()
@@ -88,12 +88,12 @@ export function inspectInstallation(hostRoot, profileRoot, support = policy) {
     ok: problems.length === 0,
     host: { version: host.version, path: dirname(hostPath) },
     ...(plugin ? { plugin } : {}),
-    checkedPackages: packages.length, supportedHosts: allowed,
-    validation: sourceCandidate ? { kind: 'source-preview', ...sourceCandidate, sourceCommitVerified: false } : { kind: allowed.includes(host.version) ? 'published-matrix' : 'unsupported' },
+    checkedPackages: packages.length, supportedHosts: allowed, minimumHost: support.minimumHost,
+    validation: { kind: !aboveFloor ? 'unsupported' : allowed.includes(host.version) ? 'published-matrix' : 'above-floor' },
     problems, packages,
     limits: [
       'Checks files resolved from the supplied roots; does not identify the running process or prove plugin behavior.',
-      ...(sourceCandidate ? [`Host ${host.version} is pre-adapted against source ${sourceCandidate.commit}; this inspection does not verify that the installed release matches that source.`] : []),
+      `Tested matrix: ${allowed.join(', ')}; a newer host is accepted on the floor but is not part of the tested matrix.`,
     ],
   }
 }

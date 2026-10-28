@@ -45,7 +45,10 @@ export interface MemberLlmSelection {
     provider: string;
     /** Provider-owned model id. */
     model: string;
-    /** Adapter-owned reasoning effort, absent when the target has no explicit/default effort. */
+    /**
+     * Pinned adapter-owned reasoning effort. Absent when the member follows the
+     * target model's own default, which the host re-resolves on every request.
+     */
     reasoningEffort?: string;
     /** Configured second-choice route. */
     fallback?: {
@@ -63,7 +66,10 @@ export interface MemberLlmSelectionRequest {
     defaultModel?: string;
     /** Configured member LLM provider, paired with `defaultModel` (issue #189). */
     defaultProvider?: string;
-    /** Explicit reasoning effort; "default" selects the target model's default effort. */
+    /**
+     * Explicit reasoning effort; "default" unpins the same-route captain
+     * inheritance so the target model's own default applies.
+     */
     reasoningEffort?: string;
     /** Configured fallback route. */
     fallback?: {
@@ -206,12 +212,19 @@ export declare function failMemberOpenAttempt(ctx: Context, stateRoot: string, t
 }, fallbackSession: Session, observed: FailedMemberAttempt): Promise<boolean>;
 /**
  * Resolve one member's complete model selection. Ordinary members snapshot the
- * captain's current request route and reasoning effort. When provider or model
- * changes, effort is intentionally omitted so the target model materializes
- * its own default instead of receiving an adapter-owned id from another route.
- * An explicit effort overrides either policy; the sentinel "default" also
- * selects the target model's default. The final effort is validated against
- * the target model before a child is created.
+ * captain's current request route, and inherit the captain's effort only when
+ * that effort is a real choice on the same route. An effort the host
+ * materialized from the adapter's own default (`adapterDefaults`) is not a
+ * choice, and a member on another route never receives an id owned by a
+ * different model.
+ *
+ * Only a pinned effort is reported back. When the caller leaves the effort to
+ * the target model, the selection carries none and the host resolves that
+ * model's default on every request; reporting the materialized default instead
+ * would freeze today's value into `team.json` and show every member as if the
+ * user had chosen it (usually "high"). An explicit effort overrides either
+ * policy, while the sentinel "default" unpins the same-route inheritance. A
+ * pinned effort is validated against the target model before a child exists.
  *
  * A configured `memberModel` is a route preference, not a blind model-id
  * override: it is paired with `memberLlmProvider` (or its own `provider/model`
@@ -301,6 +314,8 @@ export declare function deliverToMember(ctx: Context, captain: Agent, childId: s
  * Fallback: the process-local agent registry. Both miss ⇒ `undefined`; callers
  * must surface a readable error instead of guessing.
  */
+/** Live member Agent from the process registry, or undefined when it is cold. */
+export declare function liveMemberAgent(ctx: Context, childId: string): Agent | undefined;
 export declare function resolveMemberAgent(ctx: Context, childId: string): Promise<Agent | undefined>;
 /**
  * Request cancellation of one live member's current turn. Best effort, fire

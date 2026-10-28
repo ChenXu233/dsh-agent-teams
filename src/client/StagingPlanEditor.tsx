@@ -142,14 +142,17 @@ function StagedModelPicker({
   const efforts = selected?.model.reasoning?.efforts ?? []
   const currentMissing = provider !== '' && model !== '' && selected === undefined
   const defaultEffort = selected?.model.reasoning?.defaultEffort
-  const effectiveEffort = reasoningEffort === '' || reasoningEffort === 'default'
-    ? defaultEffort
-    : reasoningEffort
-  const selectedEffort = efforts.find((effort) => effort.id === effectiveEffort)
+  const followsModelDefault = reasoningEffort === '' || reasoningEffort === 'default'
+  const effortName = (id: string): string => efforts.find((effort) => effort.id === id)?.name ?? id
   const modelLabel = selected?.model.name
     ?? (model === '' ? t('plan.model.choose') : model)
-  const effortLabel = selectedEffort?.name
-    ?? (effectiveEffort === undefined ? t('plan.model.providerDefault') : effectiveEffort)
+  // An unpinned member follows the catalog default; say so instead of echoing
+  // that default as though the member had been set to it.
+  const effortLabel = followsModelDefault
+    ? defaultEffort === undefined
+      ? t('plan.model.providerDefault')
+      : t('plan.model.modelDefault', { effort: effortName(defaultEffort) })
+    : effortName(reasoningEffort)
   const unavailable = state.status === 'error' || state.failures.length > 0
 
   const close = (): void => {
@@ -281,7 +284,7 @@ function StagedModelPicker({
     }
     if (id === MODEL_MENU_DEFAULT_EFFORT) {
       close()
-      if (effectiveEffort === defaultEffort) return
+      if (followsModelDefault) return
       onChange({ provider, model, reasoningEffort: 'default' })
       return
     }

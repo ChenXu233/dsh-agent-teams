@@ -38,8 +38,10 @@ export function findStaleVersionReferences(markdown, version, known) {
   return stale
 }
 
-export function findPinnedInstallVersions(markdown) {
-  return [...markdown.matchAll(/@nanmicoder\/dsh-agent-teams@([0-9A-Za-z.-]+)/g)].map(match => match[1])
+export function findPinnedInstallVersions(markdown, packageName) {
+  const name = packageName ?? JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name
+  const pattern = new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}@([0-9A-Za-z.-]+)`, 'g')
+  return [...markdown.matchAll(pattern)].map(match => match[1])
 }
 
 export function checkReadmeVersions({ version, known, files }) {
@@ -50,7 +52,7 @@ export function checkReadmeVersions({ version, known, files }) {
     }
     for (const pinned of findPinnedInstallVersions(markdown)) {
       if (pinned !== version) {
-        problems.push(`${name} pins @nanmicoder/dsh-agent-teams@${pinned} but the package is ${version}`)
+        problems.push(`${name} pins @chenxu233/dsh-agent-teams@${pinned} but the package is ${version}`)
       }
     }
   }

@@ -2,7 +2,6 @@
  * Independent verification for the 01c host command surface:
  *   - agent_teams_run_command tool (list / run / deny / guards / undefined bus / cold member)
  *   - resolveMemberAgent (typert first, agents fallback, both-miss)
- *   - POST /plugins/dsh-agent-teams/member/prompt route (200 / 400 / 404 / 409 / 405)
  *
  * Everything runs against fake ctx objects; no Harness runtime needed.
  * Imports the BUILT bundle (../lib/**.js) - run `pnpm build` first.
@@ -25,30 +24,6 @@ const MEMBER_ID = 'child-session-0001'
 function fakeAgent(id) {
   return { id, session: { header: { cwd: '/tmp' } } }
 }
-
-/** Request-like object readJsonRequest can consume. */
-function jsonRequest(payload) {
-  const req = new EventEmitter()
-  req.method = 'POST'
-  req.url = '/'
-  req.off = (event, handler) => req.removeListener(event, handler)
-  req.once = (event, handler) => EventEmitter.prototype.once.call(req, event, handler)
-  process.nextTick(() => {
-    req.emit('data', Buffer.from(JSON.stringify(payload)))
-    req.emit('end')
-  })
-  return req
-}
-
-function makeRes() {
-  return {
-    statusCode: 0,
-    body: '',
-    writeHead(code, headers) { this.statusCode = code; this.headers = headers ?? {} },
-    end(payload) { this.body = payload ?? '' },
-  }
-}
-
 
 /** Fake plugin ctx: records tool/route registrations and exposes configurable services. */
 function makeFakeCtx(options = {}) {
@@ -315,148 +290,6 @@ test('run against a cold member resolves through typert and executes', async () 
     assert.equal(value.ok, true)
     assert.equal(value.command_id, 'cold-1')
   } finally { await cleanup(workspace) }
-})
-
-// ---- POST /plugins/dsh-agent-teams/member/prompt ----
-
-/** Mount the real plugin surface (index.apply) against the fake ctx and return the prompt route. */
-async function setupRoute(deliveries) {
-  const workspace = await mkdtemp(join(tmpdir(), 'agent-teams-run-command-route-'))
-  const stateRoot = join(workspace, '.agent-teams')
-  await mkdir(stateRoot, { recursive: true })
-  await createTeamDir(stateRoot, {
-    name: 'demo', id: 'demo', captainSessionId: 'captain-1', createdAt: 1, taskSeq: 0,
-    members: MEMBERS.map((member) => ({ ...member })), tasks: [],
-  })
-  const subagents = {
-    registerContinuableSetup() { return () => undefined },
-    async followup(parent, childId, content) {
-      deliveries.push({ childId, text: content.map((block) => block.text).join('') })
-      return 'msg-1'
-    },
-  }
-  const { ctx, registeredRoutes } = makeFakeCtx({ subagents })
-  // The route reads the captain from the live registry.
-  const captain = { id: 'captain-1', session: { header: { cwd: workspace } } }
-  ctx.agents = { get: (id) => (id === 'captain-1' ? captain : undefined), list: () => [] }
-  apply(ctx, {
-    stateDir: '.agent-teams',
-    memberProvider: 'spawn',
-    maxMembers: 8,
-    toolPolicies: {},
-    profiles: {},
-    slashCommand: false,
-  })
-  const route = registeredRoutes.find((entry) => entry.path === '/plugins/dsh-agent-teams/member/prompt')
-  assert.ok(route, 'member/prompt route registered')
-  return { workspace, ctx, deliveries, route }
-}
-
-test('member/prompt route is registered', async () => {
-  const deliveries = []
-  const { workspace, route } = await setupRoute(deliveries)
-  await rm(workspace, { recursive: true, force: true })
-  assert.notEqual(route, undefined)
-})
-
-test('member/prompt: 405 for non-POST', async () => {
-  const deliveries = []
-  const { workspace, route } = await setupRoute(deliveries)
-  const res = makeRes()
-  try {
-    await route.handler({ method: 'GET', url: '/' }, res)
-    assert.equal(res.statusCode, 405)
-  } finally { await rm(workspace, { recursive: true, force: true }) }
-})
-
-test('member/prompt: 400 when required fields are missing', async () => {
-  const deliveries = []
-  const { workspace, route } = await setupRoute(deliveries)
-  const res = makeRes()
-  try {
-    await route.handler(jsonRequest({}), res)
-    assert.equal(res.statusCode, 400)
-    assert.match(JSON.parse(res.body).error, /required/)
-  } finally { await rm(workspace, { recursive: true, force: true }) }
-})
-
-test('member/prompt: 409 when the captain session is not attached', async () => {
-  const deliveries = []
-  const { workspace, ctx, route } = await setupRoute(deliveries)
-  ctx.agents.get = () => undefined
-  const res = makeRes()
-  try {
-    await route.handler(jsonRequest({ sessionId: 'ghost-captain', teamId: 'demo', member: 'writer', text: 'hello' }), res)
-    assert.equal(res.statusCode, 409)
-    assert.match(JSON.parse(res.body).error, /not attached/)
-  } finally { await rm(workspace, { recursive: true, force: true }) }
-})
-
-test('member/prompt: 404 when the team does not belong to this captain', async () => {
-  const deliveries = []
-  const { workspace, route } = await setupRoute(deliveries)
-  const res = makeRes()
-  try {
-    await route.handler(jsonRequest({ sessionId: 'captain-1', teamId: 'other-team', member: 'writer', text: 'hello' }), res)
-    assert.equal(res.statusCode, 404)
-    assert.match(JSON.parse(res.body).error, /team not found/)
-  } finally { await rm(workspace, { recursive: true, force: true }) }
-})
-
-test('member/prompt: 404 for an unknown or removed member', async () => {
-  const deliveries = []
-  const { workspace, route } = await setupRoute(deliveries)
-  try {
-    const unknown = makeRes()
-    await route.handler(jsonRequest({ sessionId: 'captain-1', teamId: 'demo', member: 'nobody', text: 'hi' }), unknown)
-    assert.equal(unknown.statusCode, 404)
-    const removed = makeRes()
-    await route.handler(jsonRequest({ sessionId: 'captain-1', teamId: 'demo', member: 'gone', text: 'hi' }), removed)
-    assert.equal(removed.statusCode, 404)
-  } finally { await rm(workspace, { recursive: true, force: true }) }
-})
-
-test('member/prompt: 409 for stopping or never-started members', async () => {
-  const deliveries = []
-  const { workspace, route } = await setupRoute(deliveries)
-  try {
-    const stopping = makeRes()
-    await route.handler(jsonRequest({ sessionId: 'captain-1', teamId: 'demo', member: 'drained', text: 'hi' }), stopping)
-    assert.equal(stopping.statusCode, 409)
-    const unstarted = makeRes()
-    await route.handler(jsonRequest({ sessionId: 'captain-1', teamId: 'demo', member: 'ghost', text: 'hi' }), unstarted)
-    assert.equal(unstarted.statusCode, 409)
-  } finally { await rm(workspace, { recursive: true, force: true }) }
-})
-
-test('member/prompt: 200 delivers plain text through the captain -> member queue', async () => {
-  const deliveries = []
-  const { workspace, route } = await setupRoute(deliveries)
-  const res = makeRes()
-  try {
-    await route.handler(jsonRequest({ sessionId: 'captain-1', teamId: 'demo', member: 'writer', text: 'please run /compact next' }), res)
-    assert.equal(res.statusCode, 200)
-    const body = JSON.parse(res.body)
-    assert.equal(body.ok, true)
-    assert.equal(body.member, 'child-0001')
-    assert.equal(body.delivered, true)
-    assert.equal(deliveries.length, 1)
-    assert.equal(deliveries[0].childId, 'child-0001')
-    assert.match(deliveries[0].text, /please run \/compact next/)
-  } finally { await rm(workspace, { recursive: true, force: true }) }
-})
-
-test('member/prompt: 500 when the delivery path fails', async () => {
-  const deliveries = []
-  const { workspace, ctx, route } = await setupRoute(deliveries)
-  // break the queue: the subagent facade throws on followup
-  ctx.subagents.followup = async () => { throw new Error('bus down') }
-  const res = makeRes()
-  try {
-    await route.handler(jsonRequest({ sessionId: 'captain-1', teamId: 'demo', member: 'writer', text: 'hi' }), res)
-    assert.equal(res.statusCode, 500)
-    assert.match(JSON.parse(res.body).error, /failed to deliver/)
-  } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
 // ---- t28 repair (F1): the deny predicate must parse the host command name ----

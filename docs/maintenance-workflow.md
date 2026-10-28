@@ -4,29 +4,30 @@
 
 ## 一份支持清单
 
-[compatibility.json](../compatibility.json) 是宿主矩阵的唯一来源。`scripts/compatibility.mjs` 校验精确开发依赖、声明的 peer 目标和依赖覆盖策略，并通过 `--github-output` 输出 CI matrix。不要在另一个脚本里维护第二份版本数组。
+[compatibility.json](../compatibility.json) 是宿主矩阵的唯一来源，它声明三件事：
 
-发布前源码预适配记录在同一清单的 `sourceCandidates`，包含预计版本、官方源码完整 SHA 和证据路径。peer 精确枚举已发布支持目标与源码候选；`--github-output` 仍只输出 `supportedHosts`，不会尝试下载尚未发布的 npm 版本。doctor 将候选标为 `source-preview`，保留完整依赖闭包检查，不将文件版本检查当作正式产物验收。发布后核对最终 SHA 与分包产物，完成 npm 和桌面验收，再把该目标从 `sourceCandidates` 移入 `supportedHosts` 并按需要更新开发基线。当前工作见 [0.2.1-rc.2 适配](./harness-0.2.1-rc.2/README.md)。
+- `minimumHost` —— **最低兼容宿主**。每个 DSH peer 只写这一个下限（`>=0.2.1-rc.2`）。宿主用 `semver.satisfies(..., { includePrerelease: true })` 判定，所以下限之后的任何正式版、RC、预发布都能直接安装，不需要枚举，也不需要版本豁免。
+- `supportedHosts` —— **实测矩阵**（当前 `0.2.1-rc.4` / `0.2.1-rc.3` / `0.2.1-rc.2`）。`--github-output` 只输出这些版本作为 CI 下载目标；矩阵之外但高于下限的宿主在 doctor 里标为 `above-floor`（可用，但不是验收过的组合）。
+- `recommendedHost` —— **推荐宿主**，必须等于开发基线：devDependencies 与 `pnpm-workspace.yaml` 的全部 overrides 都锁到它。
 
-| 当前候选宿主 | 定位 | 安装与支持边界 |
+`scripts/compatibility.mjs` 校验上述约束（每个 DSH peer 必须恰好等于下限、开发依赖与 overrides 必须等于推荐宿主、实测目标不得低于下限），`doctor` 用同一个下限判断安装是否可用。不要在另一个脚本里维护第二份版本数组。
+
+| 当前宿主 | 定位 | 说明 |
 | --- | --- | --- |
-| `0.2.1-rc.2` | recommended | 已发布 npm 精确目标；RC 不是 GA |
-| `0.2.1-rc.1` | legacy | 保留上一推荐 RC |
-| `0.2.0-rc.2` / `0.1.7-rc.2` | legacy | 保留此前推荐版本 |
-| `0.1.5-rc.3` / `0.1.5-rc.2` / `0.1.5-rc.1` | legacy | 保留旧 RC；每个精确版本独立验证完整依赖闭包 |
-| `0.1.2-rc.1` | legacy | 保留旧 RC；与新版使用隔离的 profile 与会话副本 |
-| `0.1.2-alpha.5` | preview | 主动选择的预览宿主；不能通过插件默认更新要求普通用户切到 Alpha |
-| `0.1.2-alpha.2` | legacy | 兼容保留目标；必须检查完整依赖闭包，单独锁 CLI 仍可能混入 rc.1 分包 |
+| `0.2.1-rc.4` | recommended | 开发基线；npm 已发布；RC 不是 GA |
+| `0.2.1-rc.3` | preview | 桌面端自带内核版本；同一套用例结果一致 |
+| `0.2.1-rc.2` | legacy | 最低兼容下限；同一套用例结果一致 |
+| 高于下限的任何新宿主 | floor | 无需改声明即可安装；未进入实测矩阵 |
 
-这里是当前候选代码必须通过的矩阵，不代表对应候选 npm 版本已经发布。增加或删除目标时同时调整清单、开发/peer 依赖和必要的适配，审阅解析后的锁文件，并跑完整矩阵。未来未知版本不能因 semver 落在宽范围内就自动获得支持。
+升级下限时同时调整清单、开发依赖与 overrides、peer 下限和文档，并跑完整矩阵；下限不会因为 semver 落在宽范围内就自动承认一个未验证的宿主。
 
-旧的 `0.1.0-*`、`0.1.1-*` 宿主不在此候选矩阵中。保留其已工作的精确插件版本，或整体迁移到验收过的宿主/插件组合；不要只更新一端。历史记录中，`0.1.1-rc.2` 配插件 `0.1.10` 的精确安装已由维护者验证，可在该旧宿主上使用：
+旧的 `0.1.x` 宿主已退出支持：保留其已工作的精确插件版本，或整体迁移到验收过的宿主/插件组合，不要只更新一端。历史组合（例如 `0.1.1-rc.2` 配插件 `0.1.10`）只在旧宿主上有效：
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.10
+dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams@0.1.10
 ```
 
-这是旧组合的恢复参考，不是对所有旧 RC 或当前 Desktop 的支持承诺。Desktop 用户还要核对内置核心和实际 profile；安装全局新 CLI 不会更换桌面内核。修改 npm dist-tag 也不会撤销既有 profile 中的宽依赖范围或已安装包。
+这是旧组合的恢复参考，不是对当前宿主的支持承诺。Desktop 用户还要核对内置核心和实际 profile；安装全局新 CLI 不会更换桌面内核。
 
 ## 从报告到实现
 

@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@nanmicoder/dsh-agent-teams"><img src="https://img.shields.io/npm/v/@nanmicoder/dsh-agent-teams?style=flat-square&amp;color=5B4CF0" alt="npm 版本"></a>
+  <a href="https://www.npmjs.com/package/@chenxu233/dsh-agent-teams"><img src="https://img.shields.io/npm/v/@chenxu233/dsh-agent-teams?style=flat-square&amp;color=5B4CF0" alt="npm 版本"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-0B7285?style=flat-square" alt="MIT 许可证"></a>
   <a href="./cordis.patch.yml"><img src="https://img.shields.io/badge/DSH-Web%20%2B%20Headless-5B4CF0?style=flat-square" alt="DSH Web 与 Headless"></a>
 </p>
@@ -36,7 +36,7 @@
 
 ## 版本更新
 
-[v0.1.26](./release-notes/v0.1.26.md) 更新团队工作台，增加完成进度与收件箱卡片，保留独立的已认领状态，并修复工具可选参数与宿主会话格式检测。本插件正式版使用 npm `latest` 渠道，推荐宿主仍为 Harness `0.2.1-rc.2`。精确范围见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
+[v0.1.26](./release-notes/v0.1.26.md) 更新团队工作台，增加完成进度与收件箱卡片，保留独立的已认领状态，并修复工具可选参数与宿主会话格式检测。本插件正式版使用 npm `latest` 渠道，推荐宿主为 Harness `0.2.1-rc.4`（最低兼容 `0.2.1-rc.2`）。精确范围见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
 
 ## 为什么需要 AgentTeams？
 
@@ -54,33 +54,30 @@
 
 ## 安装与版本选择
 
-**推荐组合：DeepSeek Harness `0.2.1-rc.2` + AgentTeams `0.1.26`。宿主仍为 RC 版本。**
+**推荐组合：DeepSeek Harness `0.2.1-rc.4` + AgentTeams `0.1.26`。`0.2.1-rc.2` 及之后的宿主都被接受；宿主仍为 RC 版本。**
 
 | 使用场景 | DeepSeek Harness | AgentTeams 插件 |
 | --- | --- | --- |
-| **推荐版本** | **`0.2.1-rc.2`** | **`0.1.26`** |
-| 上一推荐 RC | `0.2.1-rc.1`, `0.2.0-rc.2`, `0.1.7-rc.2` | `0.1.26` |
-| 保留旧 RC | `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.5-rc.3` | `0.1.26` |
-| 保留旧 RC | `0.1.2-rc.1` | `0.1.26` |
-| 开发者测试 Alpha | `0.1.2-alpha.5` | `0.1.26` |
-| 保留旧 Alpha | `0.1.2-alpha.2` | `0.1.26` |
+| **推荐版本** | **`0.2.1-rc.4`** | **`0.1.26`** |
+| 同样验证过（同一套用例结果一致） | `0.2.1-rc.3`, `0.2.1-rc.2` | `0.1.26` |
+| 更新的正式版 / RC / 预发布 | `>=0.2.1-rc.2` | `0.1.26` |
 
 ### 桌面端
 
 在应用侧栏打开「插件 → 添加插件」，输入 npm 包名和版本：
 
 ```text
-@nanmicoder/dsh-agent-teams
+@chenxu233/dsh-agent-teams
 ```
 
 不带版本号的包名会安装 npm `latest`；需要锁定版本时可追加 `@0.1.26`。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
 
-桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。当前精确目标是已发布的 `0.2.1-rc.2`，仍属于 RC；此前源码预测的 `0.2.0` 已退出支持声明。详见[迁移验收记录](./docs/harness-0.2.1-rc.2/README.md)。
+桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。当前推荐目标是已发布的 `0.2.1-rc.4`，最低兼容 `0.2.1-rc.2`，仍属于 RC；此前源码预测的 `0.2.0` 已退出支持声明。peer 声明是最低版本（`>=0.2.1-rc.2`），自带任何更高宿主的桌面端都不需要版本豁免即可安装；`0.2.1-rc.2`、`rc.3`、`rc.4` 上的用例结果完全一致。详见[迁移验收记录](./docs/harness-0.2.1-rc.2/README.md)。
 
 ### CLI / Web：1. 安装 DeepSeek Harness
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.2.1-rc.2
+npm install --global @deepseek-ai/dsh@0.2.1-rc.4
 dsh --version
 ```
 
@@ -91,7 +88,7 @@ dsh --version
 从 npm 安装或升级插件（不带版本号时使用 npm `latest`，当前为正式版 `0.1.26`）：
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams
+dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams
 ```
 
 CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后，停止并重新启动该 profile 的 Harness 进程，再刷新浏览器。** 安装插件不会自动升级宿主；Harness 的 `latest` 与插件的 `latest` 是两个独立渠道。
@@ -186,7 +183,7 @@ CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后�
 
 普通调研、仓库审计可用 `agent_teams_create({name, description, approval:"required", plan:{members:[{name:"researcher"}], tasks:[{id:"audit", subject:"审计现有实现", assignee:"researcher"}]}})` 一次创建完整草案。任务的 `dependencies` 引用同一批中的 `id`，支持前向引用并校验环；结果返回实际任务 ID。`kind=review` 专用于对既有 implementation/repair 任务的质量复审，普通仓库审计使用默认的 `kind=work`。
 
-这里的 `memberProvider` 指子 Agent 的运行后端（`spawn` / `fork`），不是 LLM provider。跨 LLM provider 由 `agent_teams_add_member` 的可选 `provider` + `model` 参数表达；`memberModel` 只是所有成员的模型默认覆盖。成员沿用队长当前 provider/model 时会继承队长的思考强度；provider 或 model 任一改变时会自动使用目标模型的默认档。需要指定特定强度时，可传入可选的 `reasoning_effort` 参数（目标模型支持的档位 id，或 `"default"` 表示强制使用模型自身默认档）。
+这里的 `memberProvider` 指子 Agent 的运行后端（`spawn` / `fork`），不是 LLM provider。跨 LLM provider 由 `agent_teams_add_member` 的可选 `provider` + `model` 参数表达；`memberModel` 只是所有成员的模型默认覆盖。成员沿用队长当前 provider/model、且队长确实选定过思考强度时，会继承该强度；provider 或 model 任一改变、或队长本身跟随模型默认档时，成员的思考强度保持未指定，始终跟随目标模型自己的默认档（宿主每次请求解析，不会把当前默认值写死进 team.json）。需要指定特定强度时，可传入可选的 `reasoning_effort` 参数（目标模型支持的档位 id，或 `"default"` 表示强制使用模型自身默认档）。
 
 `slashCommand: false` 可关闭确定性的 `/agent-teams` 激活面（slash 命令与手势边界），仅保留自然语言触发。
 

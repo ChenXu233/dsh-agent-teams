@@ -79,6 +79,7 @@ import {
   installRetiredMemberGuard,
   installMemberSelectionRuntime,
   installMemberDelegationGuard,
+  liveMemberAgent,
   memberActivity,
   resolveMemberAgent,
   resolveMemberLlmSelection,
@@ -87,6 +88,9 @@ import {
   validateMemberLlmSelections,
   type MemberRuntimeConfig,
 } from './members.ts'
+import { unparkMember } from './member-residency.ts'
+import { dropMemberRoute } from './member-route-registry.ts'
+import { MemberCommandError, executeMemberCommand, isDeniedMemberCommand } from './member-command.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 import { collectCompletedDependencyOutputs, formatDependencyOutputs, installTeamScheduler } from './scheduler.ts'
 import { installMailboxAdmission, isCurrentMail, mailboxContent, mailboxPrompt, readCurrentMailbox } from './mailbox.ts'
@@ -148,7 +152,7 @@ export interface ToolsConfig {
  * `line === '/name' || line.startsWith('/name ')` predicate misses the
  * TAB/LF/CR separators.
  */
-const HOST_COMMAND_NAME = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u
+// Command-line validation and execution live in ./member-command.ts.
 
 /**
  * The host's command-name grammar without the leading slash, used to decide
@@ -206,9 +210,7 @@ export function normalizeMemberCommandDeny(entries: readonly unknown[] | undefin
  * deliberately over-broad — a safety switch should refuse too much rather than
  * let a prefixed alias slip past.
  */
-function isDeniedMemberCommand(name: string, deny: readonly string[]): boolean {
-  return deny.some((denied) => name === denied || name.startsWith(`${denied}-`))
-}
+// isDeniedMemberCommand lives in ./member-command.ts with the execution path.
 
 /** Browser/UI mutations allowed while a plan is waiting for approval. */
 export type StagedPlanMutation =
@@ -665,6 +667,14 @@ async function stopTeamMemberActivations(
 ): Promise<void> {
   const memberIds = members.filter(member => member.id !== '').map(member => member.id as SessionId)
   if (memberIds.length === 0) return
+  // Residency: drop the parked placeholder first, or the drain would keep
+  // waiting on a member that is deliberately holding itself resident.
+  for (const member of members) {
+    if (member.id === '') continue
+    const live = liveMemberAgent(ctx, member.id)
+    if (live !== undefined) unparkMember(live)
+    dropMemberRoute(member.id)
+  }
   // Every supported exact host has targeted recursive drain. Unlike interrupt,
   // it closes admission and clears queued work before awaiting descendants.
   signal?.throwIfAborted()
@@ -1454,7 +1464,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       role: { type: 'string', description: 'Role of the member (e.g. researcher, engineer, reviewer).' },
       provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model. Omit to use the configured member route (memberLlmProvider/memberModel) or the captain\'s current route.' },
       model: { type: 'string', description: 'Optional model override (used verbatim, including any "/" in the id). Omit for the configured memberModel default (paired with memberLlmProvider when set) or the captain\'s current model.' },
-      reasoning_effort: { type: 'string', description: 'Optional reasoning effort override: one of the target model\'s supported effort ids, or "default" to force its default. When omitted, the captain\'s effort is inherited only for the same provider/model; a changed route uses the target default.' },
+      reasoning_effort: { type: 'string', description: 'Optional reasoning effort override: one of the target model\'s supported effort ids, or "default" to follow that model\'s own default. When omitted, a member on the captain\'s current provider/model inherits the captain\'s chosen effort; any other route follows the target model\'s default, which stays dynamic instead of being pinned.' },
       executionPrompt: { type: 'string', description: 'Optional member-specific execution prompt. It remains editable while staged.' },
       tool_policy: { type: 'string', description: 'Optional id of a tool policy declared by the deployment owner (config toolPolicies). It restricts which global tools this member sees and may invoke: a policy allow-list also keeps the four coordination tools, and captain-only tools can never be reopened. Omit for the unchanged default tool set.' },
       context_max_tokens: { type: 'number', description: 'Optional per-member context budget in tokens: when set, the member is auto-compacted at idle once its measured context reaches the value. The member-level value and the plugin memberContext default resolve to the smaller one, so this only tightens; omit it to inherit that default (and nothing happens when no default is configured).' },
@@ -2540,29 +2550,35 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
       const line = args.line.trim()
       if (line === '' || !line.startsWith('/')) throw new Error('line must start with "/" (a command line)')
       if (line.length > 512) throw new Error(`line is too long (${line.length} > 512 characters)`)
-      const commandName = HOST_COMMAND_NAME.exec(line)?.[1]
-      if (commandName !== undefined && isDeniedMemberCommand(commandName, deniedCommandNames)) {
-        // The canonical name only: quoting '/name' here would invite deny
-        // entries written with the leading slash, which is exactly the
-        // fail-open spelling this list normalizes away.
-        throw new Error(`command "${commandName}" is denied for members (memberCommandDeny)`)
-      }
       const agent = await resolveMemberAgent(ctx, childId)
       if (agent === undefined) throw new Error(`member agent is not resolvable: ${childId}`)
-      // The official bus with a plain, attachment-free input: identical to the
-      // member typing this single line. undefined means no registered command
-      // claimed the line.
-      const outcome = await hostCommands.execute(agent, line, [], exec.signal)
-      if (outcome === undefined) {
-        return { member: member.name, line, ok: false, kind: 'error', text: `no registered command handled "${line}" in member "${member.name}"; use action="list" to see what it supports` }
-      }
-      return {
-        member: member.name,
-        line,
-        ok: outcome.result.kind === 'success',
-        kind: outcome.result.kind,
-        ...(outcome.result.text === undefined ? {} : { text: outcome.result.text }),
-        ...(outcome.commandId === undefined ? {} : { command_id: outcome.commandId }),
+      // One execution path shared with the Remote surface and the relay route;
+      // only the human-facing error text differs here.
+      try {
+        const outcome = await executeMemberCommand({
+          commands: hostCommands,
+          agent,
+          line,
+          signal: exec.signal,
+          deny: deniedCommandNames,
+          subject: member.name,
+        })
+        return {
+          member: member.name,
+          line,
+          ok: outcome.ok,
+          kind: outcome.kind,
+          ...(outcome.text === undefined ? {} : { text: outcome.text }),
+          ...(outcome.commandId === undefined ? {} : { command_id: outcome.commandId }),
+        }
+      } catch (error: unknown) {
+        if (error instanceof MemberCommandError) {
+          if (error.code === 'command/denied' && error.commandName !== undefined) {
+            throw new Error(`command "${error.commandName}" is denied for members (memberCommandDeny)`)
+          }
+          throw new Error(error.message)
+        }
+        throw error
       }
     },
   }))

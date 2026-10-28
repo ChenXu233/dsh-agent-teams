@@ -13,18 +13,20 @@ test('stable latest requires the recommended host and bounded compatibility', ()
   assert.deepEqual(releaseMetadata(fixture('0.1.16', 'latest')), {
     value: '0.1.16', dist_tag: 'latest', prerelease: false,
   })
-  const alphaOnly = fixture('0.1.16', 'latest')
-  for (const name of Object.keys(alphaOnly.devDependencies)) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) alphaOnly.devDependencies[name] = '0.1.2-alpha.2'
+  // A stable release must use the RECOMMENDED host as its baseline; an older
+  // tested target is accepted by the compatibility gate but not by the channel.
+  const olderHost = fixture('0.1.16', 'latest')
+  for (const name of Object.keys(olderHost.devDependencies)) {
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) olderHost.devDependencies[name] = '0.2.1-rc.3'
   }
   const workspace = structuredClone(workspacePolicy)
   for (const name of Object.keys(workspace.overrides)) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) workspace.overrides[name] = '0.1.2-alpha.2'
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) workspace.overrides[name] = '0.2.1-rc.3'
   }
-  assert.throws(() => releaseMetadata(alphaOnly, policy, workspace), /recommended host/)
+  assert.throws(() => releaseMetadata(olderHost, policy, workspace), /recommended host/)
   assert.throws(() => releaseMetadata(fixture('0.1.16', 'latest'), {
-    ...policy, recommendedHost: '0.1.2-alpha.2',
-    supportedHosts: [{ version: '0.1.2-alpha.2', track: 'recommended' }],
+    ...policy, minimumHost: '0.2.1-alpha.1', recommendedHost: '0.2.1-alpha.1',
+    supportedHosts: [{ version: '0.2.1-alpha.1', track: 'recommended' }],
   }), /Alpha\/beta/)
 })
 
@@ -44,7 +46,7 @@ test('reject unsupported versions and unbounded peers', () => {
   }
   const mixed = fixture('0.1.16-rc.1', 'next')
   mixed.peerDependencies['@deepseek-ai/dsh-agent'] = '^0.1.2-alpha.2'
-  assert.throws(() => releaseMetadata(mixed), /enumerate/)
+  assert.throws(() => releaseMetadata(mixed), /compatibility floor/)
 })
 
 test('checked-in candidate has consistent dependency and release metadata', () => {

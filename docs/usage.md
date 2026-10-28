@@ -62,11 +62,11 @@
 | `agent_teams_resume` | 显式恢复 halted 团队，必须带非空 reason；不重建已取消任务 |
 | `agent_teams_delete` | 结束团队：打断成员，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
 
-`agent_teams_add_member` 默认不需要模型参数：成员沿用队长当前 LLM provider/model 时，会一并快照队长当前思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。provider 或 model 任一改变时，思考强度自动使用目标模型默认档；用户明确要求某个成员使用特定强度时，可以传入可选的 `reasoning_effort`（目标模型支持的档位 id，或 `"default"` 表示强制使用模型自身默认档）。插件不会为每个成员发起二次选择或弹窗。
+`agent_teams_add_member` 默认不需要模型参数：成员沿用队长当前 LLM provider/model 时，会一并快照队长**显式选定**的思考强度（队长只是跟随模型默认档时不算选定）。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。provider 或 model 任一改变时，思考强度保持未指定、始终跟随目标模型自己的默认档；用户明确要求某个成员使用特定强度时，可以传入可选的 `reasoning_effort`（目标模型支持的档位 id，或 `"default"` 表示强制使用模型自身默认档）。插件不会为每个成员发起二次选择或弹窗。
 
-### 成员命令面（`agent_teams_run_command` + 面板成员命令栏）
+### 成员命令面（`agent_teams_run_command` + 成员详情页 composer）
 
-成员会话里的用户命令（`/compact` 等）有两个入口：队长用工具**下发**，或人在活动面板的成员行里**手点**。两者最终都走宿主的同一命令总线（在该成员 Agent 上执行 `ctx.commands.execute`），区别只在授权方是谁。
+成员会话里的用户命令（`/compact` 等）有两个入口：队长用工具**下发**，或人在该成员自己的会话里用 composer **手打**。两者最终都走宿主的同一命令总线（在该成员 Agent 上执行 `ctx.commands.execute`），区别只在授权方是谁。
 
 **工具 `agent_teams_run_command`（队长专属，成员看不到这个工具）**
 
@@ -81,20 +81,30 @@
 - 执行等价于成员**自己手打同一行**：`attachments` 恒为空（不携带附件，也不能用工具伪造附件）。
 - 守卫（全部是硬失败，不静默降级）：`line` 必须带前导斜杠、≤512 字符；**含 CR/LF 直接拒绝**（一次调用只允许一条命令行，防止用换行把第二条命令偷渡过命令名检查）。默认 **deny 掉本插件自己的命令名 `agent-teams` 及其 `<profile>` 别名前缀族**（即 `agent-teams` 与一切 `agent-teams-*`）；被拒的行**不会到达命令总线**，`list` 也不显示这一族。
 - 成员正在停止（draining）或从未启动（还没有会话）时拒绝，并提示重试时机；命令本身失败（例如压缩正在进行中返回 busy）按命令返回原样给出，**不自动重试**。
-- 配置 `memberCommandDeny?: string[]`（默认 `['agent-teams']`）是**字面替换**的安全开关，只约束队长经工具下发的行（面板人手路径不受它约束，见下）。**写法规约**：
+- 配置 `memberCommandDeny?: string[]`（默认 `['agent-teams']`）是**字面替换**的安全开关，只约束队长经工具下发的行（成员详情页 composer 的人手路径不受它约束，见下）。**写法规约**：
   - **不带斜杠**：写宿主真实的命令名（`compact`），不要写 `/compact`。条目会先归一化——忽略首尾空白、忽略**任意个数**的前导斜杠、忽略大小写，所以 `compact`、`/Compact`、` /COMPACT ` 是同一个开关。（归一化前的版本会让这些写法静默 fail-open；N1 已修复，现在它们都会正确拒绝。）
   - **前缀族**：每条条目同时拦它整个 `<entry>-*` 族——`deny: [review]` 也会拒 `/review-tools`。它比字面匹配更保守，是有意为之。
   - **`[]` 的语义 = 什么都不拒**：显式写 `memberCommandDeny: []` 会**连同默认的 `agent-teams` 保护一起关掉**（`/agent-teams` 也能下发）。这个数组是**字面替换**而不是追加；要保留默认保护就不要写这个键。
   - **非法条目 = 插件加载失败**：条目里没有可用的命令名（空串、`/`、`/ Compact`、`!!!`、数字、全角斜杠或零宽字符等）时，挂载阶段直接抛错，错误首句点明「AgentTeams 插件加载失败 … memberCommandDeny 非法」——工具与路由**都不会注册**，这不是命令执行错误。例外：绕过挂载直接调用 `registerAgentTeamsTools` 的调用方只收到一条 warn（记录差异，同名用例 M3 覆盖）。
   - 合法的超长条目**不截断也不报错**（已核对无实际影响）。
 
-**面板入口（人手动下发，01a）**
+**成员详情页 composer（人手动下发）**
 
-活动面板成员行的命令栏：命令下拉（该成员自己的 `list`）+ 文本框 + 「执行」（只接受 `/` 开头的命令）+ 「发送」（普通文本）+ 固定的「压缩上下文」（直接执行 `/compact`）。结果行原样显示命令返回的 `text`。普通文本经 `POST /plugins/dsh-agent-teams/member/prompt`（body `{ sessionId, teamId, member, text }`）投递到该成员邮箱，与队长给成员发消息走同一条队列（`deliverToMember`）；该路由对缺失字段 400、非 POST 405、队长会话未挂载 409、团队/成员不存在 404、投递失败 500。
+成员自己的会话里，插件接管了宿主 composer（`conversation.composer` 座位，优先级 -20），渲染与宿主一致的输入框：`/` 开头的行按命令执行，其他内容作为消息投递给该成员。命令目录来自该成员**自己**的会话（`GET /member/commands?sessionId=`），不是队长的目录。
 
-- **懒加载：打开面板不会唤醒冷成员。** 该成员的命令目录只在这一行的命令区**首次被交互**（聚焦文本框或按下下拉）时才拉取；仅打开面板/渲染成员行不产生这个副作用（`list` 会让宿主解析并 resume 冷成员会话）。控件本身始终渲染（保持可发现），宿主未提供命令服务（`remote.commands` 缺失）时禁用并给本地化提示。
-- 每个成员行各自持有状态、互不共享。
-- **有意的不对称**：面板路径（人点）**不套** `memberCommandDeny`——动手的就是操作者本人，即授权方；只有队长通过工具下发时才受 deny 约束。
+| 控件 | 行为 |
+|---|---|
+| `/` 菜单 | 方向键选择、Enter 执行、Esc 关闭；只列该成员自己的已注册命令 |
+| 发送 | 成员**空闲**时排队为下一回合（`mode=queue`）；成员**运行中**时插入当前回合（`mode=steer`）。模式由 `/member/state` 的实时状态决定 |
+| 模型选择 | 列出宿主模型目录；切换走 `POST /member/model`，只作用于该成员**当前存活**的选择，冷成员与 halted 团队直接拒绝（不为了换模型唤醒成员） |
+| 停止 | 成员运行中时出现，`POST /member/stop` 经其队长打断当前回合 |
+| 排队徽标 | `/member/state` 报的待处理条数；驻留占位不算排队 |
+
+- **归档成员只读**：团队 halted 后座位仍在，但输入、模型选择、停止全部禁用，历史可查看。
+- **不唤醒冷成员**：`/member/commands` 只读进程内已存在的 Agent，冷成员返回 409 且菜单为空；只有发消息才会投递（并按其所在团队规则唤醒）。
+- **归属判定在插件侧**：客户端读不到团队状态，先向 `GET /member/membership?sessionId=` 探一次并缓存；未命中（非成员会话）永不接管，交还宿主 composer。
+- **有意的不对称**：人手路径**不套** `memberCommandDeny`——动手的就是操作者本人，即授权方；只有队长通过工具下发时才受 deny 约束。
+- 附件暂不支持：宿主的附件准入拒绝 subagent 会话，图片目前无法进入成员会话；需要把文件路径写进消息正文。
 
 ## 配置
 
@@ -131,7 +141,7 @@
 
 `toolPolicies` 的 id 由部署方声明，成员只能按 id 选择：`agent_teams_add_member` 的 `tool_policy`、内联 `plan` 的成员行，或 profile 成员行的 `tool_policy`。队长模型不能提交原始 allow/deny 列表，也不能在运行时新建策略。队长专属工具始终被拒绝且无法通过 allow 列表重新打开；四个协调工具（`agent_teams_claim_task`、`agent_teams_update_task`、`agent_teams_send_message`、`agent_teams_status`）始终可用，策略也不允许拒绝它们。未知 id、空策略或空列表会在挂载时或写入成员前直接失败，不会留下成员或可恢复的孤儿会话。生效的策略 id 与解析后的过滤器会写入 `team.json`（`toolPolicy` / `toolFilter`），`agent_teams_status` 显示策略 id；重启后由子会话持久 descriptor 重新应用同一过滤器。未配置策略的成员保持原有工具集与记录结构。该能力是全局工具的模型可见性与调用限制，不是 OS 沙箱或授权边界。
 
-最终优先级为：成员显式 `provider` + `model` / `model` → `memberModel` → 队长当前路由。成员沿用队长当前 provider/model 时继承队长的思考强度；provider 或 model 任一改变时自动使用目标模型的默认档。显式 `reasoning_effort`（目标模型支持的档位 id，或 `"default"`）优先，并在目标 provider/model 上创建前校验；不兼容时成员创建会明确失败。最终生效的 provider/model/思考强度会写入 `team.json`，供状态查询和成员冷恢复使用。
+最终优先级为：成员显式 `provider` + `model` / `model` → `memberModel` → 队长当前路由。成员沿用队长当前 provider/model 且队长显式选过强度时继承该强度；provider 或 model 任一改变、或队长跟随模型默认档时，成员强度保持未指定并跟随目标模型默认档。显式 `reasoning_effort`（目标模型支持的档位 id，或 `"default"`）优先，并在目标 provider/model 上创建前校验；不兼容时成员创建会明确失败。写入 `team.json` 的是 provider/model 与**已钉住**的思考强度；未钉住的成员不落值，冷恢复后继续跟随模型默认档。
 
 ### 成员上下文预算（memberContext）
 

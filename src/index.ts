@@ -11,7 +11,7 @@
  * dependencies, wakes members with messages, relays reports, and collects
  * results.
  *
- * Installation (bundle): `dsh plugin --profile <name> add @nanmicoder/dsh-agent-teams`
+ * Installation (bundle): `dsh plugin --profile <name> add @chenxu233/dsh-agent-teams`
  * (or a local path). The bundle patch mounts this plugin row into the host
  * composition; the tools register into the shared `tools` registry and the
  * usage section into the global system prompt, so the plugin needs no realm.
@@ -35,15 +35,19 @@ import {
   type ToolsConfig,
 } from './tools.ts'
 import { installAgentTeamsGestureBoundary, registerAgentTeamsCommand } from './command.ts'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
-import { findTeamByCaptain, readTeam, sanitizeKey } from './state.ts'
+import { findTeamByCaptain } from './state.ts'
+import { findTeamByMemberSession } from './member-address.ts'
+import { MemberCommandError, executeMemberCommand } from './member-command.ts'
+import { MemberRemoteService, memberArchived, memberViewOf } from './member-remote.ts'
+import { applyMemberRoute } from './member-route-registry.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
-import { deliverToMember, resolveMemberAgent } from './members.ts'
+import { deliverToMember, interruptMember, liveMemberAgent, resolveMemberAgent } from './members.ts'
 import { installTeamCapabilities } from './capabilities.ts'
 import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
@@ -314,6 +318,19 @@ export function apply(ctx: Context, config: Config): void {
   // settled, rather than here.
 
   const agentTeamsRuntime = registerAgentTeamsTools(ctx, resolved)
+  // Plugin-owned Remote namespace (plan 10): the host Session Remote refuses
+  // every subagent-owned session, so the member composer talks to this service
+  // instead. The Gateway discovers it through the `typertRemote` binding.
+  // A Remote service registers through the Cordis service registry; fake
+  // contexts used by the plugin's own tests have no reflector, so the surface
+  // is mounted only on a real Host context.
+  const cordis = ctx as unknown as { reflect?: unknown; root?: unknown }
+  if (cordis.reflect !== undefined && cordis.root !== undefined) {
+    ctx.effect(() => {
+      new MemberRemoteService(ctx, { stateDir: resolved.stateDir, deny: resolved.memberCommandDeny ?? [] })
+      return () => undefined
+    }, 'agent-teams: member remote namespace')
+  }
   installTeamCapabilities(ctx, {
     stateDir: resolved.stateDir,
     isPendingMember: agentTeamsRuntime.isPendingMember,
@@ -437,199 +454,6 @@ export function apply(ctx: Context, config: Config): void {
       },
     }), 'agent-teams: halt route')
 
-    // Member prompt route: a human in the activity panel sends plain text to
-    // one member of their team. Delivery reuses the same captain -> member
-    // queue path the model-facing tools use (deliverToMember).
-    ctx.effect(() => webServer.register({
-      kind: 'exact',
-      path: '/plugins/dsh-agent-teams/member/prompt',
-      handler: async (req, res) => {
-        if (req.method !== 'POST') {
-          res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
-          res.end()
-          return
-        }
-        let payload: Record<string, unknown>
-        try {
-          payload = await readJsonRequest(req)
-        } catch (error: unknown) {
-          res.writeHead(error instanceof RequestBodyError ? error.status : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'invalid request body' }))
-          return
-        }
-        const sessionId = typeof payload['sessionId'] === 'string' ? payload['sessionId'].trim() : ''
-        const teamId = typeof payload['teamId'] === 'string' ? payload['teamId'].trim() : ''
-        const member = typeof payload['member'] === 'string' ? payload['member'].trim() : ''
-        const text = typeof payload['text'] === 'string' ? payload['text'] : ''
-        if (sessionId === '' || teamId === '' || member === '' || text.trim() === '') {
-          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'sessionId, teamId, member, and text are required' }))
-          return
-        }
-        const captain = ctx.agents.get(sessionId as import('@deepseek-ai/dsh-session').SessionId)
-        if (captain === undefined) {
-          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'captain session is not attached' }))
-          return
-        }
-        const workspace = captain.session.header.cwd ?? process.cwd()
-        const stateRoot = join(workspace, resolved.stateDir)
-        const team = await findTeamByCaptain(stateRoot, captain.id, await leadIdentityOfAsync(ctx, captain.session))
-        if (team === undefined || team.id !== teamId) {
-          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'team not found for this captain' }))
-          return
-        }
-        const target = team.members.find((candidate) =>
-          (sanitizeKey(candidate.name) === sanitizeKey(member) || candidate.id === member) && candidate.status !== 'removed')
-        if (target === undefined) {
-          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: `no active member "${member}" in team "${team.name}"` }))
-          return
-        }
-        if (target.stopping === true) {
-          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: `member "${target.name}" is being stopped; retry after it settles` }))
-          return
-        }
-        if (target.id === '') {
-          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: `member "${target.name}" has no session yet (never started)` }))
-          return
-        }
-        try {
-          const delivered = await deliverToMember(ctx, captain, target.id, text, new AbortController().signal, 'queue')
-          if (!delivered) {
-            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-            res.end(JSON.stringify({ error: 'failed to deliver the prompt to the member' }))
-            return
-          }
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ ok: true, member: target.id, delivered: true }))
-        } catch (error: unknown) {
-          ctx.logger.warn(`agent-teams: member prompt delivery failed for ${target.name}: ${String(error)}`)
-          res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'failed to deliver the prompt to the member' }))
-        }
-      },
-    }), 'agent-teams: member prompt route')
-
-    // Member command route: the activity-panel command bar (and, later, the
-    // member composer) run a registered command on one member session. The
-    // host's client-facing command face refuses EVERY subagent-owned session
-    // ("session/agent-busy: owned by subagent routing"), so this route executes
-    // on the in-process Agent — the same bus `agent_teams_run_command` uses.
-    // Human-driven, so it deliberately does NOT apply `memberCommandDeny`: a
-    // person clicking the control is the authorizing actor (documented
-    // asymmetry), while the model-facing tool keeps its deny list.
-    ctx.effect(() => webServer.register({
-      kind: 'exact',
-      path: '/plugins/dsh-agent-teams/member/command',
-      handler: async (req, res) => {
-        if (req.method !== 'POST') {
-          res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
-          res.end()
-          return
-        }
-        let payload: Record<string, unknown>
-        try {
-          payload = await readJsonRequest(req)
-        } catch (error: unknown) {
-          res.writeHead(error instanceof RequestBodyError ? error.status : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'invalid request body' }))
-          return
-        }
-        const sessionId = typeof payload['sessionId'] === 'string' ? payload['sessionId'].trim() : ''
-        const teamId = typeof payload['teamId'] === 'string' ? payload['teamId'].trim() : ''
-        const member = typeof payload['member'] === 'string' ? payload['member'].trim() : ''
-        const action = payload['action'] === 'list' || payload['action'] === 'run' ? payload['action'] : ''
-        if (sessionId === '' || teamId === '' || member === '' || action === '') {
-          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'sessionId, teamId, member, and action (list|run) are required' }))
-          return
-        }
-        const captain = ctx.agents.get(sessionId as import('@deepseek-ai/dsh-session').SessionId)
-        if (captain === undefined) {
-          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'captain session is not attached' }))
-          return
-        }
-        const workspace = captain.session.header.cwd ?? process.cwd()
-        const stateRoot = join(workspace, resolved.stateDir)
-        const team = await findTeamByCaptain(stateRoot, captain.id, await leadIdentityOfAsync(ctx, captain.session))
-        if (team === undefined || team.id !== teamId) {
-          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'team not found for this captain' }))
-          return
-        }
-        const target = team.members.find((candidate) =>
-          (sanitizeKey(candidate.name) === sanitizeKey(member) || candidate.id === member) && candidate.status !== 'removed')
-        if (target === undefined) {
-          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: `no active member "${member}" in team "${team.name}"` }))
-          return
-        }
-        if (target.id === '') {
-          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: `member "${target.name}" has no session yet (never started)` }))
-          return
-        }
-        const commands = (ctx as unknown as { get?: (name: string) => unknown }).get?.('commands') as undefined | {
-          list: (agent: unknown) => readonly { name: string; description?: string; input?: { hint?: string; attachments?: boolean } }[]
-          execute: (agent: unknown, line: string, attachments: readonly unknown[], signal: AbortSignal) => Promise<undefined | { commandId: string; result: { kind: 'success' | 'error'; text?: string } }>
-        }
-        if (commands === undefined) {
-          res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'the host command service is not composed in this deployment' }))
-          return
-        }
-        const agent = await resolveMemberAgent(ctx, target.id)
-        if (agent === undefined) {
-          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: `member agent is not resolvable: ${target.id}` }))
-          return
-        }
-        if (action === 'list') {
-          const descriptors = commands.list(agent)
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({
-            ok: true,
-            commands: descriptors.map((descriptor) => ({
-              name: descriptor.name,
-              description: descriptor.description,
-              ...(descriptor.input?.hint === undefined ? {} : { hint: descriptor.input.hint }),
-              ...(descriptor.input?.attachments === undefined ? {} : { attachments: descriptor.input.attachments }),
-            })),
-          }))
-          return
-        }
-        const line = typeof payload['line'] === 'string' ? payload['line'].trim() : ''
-        if (line === '' || !line.startsWith('/') || line.length > 512 || /[\r\n]/.test(line)) {
-          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'line must be one command line starting with "/" and no longer than 512 characters' }))
-          return
-        }
-        try {
-          const outcome = await commands.execute(agent, line, [], new AbortController().signal)
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          if (outcome === undefined) {
-            res.end(JSON.stringify({ ok: false, kind: 'error', text: `no registered command handles "${line}" in this member session` }))
-            return
-          }
-          res.end(JSON.stringify({
-            ok: outcome.result.kind === 'success',
-            kind: outcome.result.kind,
-            commandId: outcome.commandId,
-            ...(outcome.result.text === undefined ? {} : { text: outcome.result.text }),
-          }))
-        } catch (error: unknown) {
-          ctx.logger.warn(`agent-teams: member command failed for ${target.name}: ${String(error)}`)
-          res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'failed to run the command on the member session' }))
-        }
-      },
-    }), 'agent-teams: member command route')
-
     // Member relay route: the member-facing composer knows only its own session
     // id, so this route resolves the owning team from that id. A line starting
     // with "/" runs on the in-process command bus (the host's client-facing
@@ -655,6 +479,10 @@ export function apply(ctx: Context, config: Config): void {
         }
         const memberSessionId = typeof payload['memberSessionId'] === 'string' ? payload['memberSessionId'].trim() : ''
         const line = typeof payload['line'] === 'string' ? payload['line'].trim() : ''
+        // A running member can be steered into its current step; an idle one
+        // queues the line as its next turn. The client picks the mode from the
+        // live state it just read, and an unknown value stays the safe default.
+        const mode = payload['mode'] === 'steer' ? 'steer' as const : 'queue' as const
         if (memberSessionId === '' || line === '') {
           res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
           res.end(JSON.stringify({ error: 'memberSessionId and line are required' }))
@@ -667,17 +495,10 @@ export function apply(ctx: Context, config: Config): void {
           res.end(JSON.stringify({ error: `no attached session "${memberSessionId}"` }))
           return
         }
-        const stateRoot = join(root, resolved.stateDir)
-        const teamIds = await readdir(stateRoot).catch(() => [] as string[])
-        let found: { teamId: string; captainId: string; memberName: string } | undefined
-        for (const teamId of teamIds) {
-          const candidate = await readTeam(stateRoot, teamId)
-          const memberEntry = candidate?.members.find((entry) => entry.id === memberSessionId)
-          if (candidate !== undefined && memberEntry !== undefined) {
-            found = { teamId: candidate.id, captainId: candidate.captainSessionId, memberName: memberEntry.name }
-            break
-          }
-        }
+        const located = await findTeamByMemberSession(ctx, memberSessionId, resolved.stateDir)
+        const found = located === undefined
+          ? undefined
+          : { teamId: located.team.id, captainId: located.team.captainSessionId, memberName: located.member.name }
         if (found === undefined) {
           res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
           res.end(JSON.stringify({ error: 'this session is not a member of any team in this workspace' }))
@@ -699,18 +520,21 @@ export function apply(ctx: Context, config: Config): void {
               res.end(JSON.stringify({ error: `member agent is not resolvable: ${memberSessionId}` }))
               return
             }
-            const outcome = await commands.execute(agent, line, [], new AbortController().signal)
-            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-            if (outcome === undefined) {
-              res.end(JSON.stringify({ ok: false, kind: 'error', text: `no registered command handles "${line}" in this session` }))
+            try {
+              // Human-driven: the deny list protects the model-facing tool, not a
+              // person typing in the member's own conversation.
+              const result = await executeMemberCommand({ commands, agent, line, signal: new AbortController().signal })
+              res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+              res.end(JSON.stringify(result))
               return
+            } catch (error: unknown) {
+              if (error instanceof MemberCommandError) {
+                res.writeHead(error.code === 'command/denied' ? 403 : 422, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+                res.end(JSON.stringify({ error: error.message }))
+                return
+              }
+              throw error
             }
-            res.end(JSON.stringify({
-              ok: outcome.result.kind === 'success',
-              kind: outcome.result.kind,
-              ...(outcome.result.text === undefined ? {} : { text: outcome.result.text }),
-            }))
-            return
           }
           const captain = ctx.agents.get(found.captainId as import('@deepseek-ai/dsh-session').SessionId)
           if (captain === undefined) {
@@ -718,7 +542,7 @@ export function apply(ctx: Context, config: Config): void {
             res.end(JSON.stringify({ error: 'the captain session is not attached; plain text needs the parent to be online' }))
             return
           }
-          const delivered = await deliverToMember(ctx, captain, memberSessionId, line, new AbortController().signal, 'queue')
+          const delivered = await deliverToMember(ctx, captain, memberSessionId, line, new AbortController().signal, mode)
           if (!delivered) {
             res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
             res.end(JSON.stringify({ error: 'failed to deliver the prompt to the member' }))
@@ -733,6 +557,231 @@ export function apply(ctx: Context, config: Config): void {
         }
       },
     }), 'agent-teams: member relay route')
+
+    // Membership probe for the member composer seat (plan 10, §4.4): the client
+    // cannot read team state, so it asks which subagent conversations belong to
+    // an AgentTeams team before claiming the composer.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/membership',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId')?.trim() ?? ''
+        if (sessionId === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({
+          member: located.member.name,
+          teamId: located.team.id,
+          archived: memberArchived(located),
+        }))
+      },
+    }), 'agent-teams: member membership route')
+
+    // Command catalog for the member composer's `/` menu (plan 10, §5.2). The
+    // host's `commands/list` refuses subagent sessions, so the plugin reads the
+    // member's own session on the in-process bus. Human-driven: the deny list
+    // protects the model-facing tool, not a person typing in the conversation.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/commands',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId')?.trim() ?? ''
+        if (sessionId === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        const agent = liveMemberAgent(ctx, sessionId)
+        if (agent === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'member agent is not resident' }))
+          return
+        }
+        const commands = (ctx as unknown as { get?: (name: string) => unknown }).get?.('commands') as
+          | undefined
+          | { list: (agent: unknown) => readonly { name: string; description?: string; input?: { hint?: string; attachments?: boolean } }[] }
+        if (commands === undefined) {
+          res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'the host command service is not composed' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({
+          commands: commands.list(agent).map((descriptor) => ({
+            name: descriptor.name,
+            ...(descriptor.description === undefined ? {} : { description: descriptor.description }),
+            ...(descriptor.input?.hint === undefined ? {} : { hint: descriptor.input.hint }),
+            ...(descriptor.input?.attachments === undefined ? {} : { attachments: descriptor.input.attachments }),
+          })),
+        }))
+      },
+    }), 'agent-teams: member commands route')
+
+    // Live state of one member, for that member's own composer (plan 10, task
+    // 8). The member page cannot read team state, so this is how the model
+    // label, the stop control and the queue badge learn what to render. It
+    // reports the residency placeholder as absent: that item is the keep-alive,
+    // not queued work.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/state',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const sessionId = url.searchParams.get('sessionId')?.trim() ?? ''
+        if (sessionId === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        const view = memberViewOf(located, liveMemberAgent(ctx, sessionId))
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ ok: true, view }))
+      },
+    }), 'agent-teams: member state route')
+
+    // Model switch for a resident member (plan 10, task 8). The host's
+    // `session.selectModel` Remote refuses subagent-owned sessions, so this
+    // applies the route to the live selection the member setup owns. A cold
+    // member is refused instead of resumed: switching a model is not a reason
+    // to spend a model turn.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/model',
+      handler: async (req, res) => {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        let payload: Record<string, unknown>
+        try {
+          payload = await readJsonRequest(req)
+        } catch (error: unknown) {
+          res.writeHead(error instanceof RequestBodyError ? error.status : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'invalid request body' }))
+          return
+        }
+        const sessionId = typeof payload['sessionId'] === 'string' ? payload['sessionId'].trim() : ''
+        const provider = typeof payload['provider'] === 'string' ? payload['provider'].trim() : ''
+        const model = typeof payload['model'] === 'string' ? payload['model'].trim() : ''
+        const reasoningEffort = typeof payload['reasoningEffort'] === 'string' ? payload['reasoningEffort'].trim() : ''
+        if (sessionId === '' || provider === '' || model === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId, provider, and model are required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        if (memberArchived(located)) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'this member is archived (halted team or removed member); it cannot take a new model' }))
+          return
+        }
+        if (liveMemberAgent(ctx, sessionId) === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'member agent is not resident' }))
+          return
+        }
+        const applied = applyMemberRoute(sessionId, {
+          provider,
+          model,
+          ...(reasoningEffort === '' ? {} : { reasoningEffort }),
+        })
+        if (!applied) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'this member has no live model selection to switch' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ ok: true, provider, model }))
+      },
+    }), 'agent-teams: member model route')
+
+    // Stop the member's current turn (plan 10, task 8). Interrupting needs the
+    // live captain: it is the member's direct parent, and the host's subagent
+    // manager authorizes the interruption through it.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/stop',
+      handler: async (req, res) => {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        let payload: Record<string, unknown>
+        try {
+          payload = await readJsonRequest(req)
+        } catch (error: unknown) {
+          res.writeHead(error instanceof RequestBodyError ? error.status : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'invalid request body' }))
+          return
+        }
+        const sessionId = typeof payload['sessionId'] === 'string' ? payload['sessionId'].trim() : ''
+        if (sessionId === '') {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
+        if (located === undefined) {
+          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'not a member session' }))
+          return
+        }
+        const captain = ctx.agents.get(located.team.captainSessionId as import('@deepseek-ai/dsh-session').SessionId)
+        if (captain === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'the captain session is not attached' }))
+          return
+        }
+        interruptMember(ctx, captain, sessionId)
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ ok: true, accepted: true }))
+      },
+    }), 'agent-teams: member stop route')
 
     ctx.effect(() => webServer.register({
       kind: 'exact',
