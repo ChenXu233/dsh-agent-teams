@@ -1,6 +1,6 @@
 {
   "name": "@chenxu233/dsh-agent-teams",
-  "version": "0.2.0",
+  "version": "0.2.1-rc.1",
   "description": "AgentTeams for DeepSeek Harness: multi-agent team collaboration (captain, members, tasks with dependencies, messaging) driven by natural language, with a tree monitor in the web GUI",
   "type": "module",
   "main": "lib/index.js",
@@ -61,7 +61,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "tag": "latest",
+    "tag": "next",
     "registry": "https://registry.npmjs.org/"
   },
   "dsh": {
