@@ -217,7 +217,7 @@ check(
     && clientIndexSource.includes("'uiConversation', 'slots', 'sessions', 'locale', 'modelDirectories'")
     && clientIndexSource.includes('ctx.uiConversation.events.register(agentTeamsCardDefinition)')
     && clientIndexSource.includes('ctx.locale.register(AGENT_TEAMS_LOCALE_NAMESPACE, { zh, en })')
-    && clientIndexSource.match(/locale:\s*AGENT_TEAMS_LOCALE_NAMESPACE/gu)?.length === 5,
+    && clientIndexSource.match(/locale:\s*AGENT_TEAMS_LOCALE_NAMESPACE/gu)?.length === 6,
 )
 check(
   'slash command transcript hides the duplicate pre-message result row',
@@ -226,10 +226,15 @@ check(
 )
 check(
   'stop-team control lives in the team panel and requires confirmation',
-  !clientIndexSource.includes("conversation.input.dock")
-    && activityPanelSource.includes('className={css.teamStopButton}')
+  activityPanelSource.includes('className={css.teamStopButton}')
     && activityPanelSource.includes('<Modal')
     && activityPanelSource.includes('ACTIVITY_HALT_URL'),
+)
+check(
+  'member controls dock into the host composer instead of replacing it',
+  clientIndexSource.includes('conversation.input.dock')
+    && !clientIndexSource.includes("'conversation.composer'")
+    && clientIndexSource.includes('commandUi'),
 )
 check(
   'clean builds do not package the removed composer stop banner',

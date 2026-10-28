@@ -32,9 +32,7 @@ import {
   AGENT_TEAMS_LOCALE_NAMESPACE, en, zh, type AgentTeamsLocaleKey,
 } from './locales.ts'
 import { openAgentTeamMember, type AgentTeamsLayoutNavigator, type AgentTeamsWorkspaceNavigator } from './session-navigation.ts'
-import { MemberComposer } from './MemberComposer.tsx'
-import { decideComposerOwner, ownerSessionId, type ComposerOwnerView } from './member-select.ts'
-import { ensureMembership, membershipOf } from './member-membership.ts'
+import { MemberDock, type CommandUiHandle } from './MemberDock.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -97,40 +95,24 @@ export function apply(ctx: ClientContext): void {
   }
   // Optional service scope keeps legacy hosts working and removes every native
   // contribution when the host provider disappears (including HMR).
-  // Plan 10: claim the composer inside an AgentTeams member's own conversation.
-  // The chain slot elects the FIRST contribution whose `select` returns non-null
-  // (renderer lib/client.js:1183-1201) and restores the official placeholder when
-  // nobody is elected, so a lower priority number takes over cleanly and this
-  // registration can be removed without side effects.
   //
-  // Membership is proven by the plugin (the client cannot read team state): the
-  // cache starts empty, an unknown answer never claims the seat, and the probe
-  // fills the cache for the next election. Archived members get a read-only seat.
-  ctx.slots.inject('conversation.composer', () => ctx.slots.register({
-    name: 'conversation.composer',
-    priority: -20,
-    // The model selector reads the host catalog through the same per-session
-    // directory the host composer uses. Switching still goes through the
-    // plugin's own route: the host's `selectModel` refuses subagent sessions.
-    inject: () => ({ modelDirectories: ctx.modelDirectories }),
-    select: (owner: ComposerOwnerView & {
-      readonly session?: {
-        readonly running?: boolean
-        readonly subagent?: { readonly address?: { readonly mode?: string }; readonly parentAvailable?: boolean } | null
-      } | null
-    }): { readonly reason: string } | null => {
-      const sessionId = ownerSessionId(owner)
-      if (sessionId === undefined) return null
-      const seat = decideComposerOwner(owner, membershipOf(sessionId))
-      if (seat === null) {
-        // Unknown membership never claims the seat; a non-member answer is cached
-        // too, so the host composer keeps the conversation.
-        void ensureMembership(sessionId)
-        return null
-      }
-      return { reason: seat === 'readonly' ? 'agent-teams-member-archived' : 'agent-teams-member' }
-    },
-  }, MemberComposer))
+  // Plan 10 (revised): the HOST composer keeps the conversation — its input,
+  // keyboard, styling and steering already work for continuable subagents.
+  // Member-specific controls ride the host's own additive dock slot, and the
+  // member's command catalog is registered into the host's `commandUi` registry
+  // so the `/` menu is rendered by the host rather than reimplemented.
+  const commandUi: { current?: CommandUiHandle } = {}
+  ctx.inject(['commandUi'], (scope) => {
+    const registry = scope.get('commandUi') as CommandUiHandle | undefined
+    if (registry !== undefined) commandUi.current = registry
+  })
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    id: 'agent-teams-member',
+    order: 10,
+    locale: AGENT_TEAMS_LOCALE_NAMESPACE,
+    inject: (sessionId: string) => ({ sessionId, modelDirectories: ctx.modelDirectories, commandUi }),
+  }, MemberDock))
   ctx.inject(['sidebarRight', 'sidebarRightTabs'], (native) => {
     const t = native.locale.bind(AGENT_TEAMS_LOCALE_NAMESPACE)
     native.effect(() => native.sidebarRightTabs.register({
