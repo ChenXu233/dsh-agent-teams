@@ -4,7 +4,7 @@ description: 开发、维护、分发和验证 DeepSeek Harness (DSH) 插件的�
 metadata:
   version: "3.1.1"
   date: "2026-09-06"
-  reference: "https://github.com/NanmiCoder/dsh-agent-teams"
+  reference: "https://github.com/ChenXu233/dsh-agent-teams"
 ---
 
 # DSH 插件开发

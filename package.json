@@ -40,7 +40,8 @@
   "homepage": "https://github.com/ChenXu233/dsh-agent-teams#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ChenXu233/dsh-agent-teams.git"
+    "url": "git+https://github.com/ChenXu233/dsh-agent-teams.git",
+    "forkOf": "https://github.com/NanmiCoder/dsh-agent-teams"
   },
   "bugs": {
     "url": "https://github.com/ChenXu233/dsh-agent-teams/issues"

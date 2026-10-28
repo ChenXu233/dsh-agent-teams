@@ -22,11 +22,11 @@ concurrency:
 
 jobs:
   verify:
-    if: github.repository == 'NanmiCoder/dsh-agent-teams'
+    if: github.repository == 'ChenXu233/dsh-agent-teams'
     uses: ./.github/workflows/verify.yml
 
   publish:
-    if: github.repository == 'NanmiCoder/dsh-agent-teams'
+    if: github.repository == 'ChenXu233/dsh-agent-teams'
     needs: verify
     runs-on: ubuntu-latest
     permissions:
@@ -105,7 +105,7 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ steps.version.outputs.value }}
         run: |
-          CURRENT_LATEST="$(npm view @nanmicoder/dsh-agent-teams dist-tags.latest)"
+          CURRENT_LATEST="$(npm view @chenxu233/dsh-agent-teams dist-tags.latest)"
           export CURRENT_LATEST
           node --input-type=module <<'JS'
           import assert from 'node:assert/strict'

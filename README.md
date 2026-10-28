@@ -8,15 +8,9 @@
 
 <div align="center">
 
-[![AtomGit](https://atomgit.com/NanmiCoder/dsh-agent-teams/star/new_badge.svg)](https://atomgit.com/NanmiCoder/dsh-agent-teams)
+[![GitHub](https://img.shields.io/badge/GitHub-ChenXu233%2Fdsh--agent--teams-181717?style=flat-square&logo=github)](https://github.com/ChenXu233/dsh-agent-teams)
 
 </div>
-
-<p align="center">
-  <a href="https://dshfind.com/en/plugins/NanmiCoder/dsh-agent-teams?ref=badge"><img src="https://img.shields.io/badge/recommended%20by-dshfind-FFD700?style=flat-square" alt="Recommended by dshfind"></a>
-  <a href="https://dshfind.com/en/plugins/NanmiCoder/dsh-agent-teams?ref=badge"><img src="https://dshfind.com/api/badge/NanmiCoder/dsh-agent-teams?lang=en" alt="dshfind score"></a>
-  <a href="https://dshfind.com/en/plugins/NanmiCoder/dsh-agent-teams?ref=badge"><img src="https://dshfind.com/api/badge/NanmiCoder/dsh-agent-teams?metric=downloads&amp;lang=en" alt="dshfind downloads"></a>
-</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@chenxu233/dsh-agent-teams"><img src="https://img.shields.io/npm/v/@chenxu233/dsh-agent-teams?style=flat-square&amp;color=5B4CF0" alt="npm version"></a>
@@ -216,7 +210,7 @@ Community upgrade, audit, benchmark, testing and release skills are vendored wit
 The repository also ships the open Agent Skills package [`dsh-plugin-development`](./skills/dsh-plugin-development/SKILL.md):
 
 ```sh
-npx skills add NanmiCoder/dsh-agent-teams --skill dsh-plugin-development
+npx skills add ChenXu233/dsh-agent-teams --skill dsh-plugin-development
 ```
 
 ## Documentation
@@ -263,6 +257,10 @@ profiles:
 ```
 
 Use an explicit profile flag: `/agent-teams --profile demo-delivery implement the feature`. The first ordinary token is never treated as an implicit profile. Normal command runs call `agent_teams_create({ profile, approval: "required" })`: the roster and seed/Captain-designed DAG remain staged, no child session is created, and no task is claimed. Edit the plan in the activity panel using the host model catalog, return to chat so the Captain asks what to revise and then atomically updates the same draft, discard it, or click **Approve & Run**. Return/discard actions cancel any planning turn still running; discard also parks model-facing context that forbids silently creating a replacement team. Approval resolves the final provider/model and any pinned reasoning choice, commits the roster, and creates each member session only when its first task is ready. A running team is stopped from its own panel header through a confirmation dialog rather than from the composer. Direct tool clients may pass `approval: "automatic"` for the legacy immediate path. Failed review/test tasks do not unlock downstream work; automatic repair/review tasks do not depend on the failed review.
+
+## Acknowledgements
+
+This project is a fork of [NanmiCoder/dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams) by 程序员阿江 (Relakkes), published on npm as [`@nanmicoder/dsh-agent-teams`](https://www.npmjs.com/package/@nanmicoder/dsh-agent-teams). All credit for the original design and implementation belongs to the upstream author and contributors. This fork is maintained independently by [ChenXu233](https://github.com/ChenXu233) and released under the same [MIT license](./LICENSE); the upstream copyright notice is preserved in the LICENSE file.
 
 ## License
 
