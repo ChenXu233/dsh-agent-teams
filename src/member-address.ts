@@ -43,6 +43,34 @@ export class MemberAddressError extends Error {
   }
 }
 
+/**
+ * Structural view of the host session store.
+ *
+ * `ctx.sessions` is a host service, but this plugin never injects it: cordis
+ * throws on an undeclared service property (`cannot get property "sessions"
+ * without inject`), and every member route that resolved a workspace through it
+ * answered 400 on a real host while the fake contexts of the test suite happily
+ * provided the property. `ctx.get(name)` is the unguarded registry read this
+ * plugin already uses for the web server, the command bus and the token meter;
+ * a composition that has no session store degrades to "not a member session"
+ * instead of failing the request.
+ */
+interface SessionStoreView {
+  get(id: SessionId): { readonly header: { readonly cwd?: string } } | undefined
+}
+
+/** Read the host session store without requiring it in `inject`. */
+export function sessionStoreOf(ctx: Context): SessionStoreView | undefined {
+  const get = (ctx as unknown as { get?: (name: string) => unknown }).get
+  if (typeof get !== 'function') return undefined
+  try {
+    const store = get.call(ctx, 'sessions') as SessionStoreView | undefined
+    return store !== undefined && typeof store.get === 'function' ? store : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Every team id under one resolved state root; an absent root reads as empty. */
 async function teamIdsOf(stateRoot: string): Promise<readonly string[]> {
   return readdir(stateRoot).catch(() => [] as string[])
@@ -92,7 +120,7 @@ export async function findTeamByMemberSession(
   memberSessionId: string,
   stateDir: string,
 ): Promise<{ team: TeamState; member: TeamMember } | undefined> {
-  const session = ctx.sessions.get(memberSessionId as SessionId)
+  const session = sessionStoreOf(ctx)?.get(memberSessionId as SessionId)
   const root = session?.header.cwd
   if (session === undefined || root === undefined) return undefined
   const stateRoot = join(root, stateDir)

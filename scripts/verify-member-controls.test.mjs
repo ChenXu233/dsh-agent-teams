@@ -195,11 +195,14 @@ async function mountHarness(options = {}) {
       if (key === 'workspaceRegistry' || key === 'workspace') return { list() { return [] } }
       if (key === 'connection') return { requestRejection() { return undefined } }
       if (key === 'commands') return { list() { return [] }, async execute() { return undefined } }
+      // The session store is a registry read, never an injected property:
+      // cordis throws on an undeclared service property, so a fake that hands
+      // one out would hide exactly that failure.
+      if (key === 'sessions') return { get(id) { return sessions.get(id) } }
       return undefined
     },
     tools: { register(definition) { definitions.set(definition.name, definition) } },
     agents: { get(id) { return liveAgents.get(id) }, list() { return [...liveAgents.values()] } },
-    sessions: { get(id) { return sessions.get(id) } },
     llm: {
       async resolveCallConfig(config) { return config },
       async listModels(provider) { return [{ provider, id: 'fake-model', name: 'fake-model' }] },

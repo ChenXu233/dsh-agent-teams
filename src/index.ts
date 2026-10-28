@@ -40,7 +40,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
 import { findTeamByCaptain } from './state.ts'
-import { findTeamByMemberSession } from './member-address.ts'
+import { findTeamByMemberSession, sessionStoreOf } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand } from './member-command.ts'
 import { MemberRemoteService, memberArchived, memberViewOf } from './member-remote.ts'
 import { applyMemberRoute } from './member-route-registry.ts'
@@ -488,7 +488,7 @@ export function apply(ctx: Context, config: Config): void {
           res.end(JSON.stringify({ error: 'memberSessionId and line are required' }))
           return
         }
-        const session = ctx.sessions.get(memberSessionId as import('@deepseek-ai/dsh-session').SessionId)
+        const session = sessionStoreOf(ctx)?.get(memberSessionId as import('@deepseek-ai/dsh-session').SessionId)
         const root = session?.header.cwd
         if (session === undefined || root === undefined) {
           res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })

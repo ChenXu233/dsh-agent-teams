@@ -9,6 +9,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
+import type { SessionId } from '@deepseek-ai/dsh-session';
 import type { TeamMember, TeamState } from './types.ts';
 /** Durable address of one member: its captain plus its own child session. */
 export interface MemberAddress {
@@ -28,6 +29,27 @@ export declare class MemberAddressError extends Error {
     readonly code: MemberAddressErrorCode;
     constructor(code: MemberAddressErrorCode, message: string);
 }
+/**
+ * Structural view of the host session store.
+ *
+ * `ctx.sessions` is a host service, but this plugin never injects it: cordis
+ * throws on an undeclared service property (`cannot get property "sessions"
+ * without inject`), and every member route that resolved a workspace through it
+ * answered 400 on a real host while the fake contexts of the test suite happily
+ * provided the property. `ctx.get(name)` is the unguarded registry read this
+ * plugin already uses for the web server, the command bus and the token meter;
+ * a composition that has no session store degrades to "not a member session"
+ * instead of failing the request.
+ */
+interface SessionStoreView {
+    get(id: SessionId): {
+        readonly header: {
+            readonly cwd?: string;
+        };
+    } | undefined;
+}
+/** Read the host session store without requiring it in `inject`. */
+export declare function sessionStoreOf(ctx: Context): SessionStoreView | undefined;
 /**
  * Resolve one durable member address without resuming anything.
  * @param ctx - plugin context carrying the live Agent registry.
@@ -49,3 +71,4 @@ export declare function findTeamByMemberSession(ctx: Context, memberSessionId: s
     team: TeamState;
     member: TeamMember;
 } | undefined>;
+export {};
