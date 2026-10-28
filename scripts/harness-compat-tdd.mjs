@@ -187,9 +187,12 @@ await test('synchronous modern setup selects the first request, deduplicates eve
     provider: 'selected', model: 'selected-model', reasoningEffort: 'high',
   }, async () => {
     ctx.emit('agent/session-start', { agent, source: 'startup' })
-    assert.equal(agent.ctx.listeners.get('agent/request').size, 1)
+    // Two request listeners: the host's model-selection install plus this
+    // plugin's prepended route guard that keeps a pinned effort winning over a
+    // deployment-wide subagent effort policy.
+    assert.equal(agent.ctx.listeners.get('agent/request').size, 2)
     ctx.emit('agent/session-start', { agent, source: 'compact' })
-    assert.equal(agent.ctx.listeners.get('agent/request').size, 1)
+    assert.equal(agent.ctx.listeners.get('agent/request').size, 2)
     assert.deepEqual(await selection(agent), { provider: 'selected', model: 'selected-model', reasoningEffort: 'high' })
   })
   ctx.dispose()

@@ -1512,9 +1512,27 @@ function descriptorEvent(label, agentProvider = 'descriptor-provider', agentMode
 }
 
 function fakeChildContext({ label, parentSessionId, cwd, agentProvider, agentModel }) {
+  // Listeners keep cordis' ordering contract: one list per event, appended by
+  // default and unshifted with `prepend`, dispatched outermost-first.
   const listeners = new Map()
+  const on = (name, listener, options) => {
+    const list = listeners.get(name) ?? []
+    if (options?.prepend === true) list.unshift(listener)
+    else list.push(listener)
+    listeners.set(name, list)
+    return () => {
+      const index = list.indexOf(listener)
+      if (index >= 0) list.splice(index, 1)
+    }
+  }
+  const waterfall = async (name, args, inner) => {
+    const list = listeners.get(name) ?? []
+    const run = (index) => index >= list.length ? inner() : list[index](...args, () => run(index + 1))
+    return run(0)
+  }
   return {
     listeners,
+    waterfall,
     context: {
       agent: {
         session: {
@@ -1522,19 +1540,14 @@ function fakeChildContext({ label, parentSessionId, cwd, agentProvider, agentMod
           events: [descriptorEvent(label, agentProvider, agentModel)],
         },
       },
-      on(name, listener) {
-        listeners.set(name, listener)
-        return () => listeners.delete(name)
-      },
+      on,
     },
   }
 }
 
 async function routedConfig(child) {
-  const assemble = child.listeners.get('system-prompt/assemble')
-  const request = child.listeners.get('agent/request')
-  await assemble({}, {}, async () => ({ variables: {} }))
-  return request({}, async () => ({
+  await child.waterfall('system-prompt/assemble', [{}, {}], async () => ({ variables: {} }))
+  return child.waterfall('agent/request', [{}], async () => ({
     provider: 'unselected-provider',
     model: 'unselected-model',
     reasoningEffort: 'low',
@@ -1596,6 +1609,37 @@ check(
     && pinnedRoute.reasoningEffort === 'high',
 )
 disposePinned()
+
+// A deployment-level policy plugin can rewrite every subagent request from a
+// global listener registered at boot (a "thinking effort" plugin forcing one
+// level is the real case). A member's own pinned effort is the narrower
+// decision and must survive that blanket policy.
+const blanketChild = fakeChildContext({
+  label: 'agent-teams:fresh-team:blanket',
+  parentSessionId: 'captain-session',
+  cwd: process.cwd(),
+})
+blanketChild.context.on('agent/request', async (_payload, next) => {
+  const resolved = await next()
+  return { ...resolved, reasoningEffort: 'high' }
+}, { global: true })
+let disposeBlanket
+await selectionRuntime.withPending(
+  'captain-session',
+  'agent-teams:fresh-team:blanket',
+  { provider: 'other-provider', model: 'other-model', reasoningEffort: 'max' },
+  async () => {
+    disposeBlanket = setupMemberSelection(blanketChild.context)
+  },
+)
+const blanketRoute = await routedConfig(blanketChild)
+check(
+  'a member pinned effort survives a blanket subagent effort policy',
+  blanketRoute.provider === 'other-provider'
+    && blanketRoute.model === 'other-model'
+    && blanketRoute.reasoningEffort === 'max',
+)
+disposeBlanket()
 
 const restoreWorkspace = await mkdtemp(join(tmpdir(), 'dsh-agent-teams-selection-'))
 try {
