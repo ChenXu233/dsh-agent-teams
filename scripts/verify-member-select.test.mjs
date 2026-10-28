@@ -24,6 +24,15 @@ test('non-subagent and non-continuable sessions are never claimed', () => {
   assert.equal(decideComposerOwner({ session: { subagent: { address: { mode: 'one-shot' } } } }, 'member'), null)
 })
 
+test('a cold transcript projects the descriptor mode instead of an address', () => {
+  // The host renders a settled member from its durable log: the projection is
+  // { mode, label, seq } with no address, and the seat must still be claimable.
+  const cold = { sessionId: 'child-1', session: { subagent: { mode: 'continuable', label: 'agent-teams:team:alpha' } } }
+  assert.equal(decideComposerOwner(cold, 'member'), 'write')
+  assert.equal(decideComposerOwner(cold, 'member-archived'), 'readonly')
+  assert.equal(decideComposerOwner({ session: { subagent: { mode: 'one-shot' } } }, 'member'), null)
+})
+
 test('ownerSessionId only accepts a non-empty string', () => {
   assert.equal(ownerSessionId(member), 'child-1')
   assert.equal(ownerSessionId({}), undefined)

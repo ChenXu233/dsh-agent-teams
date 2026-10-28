@@ -12,7 +12,15 @@ import type { MemberMembership } from './member-membership.ts'
 export interface ComposerOwnerView {
   readonly sessionId?: string
   readonly session?: {
-    readonly subagent?: { readonly address?: { readonly mode?: string } } | null
+    /**
+     * The host's subagent projection. A live child carries an addressed shape
+     * (`address.mode`); a cold transcript projects the durable descriptor
+     * (`mode`) directly, and both name the same continuable member.
+     */
+    readonly subagent?: {
+      readonly address?: { readonly mode?: string }
+      readonly mode?: string
+    } | null
   } | null
 }
 
@@ -28,7 +36,10 @@ export type ComposerSeat = 'write' | 'readonly' | null
 export function decideComposerOwner(owner: ComposerOwnerView, membership: MemberMembership): ComposerSeat {
   const subagent = owner.session?.subagent
   if (subagent === undefined || subagent === null) return null
-  if (subagent.address?.mode !== 'continuable') return null
+  // Cold transcripts expose the durable descriptor's `mode`; live children add
+  // an address. Accept either, and never claim a one-shot child.
+  const mode = subagent.address?.mode ?? subagent.mode
+  if (mode !== 'continuable') return null
   if (membership === 'member') return 'write'
   if (membership === 'member-archived') return 'readonly'
   return null

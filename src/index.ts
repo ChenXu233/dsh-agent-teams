@@ -55,6 +55,22 @@ import { parseMemberContextConfig, type MemberContextConfig } from './member-con
 
 import { authenticatedWebRoutes, readJsonRequest, RequestBodyError, type BrowserRequestGate, type WebRouteHost } from './web-routes.ts'
 
+/** One command descriptor as the member composer's menu needs it. */
+interface CommandDescriptorView {
+  readonly name: string
+  readonly description?: string
+  readonly input?: { readonly hint?: string; readonly attachments?: boolean }
+}
+
+/**
+ * Last live command catalog per member session.
+ *
+ * `commands.list()` takes an Agent, and a settled member page is rendered from
+ * the durable log with no Agent attached. Remembering the live answer keeps the
+ * `/` menu populated on a cold page instead of silently empty.
+ */
+const memberCommandCatalog = new Map<string, readonly CommandDescriptorView[]>()
+
 /** Web-server service key candidates, newest first. */
 const WEB_SERVER_KEYS = ['webServer', 'httpServer'] as const
 /** Workspace registry service key candidates, newest first. */
@@ -577,6 +593,15 @@ export function apply(ctx: Context, config: Config): void {
           res.end(JSON.stringify({ error: 'sessionId is required' }))
           return
         }
+        const store = sessionStoreOf(ctx)
+        // A composition without a readable session store is not the same answer
+        // as "this session is not a member": say so instead of letting the
+        // client cache a wrong verdict forever.
+        if (store === undefined) {
+          res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'the host session store is not readable' }))
+          return
+        }
         const located = await findTeamByMemberSession(ctx, sessionId, resolved.stateDir)
         if (located === undefined) {
           res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -618,23 +643,38 @@ export function apply(ctx: Context, config: Config): void {
           res.end(JSON.stringify({ error: 'not a member session' }))
           return
         }
-        const agent = liveMemberAgent(ctx, sessionId)
-        if (agent === undefined) {
-          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: 'member agent is not resident' }))
-          return
-        }
         const commands = (ctx as unknown as { get?: (name: string) => unknown }).get?.('commands') as
           | undefined
-          | { list: (agent: unknown) => readonly { name: string; description?: string; input?: { hint?: string; attachments?: boolean } }[] }
+          | { list: (agent: unknown) => readonly CommandDescriptorView[] }
         if (commands === undefined) {
           res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
           res.end(JSON.stringify({ error: 'the host command service is not composed' }))
           return
         }
+        // The member page is normally opened on a COLD transcript: the host
+        // renders the durable log without attaching the child Agent, so
+        // `commands.list(agent)` has no agent to read. The catalog is still
+        // knowable — remember the live answer, and fall back to the captain's
+        // (the global layer is the same one a member would see) so the `/` menu
+        // is never silently empty.
+        const agent = liveMemberAgent(ctx, sessionId)
+        const cached = memberCommandCatalog.get(sessionId)
+        const catalog = agent !== undefined
+          ? commands.list(agent)
+          : cached ?? (() => {
+            const captain = ctx.agents.get(located.team.captainSessionId as import('@deepseek-ai/dsh-session').SessionId)
+            return captain === undefined ? undefined : commands.list(captain)
+          })()
+        if (catalog === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'member agent is not resident and the captain is offline' }))
+          return
+        }
+        if (agent !== undefined) memberCommandCatalog.set(sessionId, catalog)
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify({
-          commands: commands.list(agent).map((descriptor) => ({
+          live: agent !== undefined,
+          commands: catalog.map((descriptor) => ({
             name: descriptor.name,
             ...(descriptor.description === undefined ? {} : { description: descriptor.description }),
             ...(descriptor.input?.hint === undefined ? {} : { hint: descriptor.input.hint }),

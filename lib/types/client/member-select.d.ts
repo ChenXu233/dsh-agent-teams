@@ -10,10 +10,16 @@ import type { MemberMembership } from './member-membership.ts';
 export interface ComposerOwnerView {
     readonly sessionId?: string;
     readonly session?: {
+        /**
+         * The host's subagent projection. A live child carries an addressed shape
+         * (`address.mode`); a cold transcript projects the durable descriptor
+         * (`mode`) directly, and both name the same continuable member.
+         */
         readonly subagent?: {
             readonly address?: {
                 readonly mode?: string;
             };
+            readonly mode?: string;
         } | null;
     } | null;
 }

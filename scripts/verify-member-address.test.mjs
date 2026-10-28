@@ -84,6 +84,26 @@ test('findTeamByMemberSession resolves from the member session workspace', async
   await rm(workspace, { recursive: true, force: true })
 })
 
+test('findTeamByMemberSession resolves a cold member through the workspace registry', async () => {
+  const { workspace } = await fixture()
+  // The member page opens a cold transcript: the host renders the durable log
+  // without attaching the session, so the store has no entry for it.
+  const coldCtx = {
+    agents: { get: () => undefined },
+    get: (name) => {
+      if (name === 'sessions') return { get: () => undefined }
+      if (name === 'workspaceRegistry') return { list: () => [{ path: workspace }] }
+      return undefined
+    },
+  }
+  const found = await findTeamByMemberSession(coldCtx, MEMBER, STATE_DIR)
+  assert.equal(found?.team.id, 'demo')
+  assert.equal(found?.member.name, 'alpha')
+  // A session id that belongs to no team is still "not a member".
+  assert.equal(await findTeamByMemberSession(coldCtx, 'child-9', STATE_DIR), undefined)
+  await rm(workspace, { recursive: true, force: true })
+})
+
 test('findTeamByMemberSession degrades without a session store instead of throwing', async () => {
   const { workspace } = await fixture()
   // No registry read at all: a composition without the service must answer

@@ -47,9 +47,22 @@ interface SessionStoreView {
             readonly cwd?: string;
         };
     } | undefined;
+    list?(): readonly {
+        readonly id: string;
+    }[];
 }
 /** Read the host session store without requiring it in `inject`. */
 export declare function sessionStoreOf(ctx: Context): SessionStoreView | undefined;
+/**
+ * Live session ids the store currently holds, for the membership diagnostic.
+ *
+ * The store only carries sessions this process has attached: a member that
+ * settled before a restart is durable but absent here, which is why a cold
+ * member answers "not a member session" until its conversation is opened.
+ * @param store - the store read through {@link sessionStoreOf}.
+ * @param limit - maximum ids to report.
+ */
+export declare function liveSessionIds(store: SessionStoreView | undefined, limit?: number): readonly string[];
 /**
  * Resolve one durable member address without resuming anything.
  * @param ctx - plugin context carrying the live Agent registry.
