@@ -35,6 +35,7 @@ import { openAgentTeamMember, type AgentTeamsLayoutNavigator, type AgentTeamsWor
 import { MemberDock, type CommandUiHandle } from './MemberDock.tsx'
 import { refreshMemberRoster } from './member-membership.ts'
 import { applyMemberSelection, fetchMemberSelection, installMemberSeat } from './member-seat.ts'
+import { installMemberCommands } from './member-commands.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -122,6 +123,16 @@ export function apply(ctx: ClientContext): void {
   if (!memberSeat.active) {
     console.warn(`agent-teams: member model seat inactive (${memberSeat.reason ?? 'unknown reason'}); the dock keeps its own model control`)
   }
+  // Plan 10 (task 9): the host's own `/` menu, driven by the member catalog.
+  // Without this patch the menu has to be faked with commandUi contributions,
+  // and the host renders those as completions: picking a row duplicates the
+  // typed token (/compact/compact) instead of executing it.
+  let memberCommands = { active: false } as ReturnType<typeof installMemberCommands>
+  try {
+    memberCommands = installMemberCommands(ctx)
+  } catch (error: unknown) {
+    console.warn(`agent-teams: member command catalog unavailable: ${String(error)}`)
+  }
   const commandUi: { current?: CommandUiHandle } = {}
   ctx.inject(['commandUi'], (scope) => {
     const registry = scope.get('commandUi') as CommandUiHandle | undefined
@@ -135,7 +146,9 @@ export function apply(ctx: ClientContext): void {
     inject: (sessionId: string) => ({
       sessionId,
       modelDirectories: ctx.modelDirectories,
-      commandUi,
+      // The native catalog owns the menu when it is installed; the commandUi
+      // contributions are the fallback for a host we could not patch.
+      commandUi: memberCommands.active ? undefined : commandUi,
       modelSeatActive: memberSeat.active,
     }),
   }, MemberDock))

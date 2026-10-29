@@ -131,6 +131,8 @@ export function MemberDock({ sessionId, modelDirectories, commandUi, modelSeatAc
   // Command catalog for this member: fetched once, registered into the host's
   // menu so `/` is rendered by the host itself.
   useEffect(() => {
+    // The native catalog patch owns the menu; contributions would duplicate it.
+    if (commandUi?.current === undefined) return
     let cancelled = false
     void (async () => {
       try {
