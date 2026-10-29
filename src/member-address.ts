@@ -143,7 +143,7 @@ function workspaceRootsOf(ctx: Context): readonly string[] {
 async function scanForMember(
   stateRoot: string,
   memberSessionId: string,
-): Promise<{ team: TeamState; member: TeamMember } | undefined> {
+): Promise<{ team: TeamState; member: TeamMember; archived?: true } | undefined> {
   for (const teamId of await teamIdsOf(stateRoot)) {
     const team = await readTeamSafe(stateRoot, teamId)
     const member = team?.members.find((candidate) => candidate.id === memberSessionId)
@@ -154,7 +154,7 @@ async function scanForMember(
   for (const teamId of await archivedTeamIdsOf(stateRoot)) {
     const team = await readTeamSafe(join(stateRoot, 'archive'), teamId)
     const member = team?.members.find((candidate) => candidate.id === memberSessionId)
-    if (team !== undefined && member !== undefined) return { team, member }
+    if (team !== undefined && member !== undefined) return { team, member, archived: true }
   }
   return undefined
 }
@@ -202,7 +202,7 @@ export async function findTeamByMemberSession(
   ctx: Context,
   memberSessionId: string,
   stateDir: string,
-): Promise<{ team: TeamState; member: TeamMember } | undefined> {
+): Promise<{ team: TeamState; member: TeamMember; archived?: true } | undefined> {
   const session = sessionStoreOf(ctx)?.get(memberSessionId as SessionId)
   const root = session?.header.cwd
   if (root !== undefined) {
