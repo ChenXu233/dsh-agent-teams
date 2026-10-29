@@ -252,6 +252,10 @@ export async function listMemberSessions(ctx: Context, stateDir: string): Promis
     }
   }
   for (const root of workspaceRootsOf(ctx)) roots.add(root)
+  // The host's own working directory is where a session without a registered
+  // workspace defaults; without it a cold, archived team is invisible to the
+  // client's roster prefetch even though its member pages resolve.
+  roots.add(process.cwd())
   const members: MemberSessionEntry[] = []
   const seen = new Set<string>()
   for (const root of roots) {
