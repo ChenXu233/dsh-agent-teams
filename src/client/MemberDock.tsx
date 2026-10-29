@@ -14,6 +14,7 @@
  * @module dsh-agent-teams/client/MemberDock
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ModelDirectoryResolver } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { MenuCommand } from './member-menu.ts'
 import {
@@ -52,21 +53,29 @@ export interface MemberDockProps {
 const row: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  flexWrap: 'wrap',
-  padding: '2px 2px 6px',
+  gap: 6,
+  flexWrap: 'nowrap',
   fontSize: 12,
-  color: 'var(--dsw-alias-label-secondary, inherit)',
+  color: 'var(--dsw-alias-label-caption, inherit)',
 }
-const control: CSSProperties = {
-  padding: '2px 8px',
-  borderRadius: 6,
-  border: '1px solid var(--dsw-alias-border-l3, rgba(127,127,127,0.35))',
+/** Same pill language as the host's own composer controls (313:14108). */
+const pill: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  height: 28,
+  padding: '0 10px',
+  borderRadius: 999,
+  border: '1px solid var(--dsw-alias-border-l3, rgba(127,127,127,0.3))',
   background: 'transparent',
-  color: 'inherit',
+  color: 'var(--dsw-alias-label-secondary, inherit)',
   font: 'inherit',
+  fontSize: 12,
+  lineHeight: 1,
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
 }
+const control: CSSProperties = { ...pill }
 const hint: CSSProperties = { opacity: 0.7 }
 
 /** Relay one line to this member; commands execute on the member's session. */
@@ -87,6 +96,7 @@ export function MemberDock({ sessionId, modelDirectories, commandUi }: MemberDoc
   const [groups, setGroups] = useState<readonly MemberModelGroup[]>([])
   const [commands, setCommands] = useState<readonly MenuCommand[]>([])
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
   const [feedback, setFeedback] = useState<string | undefined>(undefined)
   const alive = useRef(true)
 
@@ -210,27 +220,50 @@ export function MemberDock({ sessionId, modelDirectories, commandUi }: MemberDoc
   }, [busy, refresh, sessionId])
 
   if (view === undefined) return null
+  // Rendered inside the host composer's own standardControls cluster, next to
+  // where the host draws its model seat, so it uses the same pill language.
+  const modelItems: MenuEntry[] = options.map((option) => ({ id: option.key, label: option.label }))
+  // Prefer the catalog's display name; a cold member may have no directory, so
+  // fall back to the durable model id plus its pinned effort.
+  const shownLabel = options.find((option) => option.key === currentKey)?.short
+    ?? (view.model === null || view.model === undefined
+      ? modelLabel(view)
+      : `${view.model.model}${view.reasoningEffort === undefined ? '' : ` · ${view.reasoningEffort}`}`)
   return (
     <div style={row} data-agent-teams-member-dock={sessionId}>
       {archived
-        ? <span style={hint}>该成员已归档，只读</span>
+        ? <span style={hint}>已归档 · 只读</span>
         : (
           <>
-            <label style={hint}>
-              模型
-              <select
-                style={{ ...control, marginLeft: 6, maxWidth: 220 }}
-                value={currentKey}
-                disabled={busy || options.length === 0}
-                onChange={(event) => { switchModel(event.target.value) }}
-                aria-label={modelLabel(view)}
-              >
-                {options.length === 0 ? <option value={currentKey}>{modelLabel(view)}</option> : null}
-                {options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
-              </select>
-            </label>
+            <Menu
+              open={open}
+              portal
+              align="end"
+              compact
+              items={modelItems}
+              selectedId={currentKey}
+              onSelect={(id: string) => { setOpen(false); switchModel(id) }}
+              onClose={() => setOpen(false)}
+              anchor={(
+                <button
+                  type="button"
+                  style={pill}
+                  disabled={busy || options.length === 0}
+                  aria-haspopup="menu"
+                  aria-expanded={open}
+                  aria-label={modelLabel(view)}
+                  title={modelLabel(view)}
+                  onClick={() => setOpen((value) => !value)}
+                >
+                  {shownLabel}
+                  <span aria-hidden>▾</span>
+                </button>
+              )}
+            />
             {queued === undefined ? null : <span style={hint}>{queued}</span>}
-            <button type="button" style={control} disabled={!canStop || busy} onClick={stop}>停止</button>
+            {canStop
+              ? <button type="button" style={pill} disabled={busy} onClick={stop} title="停止该成员">停止</button>
+              : null}
           </>
         )}
       {feedback === undefined ? null : <span style={hint}>{feedback}</span>}

@@ -51,6 +51,8 @@ export interface MemberView {
   /** Halted teams keep their transcript readable but refuse new work. */
   readonly archived: boolean
   readonly model: { readonly provider: string; readonly model: string } | null
+  /** Pinned reasoning effort of that route, when the member has one. */
+  readonly reasoningEffort?: string
   readonly queued: number
 }
 
@@ -114,7 +116,16 @@ const REQUEST_WINDOW = 128
 
 /** The subset of a resolved address the views read. */
 export interface MemberViewSource {
-  readonly member: { readonly name: string; readonly id?: string; readonly status?: string }
+  readonly member: {
+    readonly name: string
+    readonly id?: string
+    readonly status?: string
+    /** Durable spawn route, still meaningful while the member is cold. */
+    readonly provider?: string
+    readonly model?: string
+    readonly reasoningEffort?: string
+    readonly fallbackActive?: boolean
+  }
   readonly team: { readonly id: string; readonly halted?: boolean }
 }
 
@@ -159,9 +170,16 @@ export function memberViewOf(resolved: MemberViewSource, agent: Agent | undefine
   const spawn = agent?.options.provider !== undefined && agent.options.model !== undefined
     ? { provider: agent.options.provider, model: agent.options.model }
     : undefined
+  // A cold member has no Agent to read: the durable roster still names the
+  // route it was spawned with, which is what the composer's model seat shows.
+  const durable = resolved.member.provider !== undefined && resolved.member.model !== undefined
+    ? { provider: resolved.member.provider, model: resolved.member.model }
+    : undefined
   const model = switched !== undefined
     ? { provider: switched.provider, model: switched.model }
-    : spawn ?? null
+    : spawn ?? durable ?? null
+  const reasoningEffort = switched?.reasoningEffort
+    ?? (resolved.member.fallbackActive === true ? undefined : resolved.member.reasoningEffort)
   return {
     member: resolved.member.name,
     teamId: resolved.team.id,
@@ -169,6 +187,7 @@ export function memberViewOf(resolved: MemberViewSource, agent: Agent | undefine
     running: agent?.status === 'running',
     archived: memberArchived(resolved),
     model,
+    ...reasoningEffort === undefined || reasoningEffort === '' ? {} : { reasoningEffort },
     queued: agent === undefined ? 0 : pendingMessages(agent).length,
   }
 }

@@ -15,6 +15,8 @@ export interface MemberControlView {
         readonly provider: string;
         readonly model: string;
     } | null;
+    /** Pinned reasoning effort of that route, when the member has one. */
+    readonly reasoningEffort?: string;
     readonly queued?: number;
 }
 /** How one submitted line reaches a member. */
@@ -57,7 +59,10 @@ export interface MemberModelOption {
     readonly key: string;
     readonly provider: string;
     readonly model: string;
+    /** Provider-qualified caption for the menu row. */
     readonly label: string;
+    /** Model name alone, for the composer pill (the host shows the name there). */
+    readonly short: string;
 }
 /** Build the select value of one route. */
 export declare function modelOptionKey(provider: string, model: string): string;

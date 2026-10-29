@@ -231,8 +231,8 @@ check(
     && activityPanelSource.includes('ACTIVITY_HALT_URL'),
 )
 check(
-  'member controls dock into the host composer instead of replacing it',
-  clientIndexSource.includes('conversation.input.dock')
+  'member controls register inside the host composer instead of replacing it',
+  clientIndexSource.includes('conversation.input.right')
     && !clientIndexSource.includes("'conversation.composer'")
     && clientIndexSource.includes('commandUi'),
 )

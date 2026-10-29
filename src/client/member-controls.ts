@@ -13,6 +13,8 @@ export interface MemberControlView {
   readonly running?: boolean
   readonly archived?: boolean
   readonly model?: { readonly provider: string; readonly model: string } | null
+  /** Pinned reasoning effort of that route, when the member has one. */
+  readonly reasoningEffort?: string
   readonly queued?: number
 }
 
@@ -79,7 +81,10 @@ export interface MemberModelOption {
   readonly key: string
   readonly provider: string
   readonly model: string
+  /** Provider-qualified caption for the menu row. */
   readonly label: string
+  /** Model name alone, for the composer pill (the host shows the name there). */
+  readonly short: string
 }
 
 /** Build the select value of one route. */
@@ -99,7 +104,13 @@ export function modelOptions(groups: readonly MemberModelGroup[] | undefined): M
       const key = modelOptionKey(group.id, model.id)
       if (seen.has(key)) continue
       seen.add(key)
-      options.push({ key, provider: group.id, model: model.id, label: `${group.name} / ${model.name}` })
+      options.push({
+        key,
+        provider: group.id,
+        model: model.id,
+        label: `${group.name} / ${model.name}`,
+        short: model.name,
+      })
     }
   }
   return options
@@ -119,5 +130,11 @@ export function withCurrentOption(
   if (model === null || model === undefined) return [...options]
   const key = modelOptionKey(model.provider, model.model)
   if (options.some(option => option.key === key)) return [...options]
-  return [{ key, provider: model.provider, model: model.model, label: modelLabel(view) }, ...options]
+  return [{
+    key,
+    provider: model.provider,
+    model: model.model,
+    label: modelLabel(view),
+    short: model.model,
+  }, ...options]
 }

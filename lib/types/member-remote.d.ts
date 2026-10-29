@@ -52,6 +52,8 @@ export interface MemberView {
         readonly provider: string;
         readonly model: string;
     } | null;
+    /** Pinned reasoning effort of that route, when the member has one. */
+    readonly reasoningEffort?: string;
     readonly queued: number;
 }
 /** One command descriptor offered by the member's own session. */
@@ -100,6 +102,11 @@ export interface MemberViewSource {
         readonly name: string;
         readonly id?: string;
         readonly status?: string;
+        /** Durable spawn route, still meaningful while the member is cold. */
+        readonly provider?: string;
+        readonly model?: string;
+        readonly reasoningEffort?: string;
+        readonly fallbackActive?: boolean;
     };
     readonly team: {
         readonly id: string;
