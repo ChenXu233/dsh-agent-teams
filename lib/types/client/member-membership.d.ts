@@ -33,3 +33,14 @@ export type MembershipFetch = (url: string, init: {
  * @param fetchImpl - fetch override for tests.
  */
 export declare function ensureMembership(sessionId: string, fetchImpl?: MembershipFetch): Promise<void>;
+/** Route that lists every member session this host can see. */
+export declare const MEMBER_SESSIONS_URL = "/plugins/dsh-agent-teams/member/sessions";
+/**
+ * Prefetch the whole member roster.
+ *
+ * The model seat answers "is this a member?" synchronously while the composer
+ * renders, and the per-session probe loses that race on a cold member page.
+ * One roster read fills the cache for every team the host knows about.
+ * @param fetchImpl - fetch override for tests.
+ */
+export declare function refreshMemberRoster(fetchImpl?: MembershipFetch): Promise<void>;

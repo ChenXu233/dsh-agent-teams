@@ -33,6 +33,8 @@ import {
 } from './locales.ts'
 import { openAgentTeamMember, type AgentTeamsLayoutNavigator, type AgentTeamsWorkspaceNavigator } from './session-navigation.ts'
 import { MemberDock, type CommandUiHandle } from './MemberDock.tsx'
+import { refreshMemberRoster } from './member-membership.ts'
+import { applyMemberSelection, fetchMemberSelection, installMemberSeat } from './member-seat.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -101,17 +103,41 @@ export function apply(ctx: ClientContext): void {
   // Member-specific controls ride the host's own additive dock slot, and the
   // member's command catalog is registered into the host's `commandUi` registry
   // so the `/` menu is rendered by the host rather than reimplemented.
+  //
+  // Plan 10 (task 9): the member model seat is the HOST's own pill. The
+  // membership roster is prefetched so the seat can answer synchronously, and
+  // every patched host surface is restored when this plugin unloads.
+  void refreshMemberRoster()
+  // The seat is an optional enhancement: a host that changed these internals
+  // must degrade to the dock's own control, never break the plugin boot.
+  let memberSeat = { active: false } as ReturnType<typeof installMemberSeat>
+  try {
+    memberSeat = installMemberSeat(ctx, {
+      readSelection: fetchMemberSelection,
+      writeSelection: applyMemberSelection,
+    })
+  } catch (error: unknown) {
+    console.warn(`agent-teams: member model seat unavailable: ${error instanceof Error ? error.stack : String(error)}`)
+  }
+  if (!memberSeat.active) {
+    console.warn(`agent-teams: member model seat inactive (${memberSeat.reason ?? 'unknown reason'}); the dock keeps its own model control`)
+  }
   const commandUi: { current?: CommandUiHandle } = {}
   ctx.inject(['commandUi'], (scope) => {
     const registry = scope.get('commandUi') as CommandUiHandle | undefined
     if (registry !== undefined) commandUi.current = registry
   })
-  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-    name: 'conversation.input.dock',
+  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+    name: 'conversation.input.right',
     id: 'agent-teams-member',
-    order: 10,
+    order: 20,
     locale: AGENT_TEAMS_LOCALE_NAMESPACE,
-    inject: (sessionId: string) => ({ sessionId, modelDirectories: ctx.modelDirectories, commandUi }),
+    inject: (sessionId: string) => ({
+      sessionId,
+      modelDirectories: ctx.modelDirectories,
+      commandUi,
+      modelSeatActive: memberSeat.active,
+    }),
   }, MemberDock))
   ctx.inject(['sidebarRight', 'sidebarRightTabs'], (native) => {
     const t = native.locale.bind(AGENT_TEAMS_LOCALE_NAMESPACE)

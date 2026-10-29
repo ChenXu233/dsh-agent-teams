@@ -192,3 +192,57 @@ export async function findTeamByMemberSession(
   }
   return undefined
 }
+
+/** One member session discovered across the workspaces this host knows. */
+export interface MemberSessionEntry {
+  readonly sessionId: string
+  readonly teamId: string
+  readonly captainSessionId: string
+  readonly member: string
+}
+
+/**
+ * Every member session the host can see, for the client's model seat.
+ *
+ * The client cannot read team state, and the seat has to answer "is this
+ * session a member?" synchronously while the composer renders, so the answer
+ * is prefetched once per page instead of probed per session.
+ * @param ctx - plugin context carrying the attached-session and workspace registries.
+ * @param stateDir - configured state directory name.
+ * @returns one entry per active (non-removed) member, deduplicated by session id.
+ */
+export async function listMemberSessions(ctx: Context, stateDir: string): Promise<readonly MemberSessionEntry[]> {
+  const roots = new Set<string>()
+  const store = sessionStoreOf(ctx)
+  if (store?.list !== undefined) {
+    try {
+      for (const session of store.list()) {
+        const cwd = store.get(session.id as SessionId)?.header.cwd
+        if (cwd !== undefined && cwd !== '') roots.add(cwd)
+      }
+    } catch {
+      // An unreadable store still leaves the workspace registry below.
+    }
+  }
+  for (const root of workspaceRootsOf(ctx)) roots.add(root)
+  const members: MemberSessionEntry[] = []
+  const seen = new Set<string>()
+  for (const root of roots) {
+    const stateRoot = join(root, stateDir)
+    for (const teamId of await teamIdsOf(stateRoot)) {
+      const team = await readTeam(stateRoot, teamId)
+      if (team === undefined) continue
+      for (const member of team.members) {
+        if (member.status === 'removed' || member.id === '' || seen.has(member.id)) continue
+        seen.add(member.id)
+        members.push({
+          sessionId: member.id,
+          teamId: team.id,
+          captainSessionId: team.captainSessionId,
+          member: member.name,
+        })
+      }
+    }
+  }
+  return members
+}

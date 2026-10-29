@@ -40,7 +40,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
 import { findTeamByCaptain } from './state.ts'
-import { findTeamByMemberSession, sessionStoreOf } from './member-address.ts'
+import { findTeamByMemberSession, listMemberSessions, sessionStoreOf } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand } from './member-command.ts'
 import { MemberRemoteService, memberArchived, memberViewOf } from './member-remote.ts'
 import { applyMemberRoute } from './member-route-registry.ts'
@@ -616,6 +616,30 @@ export function apply(ctx: Context, config: Config): void {
         }))
       },
     }), 'agent-teams: member membership route')
+
+    // Roster of member sessions for the client's model seat (plan 10, task 9).
+    // The seat decides "is this session a member?" synchronously while the
+    // composer renders, so the page prefetches the whole roster once instead of
+    // probing per session and racing the first paint.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugins/dsh-agent-teams/member/sessions',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        if (sessionStoreOf(ctx) === undefined) {
+          res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ error: 'the host session store is not readable' }))
+          return
+        }
+        const members = await listMemberSessions(ctx, resolved.stateDir)
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ sessions: members }))
+      },
+    }), 'agent-teams: member sessions route')
 
     // Command catalog for the member composer's `/` menu (plan 10, §5.2). The
     // host's `commands/list` refuses subagent sessions, so the plugin reads the

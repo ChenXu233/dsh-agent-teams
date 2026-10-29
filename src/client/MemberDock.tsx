@@ -48,6 +48,12 @@ export interface MemberDockProps {
   readonly sessionId: string
   readonly modelDirectories?: ModelDirectoryResolver
   readonly commandUi?: { readonly current?: CommandUiHandle }
+  /**
+   * The host's own model seat already renders for this session (plan 10, task
+   * 9). The dock then keeps only what the host has no seat for: the member
+   * queue badge and the stop control.
+   */
+  readonly modelSeatActive?: boolean
 }
 
 const row: CSSProperties = {
@@ -91,7 +97,7 @@ async function relay(sessionId: string, line: string): Promise<void> {
  * One compact control row for a member conversation, plus the member's command
  * catalog in the host's `/` menu. Renders nothing for a non-member session.
  */
-export function MemberDock({ sessionId, modelDirectories, commandUi }: MemberDockProps) {
+export function MemberDock({ sessionId, modelDirectories, commandUi, modelSeatActive = false }: MemberDockProps) {
   const [view, setView] = useState<MemberControlView | undefined>(undefined)
   const [groups, setGroups] = useState<readonly MemberModelGroup[]>([])
   const [commands, setCommands] = useState<readonly MenuCommand[]>([])
@@ -235,7 +241,7 @@ export function MemberDock({ sessionId, modelDirectories, commandUi }: MemberDoc
         ? <span style={hint}>已归档 · 只读</span>
         : (
           <>
-            <Menu
+            {modelSeatActive ? null : <Menu
               open={open}
               portal
               align="end"
@@ -259,7 +265,7 @@ export function MemberDock({ sessionId, modelDirectories, commandUi }: MemberDoc
                   <span aria-hidden>▾</span>
                 </button>
               )}
-            />
+            />}
             {queued === undefined ? null : <span style={hint}>{queued}</span>}
             {canStop
               ? <button type="button" style={pill} disabled={busy} onClick={stop} title="停止该成员">停止</button>

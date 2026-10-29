@@ -65,3 +65,30 @@ export async function ensureMembership(sessionId: string, fetchImpl: MembershipF
     inflight.delete(sessionId)
   }
 }
+/** Route that lists every member session this host can see. */
+export const MEMBER_SESSIONS_URL = '/plugins/dsh-agent-teams/member/sessions'
+
+/**
+ * Prefetch the whole member roster.
+ *
+ * The model seat answers "is this a member?" synchronously while the composer
+ * renders, and the per-session probe loses that race on a cold member page.
+ * One roster read fills the cache for every team the host knows about.
+ * @param fetchImpl - fetch override for tests.
+ */
+export async function refreshMemberRoster(fetchImpl: MembershipFetch = fetch as unknown as MembershipFetch): Promise<void> {
+  try {
+    const response = await fetchImpl(MEMBER_SESSIONS_URL, { cache: 'no-store' })
+    if (!response.ok) return
+    const payload = await response.json?.() as { sessions?: unknown } | undefined
+    const sessions = payload?.sessions
+    if (!Array.isArray(sessions)) return
+    for (const entry of sessions) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const id = (entry as { sessionId?: unknown }).sessionId
+      if (typeof id === 'string' && id !== '') known.set(id, 'member')
+    }
+  } catch {
+    // Offline or an older host: the per-session probe stays the oracle.
+  }
+}

@@ -84,4 +84,22 @@ export declare function findTeamByMemberSession(ctx: Context, memberSessionId: s
     team: TeamState;
     member: TeamMember;
 } | undefined>;
+/** One member session discovered across the workspaces this host knows. */
+export interface MemberSessionEntry {
+    readonly sessionId: string;
+    readonly teamId: string;
+    readonly captainSessionId: string;
+    readonly member: string;
+}
+/**
+ * Every member session the host can see, for the client's model seat.
+ *
+ * The client cannot read team state, and the seat has to answer "is this
+ * session a member?" synchronously while the composer renders, so the answer
+ * is prefetched once per page instead of probed per session.
+ * @param ctx - plugin context carrying the attached-session and workspace registries.
+ * @param stateDir - configured state directory name.
+ * @returns one entry per active (non-removed) member, deduplicated by session id.
+ */
+export declare function listMemberSessions(ctx: Context, stateDir: string): Promise<readonly MemberSessionEntry[]>;
 export {};
