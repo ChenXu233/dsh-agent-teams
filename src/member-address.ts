@@ -90,9 +90,29 @@ export function liveSessionIds(store: SessionStoreView | undefined, limit = 20):
   }
 }
 
-/** Every team id under one resolved state root; an absent root reads as empty. */
+/** Every team DIRECTORY under one resolved state root; an absent root reads as empty. */
 async function teamIdsOf(stateRoot: string): Promise<readonly string[]> {
-  return readdir(stateRoot).catch(() => [] as string[])
+  // Only directories are teams: a stray file (or a lock file named like a team)
+  // must not make the whole lookup throw, which surfaced as an empty HTTP 400.
+  const entries = await readdir(stateRoot, { withFileTypes: true }).catch(() => [])
+  return entries.filter(entry => entry.isDirectory()).map(entry => entry.name)
+}
+
+/** Every archived team id under one state root (`archive/<teamId>/team.json`). */
+async function archivedTeamIdsOf(stateRoot: string): Promise<readonly string[]> {
+  const entries = await readdir(join(stateRoot, 'archive'), { withFileTypes: true }).catch(() => [])
+  return entries
+    .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map(entry => entry.name)
+}
+
+/** Read one team, treating an unreadable team.json as "not this team". */
+async function readTeamSafe(stateRoot: string, teamId: string): Promise<TeamState | undefined> {
+  try {
+    return await readTeam(stateRoot, teamId)
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -125,7 +145,14 @@ async function scanForMember(
   memberSessionId: string,
 ): Promise<{ team: TeamState; member: TeamMember } | undefined> {
   for (const teamId of await teamIdsOf(stateRoot)) {
-    const team = await readTeam(stateRoot, teamId)
+    const team = await readTeamSafe(stateRoot, teamId)
+    const member = team?.members.find((candidate) => candidate.id === memberSessionId)
+    if (team !== undefined && member !== undefined) return { team, member }
+  }
+  // An archived team still owns its member conversations: the pages stay
+  // readable (and keep their model seat / dock), they are just refused new work.
+  for (const teamId of await archivedTeamIdsOf(stateRoot)) {
+    const team = await readTeamSafe(join(stateRoot, 'archive'), teamId)
     const member = team?.members.find((candidate) => candidate.id === memberSessionId)
     if (team !== undefined && member !== undefined) return { team, member }
   }
@@ -229,20 +256,24 @@ export async function listMemberSessions(ctx: Context, stateDir: string): Promis
   const seen = new Set<string>()
   for (const root of roots) {
     const stateRoot = join(root, stateDir)
-    for (const teamId of await teamIdsOf(stateRoot)) {
-      const team = await readTeam(stateRoot, teamId)
-      if (team === undefined) continue
-      for (const member of team.members) {
-        if (member.status === 'removed' || member.id === '' || seen.has(member.id)) continue
-        seen.add(member.id)
-        members.push({
-          sessionId: member.id,
-          teamId: team.id,
-          captainSessionId: team.captainSessionId,
-          member: member.name,
-        })
+    const scan = async (base: string, teamIds: readonly string[]): Promise<void> => {
+      for (const teamId of teamIds) {
+        const team = await readTeamSafe(base, teamId)
+        if (team === undefined) continue
+        for (const member of team.members) {
+          if (member.status === 'removed' || member.id === '' || seen.has(member.id)) continue
+          seen.add(member.id)
+          members.push({
+            sessionId: member.id,
+            teamId: team.id,
+            captainSessionId: team.captainSessionId,
+            member: member.name,
+          })
+        }
       }
     }
+    await scan(stateRoot, await teamIdsOf(stateRoot))
+    await scan(join(stateRoot, 'archive'), await archivedTeamIdsOf(stateRoot))
   }
   return members
 }

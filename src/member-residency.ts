@@ -12,6 +12,7 @@
  * @module dsh-agent-teams/member-residency
  */
 
+import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
@@ -75,4 +76,33 @@ export function isParked(agent: Agent): boolean {
 export function parkedMessageId(agent: Agent): string | undefined {
   const id = parked.get(agent)
   return id !== undefined && pendingStep(agent, id) ? id : undefined
+}
+/**
+ * Keep one member resident across its own idle edges.
+ *
+ * A settled continuable child is disposed by the host, and a disposed child is
+ * a cold transcript: its page loses the live Agent, so host commands
+ * (`/compact`, `/export`, …) and model switches have nothing to run against.
+ * Parking on every idle edge keeps the activation resident, which is what makes
+ * a member page behave like a normal conversation after its turn ends.
+ *
+ * This is installed for every member, independently of the context watchdog:
+ * residency is a lifecycle property, not a budget feature.
+ * @param childCtx - the member's own context (listener lifetime).
+ * @param agent - the live member Agent.
+ * @returns disposer removing the listener.
+ */
+export function installMemberResidency(childCtx: Context, agent: Agent): () => void {
+  const park = (): void => {
+    try {
+      parkMember(agent)
+    } catch {
+      // The inbox refused the placeholder: the host settles the activation.
+    }
+  }
+  const stop = childCtx.on('agent/status', (payload: { agent: Agent; status: string }) => {
+    if (payload.agent.id === agent.id && payload.status === 'idle') park()
+  })
+  if (agent.status === 'idle') park()
+  return stop
 }

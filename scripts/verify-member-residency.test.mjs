@@ -11,6 +11,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MEMBER_RESIDENCY_MARKER,
+  installMemberResidency,
   parkMember,
   unparkMember,
   isParked,
@@ -109,4 +110,49 @@ test('a pending turn still reports parked: residency does not disturb delivery',
   assert.equal(agent.inbox.nextTurn.length, 1)
   assert.equal(agent.inbox.nextStep.length, 1)
   assert.equal(isParked(agent), true)
+})
+function fakeChildCtx() {
+  const listeners = []
+  return {
+    listeners,
+    on(name, fn) {
+      listeners.push({ name, fn })
+      return () => {
+        const index = listeners.findIndex(entry => entry.fn === fn)
+        if (index !== -1) listeners.splice(index, 1)
+      }
+    },
+    emit(name, payload) {
+      for (const entry of [...listeners]) if (entry.name === name) entry.fn(payload)
+    },
+  }
+}
+
+test('installMemberResidency parks an already-idle member immediately', () => {
+  const agent = fakeAgent()
+  agent.status = 'idle'
+  const childCtx = fakeChildCtx()
+  const dispose = installMemberResidency(childCtx, agent)
+  assert.equal(agent.inbox.nextStep.length, 1, 'an idle member must never settle cold')
+  dispose()
+})
+
+test('installMemberResidency re-parks on every idle edge and stops on dispose', () => {
+  const agent = fakeAgent()
+  agent.status = 'running'
+  const childCtx = fakeChildCtx()
+  const dispose = installMemberResidency(childCtx, agent)
+  assert.equal(agent.inbox.nextStep.length, 0, 'a running member is not parked')
+  agent.status = 'idle'
+  childCtx.emit('agent/status', { agent, status: 'idle' })
+  assert.equal(agent.inbox.nextStep.length, 1)
+  // A command unparks the member for the duration of the host maintenance call;
+  // the next idle edge parks it again.
+  unparkMember(agent)
+  childCtx.emit('agent/status', { agent, status: 'idle' })
+  assert.equal(agent.inbox.nextStep.length, 1)
+  childCtx.emit('agent/status', { agent, status: 'running' })
+  assert.equal(agent.inbox.nextStep.length, 1, 'a running edge does not double-park')
+  dispose()
+  assert.equal(childCtx.listeners.length, 0)
 })

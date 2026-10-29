@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { agentTeamsSource, observedSessionFormatVersion, type SessionFormatBearer, guardSubagentCreation, startMember, usesManagedActivations, guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, startMemberWithLenientFilter, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
-import { parkMember, parkedMessageId, unparkMember } from './member-residency.ts'
+import { installMemberResidency, parkMember, parkedMessageId, unparkMember } from './member-residency.ts'
 import { dropMemberRoute, registerMemberRoute } from './member-route-registry.ts'
 import { nearestLiveLead } from './lineage.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
@@ -716,6 +716,9 @@ export function installMemberSelectionRuntime(
     const key = pendingSelectionKey(parentSessionId, descriptor.label)
     // Internal settlement wakeups bypass the public delivery guard. Recheck
     // exact durable membership on every proposed step, including cold resume.
+    // Residency is a lifecycle property, not a budget feature: park the member
+    // on every idle edge so its page keeps a live Agent after the turn ends.
+    const disposeResidency = installMemberResidency(childCtx, child)
     const disposeAdmission = childCtx.on('agent/pre-step', async (payload, next) => {
       if (payload.agent.id !== child.id) return next()
       const admitted = await withTeamLock(`team:${stateRoot}:${teamId}`, async () => {
@@ -778,7 +781,7 @@ export function installMemberSelectionRuntime(
     let selection = pending.get(key)
     if (selection === undefined) {
       const team = readTeamSync(stateRoot, teamId)
-      if (team?.captainSessionId !== parentSessionId) return () => { disposeWatchdog(); cleanupAdmission() }
+      if (team?.captainSessionId !== parentSessionId) return () => { disposeWatchdog(); disposeResidency(); cleanupAdmission() }
 
       const durableMember = team.members.find(member => member.name === memberName)
       selection = selectionFromMember(durableMember)
@@ -832,7 +835,7 @@ export function installMemberSelectionRuntime(
       }
     })
     // Legacy teams still need failure reporting even without a saved route.
-    if (selection === undefined) return () => { disposeWatchdog(); disposeFailure(); cleanupAdmission() }
+    if (selection === undefined) return () => { disposeWatchdog(); disposeFailure(); disposeResidency(); cleanupAdmission() }
     const selectionRef = { current: modelSelection(selection), assembled: undefined as ModelSelection | undefined }
     const disposeSelection = installModelSelection(childCtx, selectionRef)
     // A deployment-level policy plugin can rewrite every subagent request from a
@@ -890,6 +893,7 @@ export function installMemberSelectionRuntime(
       disposeSelection()
       disposeWatchdog()
       disposeFailure()
+      disposeResidency()
       cleanupAdmission()
     }
   })

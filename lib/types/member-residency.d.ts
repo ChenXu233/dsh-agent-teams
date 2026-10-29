@@ -11,6 +11,7 @@
  * loop claims the next turn, so it never reaches the model's context.
  * @module dsh-agent-teams/member-residency
  */
+import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 /** Text of the parked placeholder; never delivered to a member in practice. */
 export declare const MEMBER_RESIDENCY_MARKER = "[agent-teams] residency";
@@ -37,3 +38,19 @@ export declare function isParked(agent: Agent): boolean;
  * @param agent - live member Agent.
  */
 export declare function parkedMessageId(agent: Agent): string | undefined;
+/**
+ * Keep one member resident across its own idle edges.
+ *
+ * A settled continuable child is disposed by the host, and a disposed child is
+ * a cold transcript: its page loses the live Agent, so host commands
+ * (`/compact`, `/export`, …) and model switches have nothing to run against.
+ * Parking on every idle edge keeps the activation resident, which is what makes
+ * a member page behave like a normal conversation after its turn ends.
+ *
+ * This is installed for every member, independently of the context watchdog:
+ * residency is a lifecycle property, not a budget feature.
+ * @param childCtx - the member's own context (listener lifetime).
+ * @param agent - the live member Agent.
+ * @returns disposer removing the listener.
+ */
+export declare function installMemberResidency(childCtx: Context, agent: Agent): () => void;

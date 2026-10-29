@@ -43,6 +43,7 @@ import { findTeamByCaptain } from './state.ts'
 import { findTeamByMemberSession, listMemberSessions, sessionStoreOf } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand } from './member-command.ts'
 import { MemberRemoteService, memberArchived, memberViewOf } from './member-remote.ts'
+import { isParked, parkMember, parkedMessageId, unparkMember } from './member-residency.ts'
 import { applyMemberRoute } from './member-route-registry.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
@@ -540,6 +541,12 @@ export function apply(ctx: Context, config: Config): void {
               }))
               return
             }
+            // The residency placeholder is "waking queued work" to the host's
+            // maintenance admission, so `/compact` would refuse with "agent is
+            // not idle" while the member is parked. Drop it for the command and
+            // park again once the command settled.
+            const placeholder = parkedMessageId(agent)
+            if (placeholder !== undefined) unparkMember(agent, placeholder)
             try {
               // Human-driven: the deny list protects the model-facing tool, not a
               // person typing in the member's own conversation.
@@ -554,6 +561,11 @@ export function apply(ctx: Context, config: Config): void {
                 return
               }
               throw error
+            } finally {
+              // Park again once the command settled, so the member stays live
+              // for the next command instead of going cold.
+              const after = liveMemberAgent(ctx, memberSessionId)
+              if (after !== undefined && after.status === 'idle' && !isParked(after)) parkMember(after)
             }
           }
           const captain = ctx.agents.get(found.captainId as import('@deepseek-ai/dsh-session').SessionId)
