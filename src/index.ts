@@ -504,13 +504,11 @@ export function apply(ctx: Context, config: Config): void {
           res.end(JSON.stringify({ error: 'memberSessionId and line are required' }))
           return
         }
-        const session = sessionStoreOf(ctx)?.get(memberSessionId as import('@deepseek-ai/dsh-session').SessionId)
-        const root = session?.header.cwd
-        if (session === undefined || root === undefined) {
-          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ error: `no attached session "${memberSessionId}"` }))
-          return
-        }
+        // No attached-session requirement: a member page is normally rendered
+        // from the durable log, and both paths below can serve that. A command
+        // resolves the member through the typert agent lookup, which resumes a
+        // cold member (the documented way to issue that member's own command);
+        // plain text still needs the live captain, checked below.
         const located = await findTeamByMemberSession(ctx, memberSessionId, resolved.stateDir)
         const found = located === undefined
           ? undefined
