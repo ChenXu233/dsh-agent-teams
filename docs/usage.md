@@ -76,7 +76,7 @@
 | `action` | `list` = 列该成员**自己的**命令目录；`run` = 在成员会话里执行 `line` |
 | `line` | `run` 必填：单行命令，必须以 `/` 开头，≤512 字符，**不允许 CR/LF** |
 
-- `list` → `{ member, commands: [{ name, description?, hint?, attachments? }] }`，按该成员会话自己的 scope 列举（不同成员可见命令集可能不同，不能拿队长的列表冒充）。冷成员会先被解析/唤醒（与 `run` 同一解析路径），不确定成员支持什么命令时先 `list`。
+- `list` → `{ member, commands: [{ name, description?, hint?, attachments? }] }`，按该成员会话自己的 scope 列举（不同成员可见命令集可能不同，不能拿队长的列表冒充）。**成员必须处于驻留态**：同一宿主进程内，成员回合结束后会被驻留（见「常驻」），所以 `list` / `run` 正常可用；宿主重启后成员是冷转录，`resolveMemberAgent` 被宿主所有权守卫拒绝，工具报 `member agent is not resolvable` —— 先给该成员发一条消息唤醒，再执行命令。
 - `run` → `{ member, line, ok, kind: 'success' | 'error', text?, command_id? }`；`text` 是命令自己的结果文案，原样返回。没有任何已注册命令认领该行（`execute` 返回 `undefined`）时返回 `ok: false, kind: 'error'` 与明确说明，不会静默成功。
 - 执行等价于成员**自己手打同一行**：`attachments` 恒为空（不携带附件，也不能用工具伪造附件）。
 - 守卫（全部是硬失败，不静默降级）：`line` 必须带前导斜杠、≤512 字符；**含 CR/LF 直接拒绝**（一次调用只允许一条命令行，防止用换行把第二条命令偷渡过命令名检查）。默认 **deny 掉本插件自己的命令名 `agent-teams` 及其 `<profile>` 别名前缀族**（即 `agent-teams` 与一切 `agent-teams-*`）；被拒的行**不会到达命令总线**，`list` 也不显示这一族。
