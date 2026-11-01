@@ -30,7 +30,7 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
 
 ## Releases
 
-[v0.2.1-rc.1](./release-notes/v0.2.1-rc.1.md) is a prerelease that verifies the tag-driven publishing pipeline end to end; it carries no functional changes over [v0.2.0](./release-notes/v0.2.0.md) and ships on npm `next`, not `latest`. The stable line remains the [v0.2.0](./release-notes/v0.2.0.md) release (member page owns the member conversation, settled members stay resident, fork identity with a single Harness floor of `0.2.1-rc.2`). The plugin declares only that minimum host (`engines.dsh: >=0.2.1-rc.2`) instead of listing tested versions, so a newer Harness release installs without a plugin release; the CI-tested matrix stays advisory. The stable channel uses npm `latest`; the recommended Harness host is `0.2.1-rc.4`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
+[v0.2.1-rc.2](./release-notes/v0.2.1-rc.2.md) ships on npm `next`, not `latest`. It turns the member page's model seat and slash-command launcher into pure slot contributions — the host composer keeps the conversation and no host service is patched — and adopts upstream's single-host-requirement policy: one install floor (`engines.dsh: >=0.2.1-rc.2`) instead of an enumerated tested list, so a newer Harness release installs without a plugin release while the CI-tested matrix stays advisory. The stable line remains [v0.2.0](./release-notes/v0.2.0.md) on npm `latest`; the recommended Harness host is `0.2.1-rc.4`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
 
 ## Why AgentTeams?
 
@@ -67,7 +67,7 @@ In the app sidebar, open **Plugins → Add plugin**. You can install directly fr
 @chenxu233/dsh-agent-teams
 ```
 
-The package name resolves npm `latest`. To pin a version, append `@0.2.1-rc.1` for the current prerelease, or the stable tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
+The package name resolves npm `latest`. To pin a version, append `@0.2.1-rc.2` for the current prerelease, or the stable tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
 The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Check the embedded core against the compatibility list. Harness `0.2.1-rc.4` is the newest published target; the floor stays `0.2.1-rc.2` and the RC status is unchanged. The earlier source-only prediction of a later stable host is no longer a support declaration. The peer declaration is a floor (`>=0.2.1-rc.2`), so a desktop build that embeds any later host installs without a version exemption; `0.2.1-rc.2`, `rc.3` and `rc.4` report identical suite results. See the [release migration evidence](./docs/harness-0.2.1-rc.2/README.md).
 
@@ -82,7 +82,7 @@ The command selects the host's npm `latest`; check `dsh --version` against the s
 
 ### CLI / Web: 2. Install the AgentTeams plugin
 
-Install or upgrade from npm using the package name (resolves npm `latest`; the preview channel `next` carries `0.2.1-rc.1`):
+Install or upgrade from npm using the package name (resolves npm `latest`; the preview channel `next` carries `0.2.1-rc.2`):
 
 ```sh
 dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams

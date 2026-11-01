@@ -30,7 +30,7 @@
 
 ## 版本更新
 
-[v0.2.1-rc.1](./release-notes/v0.2.1-rc.1.md) 是一次验证 tag 驱动发布流水线的预发布版，功能上与 [v0.2.0](./release-notes/v0.2.0.md) 一致，发布到 npm `next` 而非 `latest`。正式线仍为 [v0.2.0](./release-notes/v0.2.0.md)：成员页接管成员会话（换模型、队列、停止、命令菜单，归档后只读），成员回合结束后保持常驻，包名改为本分支自有身份。插件只声明最低宿主（`engines.dsh: >=0.2.1-rc.2`），不再逐个列出已测宿主，Harness 发新版本不必再发插件；CI 测试矩阵仅作参考。正式版使用 npm `latest` 渠道，推荐宿主为 Harness `0.2.1-rc.4`。精确范围见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
+[v0.2.1-rc.2](./release-notes/v0.2.1-rc.2.md) 发布到 npm `next` 而非 `latest`。这一版把成员页的模型座位与 `/` 命令启动器改成纯槽位贡献（宿主 composer 继续负责对话，插件不再修改任何宿主服务），并采用上游的单一宿主下限策略：只声明一个安装下限（`engines.dsh: >=0.2.1-rc.2`），不再逐个列出已测宿主，Harness 发新版本不必再发插件；CI 测试矩阵仅作参考。正式线仍为 [v0.2.0](./release-notes/v0.2.0.md)（npm `latest`），推荐宿主为 Harness `0.2.1-rc.4`。精确范围见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
 
 ## 为什么需要 AgentTeams？
 
@@ -66,7 +66,7 @@
 @chenxu233/dsh-agent-teams
 ```
 
-不带版本号的包名会安装 npm `latest`；需要锁定版本时可追加 `@0.2.1-rc.1`（当前预发布）或上表中的正式版本。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
+不带版本号的包名会安装 npm `latest`；需要锁定版本时可追加 `@0.2.1-rc.2`（当前预发布）或上表中的正式版本。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
 
 桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。当前推荐目标是已发布的 `0.2.1-rc.4`，最低兼容 `0.2.1-rc.2`，仍属于 RC；此前仅依据源码做出的正式版宿主预测已退出支持声明。peer 声明是最低版本（`>=0.2.1-rc.2`），自带任何更高宿主的桌面端都不需要版本豁免即可安装；`0.2.1-rc.2`、`rc.3`、`rc.4` 上的用例结果完全一致。详见[迁移验收记录](./docs/harness-0.2.1-rc.2/README.md)。
 
@@ -81,7 +81,7 @@ dsh --version
 
 ### CLI / Web：2. 安装 AgentTeams 插件
 
-从 npm 安装或升级插件（不带版本号时使用 npm `latest`；预览渠道 `next` 当前为 `0.2.1-rc.1`）：
+从 npm 安装或升级插件（不带版本号时使用 npm `latest`；预览渠道 `next` 当前为 `0.2.1-rc.2`）：
 
 ```sh
 dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams
