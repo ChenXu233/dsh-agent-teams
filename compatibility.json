@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "minimumHost": "0.2.1-rc.2",
   "recommendedHost": "0.2.1-rc.4",
   "previewTag": "next",
   "supportedHosts": [

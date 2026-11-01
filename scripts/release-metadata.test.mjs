@@ -13,20 +13,20 @@ test('stable latest requires the recommended host and bounded compatibility', ()
   assert.deepEqual(releaseMetadata(fixture('0.1.16', 'latest')), {
     value: '0.1.16', dist_tag: 'latest', prerelease: false,
   })
-  // A stable release must use the RECOMMENDED host as its baseline; an older
-  // tested target is accepted by the compatibility gate but not by the channel.
-  const olderHost = fixture('0.1.16', 'latest')
-  for (const name of Object.keys(olderHost.devDependencies)) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) olderHost.devDependencies[name] = '0.2.1-rc.3'
+  // This fork narrowed the matrix to 0.2.1-rc.2 .. rc.4; rc.2 is the oldest
+  // SUPPORTED host that is not the recommended one, so the same rule applies.
+  const legacyOnly = fixture('0.1.16', 'latest')
+  for (const name of Object.keys(legacyOnly.devDependencies)) {
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) legacyOnly.devDependencies[name] = '0.2.1-rc.2'
   }
   const workspace = structuredClone(workspacePolicy)
   for (const name of Object.keys(workspace.overrides)) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) workspace.overrides[name] = '0.2.1-rc.3'
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) workspace.overrides[name] = '0.2.1-rc.2'
   }
-  assert.throws(() => releaseMetadata(olderHost, policy, workspace), /recommended host/)
+  assert.throws(() => releaseMetadata(legacyOnly, policy, workspace), /recommended host/)
   assert.throws(() => releaseMetadata(fixture('0.1.16', 'latest'), {
-    ...policy, minimumHost: '0.2.1-alpha.1', recommendedHost: '0.2.1-alpha.1',
-    supportedHosts: [{ version: '0.2.1-alpha.1', track: 'recommended' }],
+    ...policy, recommendedHost: '0.1.2-alpha.2',
+    supportedHosts: [{ version: '0.1.2-alpha.2', track: 'recommended' }],
   }), /Alpha\/beta/)
 })
 
@@ -40,13 +40,13 @@ for (const suffix of ['alpha', 'beta', 'rc']) {
   })
 }
 
-test('reject unsupported versions and unbounded peers', () => {
+test('reject unsupported versions and bounded or listed peers', () => {
   for (const version of ['0.1.16-dev.1', '0.1.16-alpha.01', '0.1.16-alpha.1\n', 'v0.1.16', '0.1']) {
     assert.throws(() => releaseMetadata(fixture(version, 'next')))
   }
   const mixed = fixture('0.1.16-rc.1', 'next')
   mixed.peerDependencies['@deepseek-ai/dsh-agent'] = '^0.1.2-alpha.2'
-  assert.throws(() => releaseMetadata(mixed), /compatibility floor/)
+  assert.throws(() => releaseMetadata(mixed), /peer range must be \*/)
 })
 
 test('checked-in candidate has consistent dependency and release metadata', () => {

@@ -1,11 +1,43 @@
 /** Shared built-product scenarios for registry releases and explicitly identified source checkouts. */
-import { mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync, symlinkSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync, symlinkSync, unlinkSync, lstatSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hostVerification } from './harness-validation.mjs';
+import { policy } from './compatibility.mjs';
+
+// The installed plugin directory follows the published package name, which
+// differs between the upstream distribution and this fork.
+const PLUGIN_NAME = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name;
 
 const json = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n');
 
+/**
+ * Windows refuses `symlinkSync(..., 'dir')` without Developer Mode or an elevated
+ * token. A directory junction links the same paths with no privilege, so the
+ * fixture profile can point at the prepared runtime on every supported host.
+ * A leftover link is removed first, so repeated runs over the same report
+ * directory do not fail with EEXIST.
+ */
+export const linkDirectory = (target, path) => {
+    try {
+        if (!lstatSync(path).isSymbolicLink()) throw Error('Refusing to replace non-link fixture path: ' + path);
+        unlinkSync(path);
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir');
+};
+
 export const runtimeScenarios = ['lifecycle', 'fallback', 'failure', 'captain-idle-wakeup', 'progressive-entry', 'web-approval', 'protocol-compatibility', 'stability'];
+
+/** The direct fixture link cannot prove that a user's plugin install is accepted. */
+export async function runPluginInstallation({ version, pluginVersion, artifact, runtime, report, command, environment, support = policy }) {
+    if (!hostVerification(version, support).pluginManagerInstall) return [];
+    const home = join(report, 'plugin-install-home');
+    const install = await command([process.execPath, join(runtime, 'node_modules/@deepseek-ai/dsh/lib/bin.js'), 'plugin', '--profile', 'web', 'add', '--save-exact', resolve(artifact)], runtime, environment({ DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1' }), 'plugin-manager-install', 120000);
+    const installedPath = join(home, 'profiles/web/node_modules', PLUGIN_NAME, 'package.json');
+    const installed = existsSync(installedPath) ? JSON.parse(readFileSync(installedPath, 'utf8')) : undefined;
+    const assertions = { exit0: install.code === 0 && !install.timedOut, exactPluginVersion: installed?.version === pluginVersion };
+    return [{ scenario: 'plugin-manager-install', passed: Object.values(assertions).every(Boolean), assertions }];
+}
 
 /** Run the same fixture and persisted-state assertions against an already prepared runtime. */
 export async function runRuntimeScenarios({ report, runtime, command, environment, selectedScenarios = runtimeScenarios, linkWorkspacePackages = false }) {
@@ -14,10 +46,10 @@ for (const scenario of selectedScenarios) {
     const home = join(report, scenario, 'home'), profile = join(home, 'profiles', 'headless'), workspace = join(report, scenario, 'workspace');
     mkdirSync(profile, { recursive: true });
     mkdirSync(workspace, { recursive: true });
-    mkdirSync(join(profile, 'node_modules/@chenxu233'), { recursive: true });
-    if (linkWorkspacePackages) symlinkSync(join(runtime, 'node_modules/@deepseek-ai'), join(profile, 'node_modules/@deepseek-ai'), 'dir');
-    symlinkSync(join(runtime, 'node_modules/@chenxu233/dsh-agent-teams'), join(profile, 'node_modules/@chenxu233/dsh-agent-teams'), 'dir');
-    json(join(profile, 'package.json'), { name: 'runtime-test-profile', version: '0.0.0', private: true, type: 'module', dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless', '@chenxu233/dsh-agent-teams'], patchReload: 'startup' } } });
+    mkdirSync(join(profile, 'node_modules/@nanmicoder'), { recursive: true });
+    if (linkWorkspacePackages) linkDirectory(join(runtime, 'node_modules/@deepseek-ai'), join(profile, 'node_modules/@deepseek-ai'));
+    linkDirectory(join(runtime, 'node_modules/@nanmicoder/dsh-agent-teams'), join(profile, 'node_modules/@nanmicoder/dsh-agent-teams'));
+    json(join(profile, 'package.json'), { name: 'runtime-test-profile', version: '0.0.0', private: true, type: 'module', dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless', '@nanmicoder/dsh-agent-teams'], patchReload: 'startup' } } });
     copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures/harness-runtime-llm.mjs'), join(profile, 'fixture-llm.mjs'));
     writeFileSync(join(profile, 'cordis.patch.yml'), `- id: llm-deepseek\n  disabled: true\n- id: llm-pi-ai\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: runtime-lab\n    model: fixture-model\n- insert:\n    - id: runtime-lab-fixture\n      name: './fixture-llm.mjs'\n`);
     if (scenario === 'lifecycle')

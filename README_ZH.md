@@ -30,7 +30,7 @@
 
 ## 版本更新
 
-[v0.2.1-rc.1](./release-notes/v0.2.1-rc.1.md) 是一次验证 tag 驱动发布流水线的预发布版，功能上与 [v0.2.0](./release-notes/v0.2.0.md) 一致，发布到 npm `next` 而非 `latest`。正式线仍为 [v0.2.0](./release-notes/v0.2.0.md)：成员页接管成员会话（换模型、队列、停止、命令菜单，归档后只读），成员回合结束后保持常驻，包名改为本分支自有身份并把宿主声明收敛为单一门槛 `0.2.1-rc.2`。正式版使用 npm `latest` 渠道，推荐宿主为 Harness `0.2.1-rc.4`（最低兼容 `0.2.1-rc.2`）。精确范围见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
+[v0.2.1-rc.1](./release-notes/v0.2.1-rc.1.md) 是一次验证 tag 驱动发布流水线的预发布版，功能上与 [v0.2.0](./release-notes/v0.2.0.md) 一致，发布到 npm `next` 而非 `latest`。正式线仍为 [v0.2.0](./release-notes/v0.2.0.md)：成员页接管成员会话（换模型、队列、停止、命令菜单，归档后只读），成员回合结束后保持常驻，包名改为本分支自有身份。插件只声明最低宿主（`engines.dsh: >=0.2.1-rc.2`），不再逐个列出已测宿主，Harness 发新版本不必再发插件；CI 测试矩阵仅作参考。正式版使用 npm `latest` 渠道，推荐宿主为 Harness `0.2.1-rc.4`。精确范围见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
 
 ## 为什么需要 AgentTeams？
 
@@ -48,7 +48,7 @@
 
 ## 安装与版本选择
 
-**推荐组合：DeepSeek Harness `0.2.1-rc.4` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md)。`0.2.1-rc.2` 及之后的宿主都被接受；宿主仍为 RC 版本。**
+**推荐组合：DeepSeek Harness `0.2.1-rc.4` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md)。插件只声明一个下限 `>=0.2.1-rc.2`；此后发布的宿主（含预发布）都能直接安装，无需版本豁免；宿主仍为 RC。**
 
 | 使用场景 | DeepSeek Harness | AgentTeams 插件 |
 | --- | --- | --- |
@@ -56,9 +56,11 @@
 | 同样验证过（同一套用例结果一致） | `0.2.1-rc.3`, `0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
 | 更新的正式版 / RC / 预发布 | `>=0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
 
+上表只是 CI 测试矩阵，不是白名单。宿主在读取 peer 之前先看 `engines.dsh` 这一个下限，所以更新（含预发布）的宿主可以直接安装。
+
 ### 桌面端
 
-在应用侧栏打开「插件 → 添加插件」，输入 npm 包名和版本：
+在应用侧栏打开「插件 → 添加插件」，可以直接通过 GitHub 地址安装。在插件输入框中粘贴下面的仓库地址，无需追加版本号、tag 或 commit：
 
 ```text
 @chenxu233/dsh-agent-teams
@@ -75,7 +77,7 @@ npm install --global @deepseek-ai/dsh@0.2.1-rc.4
 dsh --version
 ```
 
-已有该版本可跳过。Alpha 仅供主动测试：手动指定表中的 Alpha 版本，并按[维护指南](./docs/maintenance-workflow.md)锁定整组宿主依赖。
+此命令安装宿主的 npm `latest`；升级后请用 `dsh --version` 对照兼容清单。Alpha 仅供主动测试：手动指定表中的 Alpha 版本，并按[维护指南](./docs/maintenance-workflow.md)锁定整组宿主依赖。
 
 ### CLI / Web：2. 安装 AgentTeams 插件
 
@@ -87,11 +89,17 @@ dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams
 
 CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后，停止并重新启动该 profile 的 Harness 进程，再刷新浏览器。** 安装插件不会自动升级宿主；Harness 的 `latest` 与插件的 `latest` 是两个独立渠道。
 
-从 Git 安装时，使用固定到包含已验证 `lib/` 构建产物的提交的 Git 包规格，不要填 npm 网页链接。仓库随代码分发服务端、客户端和类型产物，安装时不需要执行 `prepare` 或批准构建脚本。源码维护者每次修改源码后，都需运行 `pnpm build` 并更新已提交的产物。已经发布的 npm 产物保持不变。
+也可以从 GitHub 默认分支安装或更新，无需追加 tag 或 commit：
+
+```sh
+dsh plugin --profile web add github:NanmiCoder/dsh-agent-teams
+```
+
+更新时把命令里的版本号换成新版本再运行，然后重启对应 profile；已有安装只重复裸包名时，包管理器可能保留旧的精确版本。不带版本号或使用 `@latest` 时，新版发布后的 24 小时内会装到上一个版本。镜像源尚未同步新发布时，可在 npm 命令后追加 `--registry=https://registry.npmjs.org`。GitHub 默认分支的代码可能先于 npm `latest` 发布；默认分支包含已验证的 `lib/` 构建产物。仓库随代码分发服务端、客户端和类型产物，安装时不需要执行 `prepare` 或批准构建脚本。源码维护者每次修改源码后，都需运行 `pnpm build` 并更新已提交的产物。已经发布的 npm 产物保持不变。
 
 手动克隆源码的用户，拉取代码后需重新运行 `pnpm install --frozen-lockfile` 和 `pnpm build`，再重启对应的 Harness；只更新 Git 不会更新本地构建产物。详见[维护指南](./docs/maintenance-workflow.md)。
 
-> 旧 `0.1.0-*` / `0.1.1-*` 或其他未列出的宿主，请先保留已工作的组合，参考[旧版本与诊断指引](./docs/maintenance-workflow.md)。
+> 低于 `0.1.2-alpha.2` 的旧 `0.1.0-*` / `0.1.1-*` 宿主，请先保留已工作的组合，参考[旧版本与诊断指引](./docs/maintenance-workflow.md)。
 
 完整[兼容清单](./compatibility.json)、[源码安装与 Alpha 验证](./docs/maintenance-workflow.md)、[已验证范围与平台限制](./docs/maintenance-2026-09-06/release/README.md)。
 

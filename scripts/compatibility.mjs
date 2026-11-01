@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const policy = JSON.parse(readFileSync(new URL('../compatibility.json', import.meta.url), 'utf8'))
@@ -26,94 +26,111 @@ export const serverRuntimePeers = [
   '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-tools',
 ]
 
-// Host versions are prereleases of one line; the host itself evaluates peer
-// ranges with semver's includePrerelease, so a floor admits every later RC and
-// every later stable release.
-const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$/
-const PRE_RANK = { alpha: 0, beta: 1, rc: 2 }
+const isDshPackage = name => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')
 
-function parseVersion(value) {
-  if (typeof value !== 'string' || value.trim() !== value) return undefined
-  const match = VERSION.exec(value)
-  if (!match) return undefined
-  return {
-    major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]),
-    pre: match[4] === undefined ? undefined : { rank: PRE_RANK[match[4]], n: Number(match[5]) },
+/** semver precedence for the x.y.z[-alpha|beta|rc.N] versions DSH publishes; undefined for anything else. */
+export function compareHostVersions(left, right) {
+  const parse = version => {
+    const match = typeof version === 'string' && /^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$/.exec(version)
+    return match && { core: match.slice(1, 4).map(Number), tag: match[4], number: Number(match[5]) }
   }
-}
-
-function compareVersions(left, right) {
-  for (const key of ['major', 'minor', 'patch']) {
-    if (left[key] !== right[key]) return left[key] < right[key] ? -1 : 1
-  }
-  // A release outranks any prerelease of the same numeric tuple.
-  if (left.pre === undefined && right.pre === undefined) return 0
-  if (left.pre === undefined) return 1
-  if (right.pre === undefined) return -1
-  if (left.pre.rank !== right.pre.rank) return left.pre.rank < right.pre.rank ? -1 : 1
-  if (left.pre.n !== right.pre.n) return left.pre.n < right.pre.n ? -1 : 1
-  return 0
+  const a = parse(left), b = parse(right)
+  if (!a || !b) return undefined
+  for (let index = 0; index < 3; index++) if (a.core[index] !== b.core[index]) return Math.sign(a.core[index] - b.core[index])
+  if (a.tag === b.tag) return a.tag ? Math.sign(a.number - b.number) : 0
+  if (!a.tag || !b.tag) return a.tag ? -1 : 1
+  return a.tag < b.tag ? -1 : 1
 }
 
 /**
- * Whether one host version is at or above a floor version.
- * @param version - candidate host version.
- * @param floor - minimum compatible host version.
+ * Oldest declared host, source candidates included. Every later host may install the plugin, including
+ * hosts released after this package. Removing the oldest tested host therefore raises the requirement.
  */
-export function atLeast(version, floor) {
-  const candidate = parseVersion(version)
-  const minimum = parseVersion(floor)
-  if (candidate === undefined || minimum === undefined) return false
-  return compareVersions(candidate, minimum) >= 0
-}
-
-/** The peer range every DSH package must declare: one floor, no enumeration. */
-export function peerRangeOf(input = policy) {
-  return `>=${input.minimumHost}`
+export function minimumHost(input = policy) {
+  return declaredHostVersions(input).sort(compareHostVersions)[0]
 }
 
 /**
- * Validate the compatibility policy itself.
- * @param input - parsed compatibility.json.
- * @returns the tested host matrix (CI download targets).
+ * The published install requirement, written to `engines.dsh`. The official installer reads that field
+ * before peers (since 0.2.1-alpha.4) and evaluates it with includePrerelease, so later RC/alpha hosts pass.
+ * supportedHosts is the tested CI matrix, not an allowlist: enumerating it blocked every new host release.
  */
+export function hostRequirement(input = policy) {
+  return `>=${minimumHost(input)}`
+}
+
+/**
+ * Every DSH peer is `*`. Older installers that read peers (0.1.7-rc.1 to 0.2.1-alpha.3) use includePrerelease,
+ * but npm checks peers without it: `>=0.1.2-alpha.2` rejects 0.2.1-rc.3 there, while npm accepts `*` explicitly.
+ * Host packages are still listed so loaders resolve them from the host installation.
+ */
+export const HOST_PEER_RANGE = '*'
+
 export function validatePolicy(input) {
   if (input.schemaVersion !== 1 || input.previewTag !== 'next') throw new Error('Unsupported compatibility policy')
-  if (parseVersion(input.minimumHost) === undefined) throw new Error('minimumHost must be one exact semantic version')
   const hosts = input.supportedHosts
   if (!Array.isArray(hosts) || hosts.length === 0) throw new Error('supportedHosts must list exact tested host targets')
   const versions = new Set()
   for (const host of hosts) {
-    if (parseVersion(host.version) === undefined || versions.has(host.version)
+    if (typeof host.version !== 'string' || !/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(host.version)
+        || host.version.trim() !== host.version || versions.has(host.version)
         || !['recommended', 'preview', 'legacy'].includes(host.track)) {
       throw new Error('Host targets must be unique exact versions with an explicit track')
     }
     versions.add(host.version)
+    if (host.platforms !== undefined && (!Array.isArray(host.platforms)
+        || !host.platforms.includes('ubuntu-latest')
+        || new Set(host.platforms).size !== host.platforms.length
+        || host.platforms.some(platform => !['ubuntu-latest', 'windows-latest'].includes(platform)))) {
+      throw new Error('Host platforms must include Ubuntu and only unique supported CI platforms')
+    }
+    if (host.legacyDirectInstallReason !== undefined && (typeof host.legacyDirectInstallReason !== 'string'
+        || !host.legacyDirectInstallReason.trim())) {
+      throw new Error('Legacy direct-install coverage requires an explicit reason')
+    }
   }
   const recommended = hosts.filter(host => host.track === 'recommended')
   if (recommended.length !== 1 || recommended[0].version !== input.recommendedHost) throw new Error('Exactly one recommended host is required')
   if (/-(alpha|beta)\./.test(input.recommendedHost)) throw new Error('Alpha/beta hosts cannot be the ordinary-user recommendation')
-  if (!versions.has(input.minimumHost)) throw new Error('minimumHost must be one of the tested host targets')
-  for (const version of versions) {
-    if (!atLeast(version, input.minimumHost)) throw new Error(`Tested host ${version} is below the minimum compatible host ${input.minimumHost}`)
+  const candidates = input.sourceCandidates ?? []
+  if (!Array.isArray(candidates)) throw new Error('sourceCandidates must be an array')
+  for (const candidate of candidates) {
+    if (typeof candidate.version !== 'string' || candidate.version.trim() !== candidate.version
+        || !/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(candidate.version)
+        || versions.has(candidate.version)
+        || candidate.repository !== 'https://github.com/deepseek-ai/deepseek-harness'
+        || typeof candidate.commit !== 'string' || candidate.commit.length !== 40 || !/^[a-f0-9]{40}$/.test(candidate.commit)
+        || typeof candidate.evidence !== 'string' || !candidate.evidence.startsWith('docs/')) {
+      throw new Error('Source candidates require a unique exact version, official repository, commit and evidence')
+    }
+    versions.add(candidate.version)
   }
+  // Only published targets enter the npm download/CI matrix.
   return hosts.map(host => host.version)
 }
 
-/** Every host version this build claims to run on: the tested matrix. */
 export function declaredHostVersions(input = policy) {
-  return validatePolicy(input)
+  return [...validatePolicy(input), ...(input.sourceCandidates ?? []).map(candidate => candidate.version)]
 }
 
-/**
- * Validate package.json against the policy.
- * @param pkg - parsed package.json.
- * @param input - compatibility policy.
- * @param workspace - parsed pnpm-workspace.yaml.
- * @returns the tested host matrix.
- */
+/** Explicit maintenance operation: derive engines.dsh and DSH peers from the oldest declared host. */
+export function generateHostPeers(pkg, input = policy, workspace = workspacePolicy) {
+  const generated = structuredClone(pkg)
+  // A deleted import declaration is a different defect; do not hide it during synchronization.
+  for (const name of requiredHostPeers) {
+    if (typeof generated.peerDependencies?.[name] !== 'string') throw new Error(`Missing required host peer declaration: ${name}`)
+  }
+  for (const name of Object.keys(generated.peerDependencies)) {
+    if (isDshPackage(name)) generated.peerDependencies[name] = HOST_PEER_RANGE
+  }
+  generated.engines = { ...generated.engines, dsh: hostRequirement(input) }
+  validatePackageCompatibility(generated, input, workspace)
+  return generated
+}
+
 export function validatePackageCompatibility(pkg, input = policy, workspace = workspacePolicy) {
   const versions = validatePolicy(input)
+  const requirement = hostRequirement(input)
   for (const name of requiredHostPeers) {
     if (typeof pkg.peerDependencies?.[name] !== 'string' || pkg.peerDependencies[name].trim() === '') {
       throw new Error(`Missing required host peer declaration: ${name}`)
@@ -140,10 +157,13 @@ export function validatePackageCompatibility(pkg, input = policy, workspace = wo
       if (version !== baseline) throw new Error(`${name} override must match the development host ${baseline}`)
     }
   }
-  const floor = peerRangeOf(input)
-  for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) {
-      if (range.trim() !== floor) throw new Error(`${name} peer range must be the compatibility floor ${floor}`)
+  // An upper bound or version list here rejects every host released after the plugin.
+  if (pkg.engines?.dsh !== requirement) {
+    throw new Error(`engines.dsh must be ${requirement}; an upper bound or version list rejects future hosts`)
+  }
+  for (const [name, declared] of Object.entries(pkg.peerDependencies ?? {})) {
+    if (isDshPackage(name) && declared !== HOST_PEER_RANGE) {
+      throw new Error(`${name} peer range must be ${HOST_PEER_RANGE}; ranges reject prerelease hosts under npm or future hosts`)
     }
   }
   return versions
@@ -151,8 +171,18 @@ export function validatePackageCompatibility(pkg, input = policy, workspace = wo
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  if (process.argv.length === 3 && process.argv[2] === '--write-peers') {
+    const generated = generateHostPeers(pkg)
+    if (JSON.stringify(generated) !== JSON.stringify(pkg)) {
+      // Keep the manifest ASCII-only, as checked in (the author name is \u-escaped).
+      const text = JSON.stringify(generated, null, 2).replace(/[\u0080-\uffff]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+      writeFileSync(new URL('../package.json', import.meta.url), text + '\n')
+    }
+    console.log(`Generated engines.dsh ${hostRequirement()} and DSH peers ${HOST_PEER_RANGE} from compatibility.json; tested targets unchanged.`)
+    process.exit(0)
+  }
   const hosts = validatePackageCompatibility(pkg)
   if (process.argv[2] === '--github-output') console.log(`hosts=${JSON.stringify(hosts)}`)
-  else if (process.argv.length === 2) console.log(`Compatibility floor: ${peerRangeOf()}; tested: ${hosts.join(', ')}`)
-  else throw new Error('Usage: node scripts/compatibility.mjs [--github-output]')
+  else if (process.argv.length === 2) console.log(`Compatibility targets: ${hosts.join(', ')}`)
+  else throw new Error('Usage: node scripts/compatibility.mjs [--github-output | --write-peers]')
 }

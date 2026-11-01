@@ -30,7 +30,7 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
 
 ## Releases
 
-[v0.2.1-rc.1](./release-notes/v0.2.1-rc.1.md) is a prerelease that verifies the tag-driven publishing pipeline end to end; it carries no functional changes over [v0.2.0](./release-notes/v0.2.0.md) and ships on npm `next`, not `latest`. The stable line remains the [v0.2.0](./release-notes/v0.2.0.md) release (member page owns the member conversation, settled members stay resident, fork identity with a single Harness floor of `0.2.1-rc.2`). The stable channel uses npm `latest`; the recommended Harness host is `0.2.1-rc.4`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
+[v0.2.1-rc.1](./release-notes/v0.2.1-rc.1.md) is a prerelease that verifies the tag-driven publishing pipeline end to end; it carries no functional changes over [v0.2.0](./release-notes/v0.2.0.md) and ships on npm `next`, not `latest`. The stable line remains the [v0.2.0](./release-notes/v0.2.0.md) release (member page owns the member conversation, settled members stay resident, fork identity with a single Harness floor of `0.2.1-rc.2`). The plugin declares only that minimum host (`engines.dsh: >=0.2.1-rc.2`) instead of listing tested versions, so a newer Harness release installs without a plugin release; the CI-tested matrix stays advisory. The stable channel uses npm `latest`; the recommended Harness host is `0.2.1-rc.4`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
 
 ## Why AgentTeams?
 
@@ -49,7 +49,7 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Recommended pair: DeepSeek Harness `0.2.1-rc.4` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md). Every host at or above `0.2.1-rc.2` is accepted; the host remains an RC.**
+**Recommended pair: DeepSeek Harness `0.2.1-rc.4` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md). The plugin declares one floor, `>=0.2.1-rc.2`; every later host installs without a version exemption, and the host remains an RC.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
@@ -57,9 +57,11 @@ The conversation card and activity panel use Harness's official locale service. 
 | Also tested (identical suite results) | `0.2.1-rc.3`, `0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
 | Any newer release, RC or prerelease | `>=0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
 
+Only the rows above are the CI-tested matrix; it is a tested list, not an allowlist. `engines.dsh` carries the single floor and the host reads it before peers, so newer hosts (including prereleases) install directly.
+
 ### Desktop app
 
-In the app sidebar, open **Plugins → Add plugin** and enter the npm package spec:
+In the app sidebar, open **Plugins → Add plugin**. You can install directly from GitHub by pasting this repository URL into the plugin input, without a version, tag, or commit suffix:
 
 ```text
 @chenxu233/dsh-agent-teams
@@ -76,7 +78,7 @@ npm install --global @deepseek-ai/dsh@0.2.1-rc.4
 dsh --version
 ```
 
-Skip this if you already run this version. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/maintenance-workflow.md).
+The command selects the host's npm `latest`; check `dsh --version` against the support matrix after upgrading. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/maintenance-workflow.md).
 
 ### CLI / Web: 2. Install the AgentTeams plugin
 
@@ -88,11 +90,17 @@ dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams
 
 For a CLI-managed installation, replace `web` with your active CLI profile. **Stop and restart that profile's Harness process, then refresh the browser.** Installing the plugin does not upgrade Harness; the host and plugin have independent `latest` channels.
 
-For Git installation, use a Git package spec pinned to a commit containing the verified server, client, and type build outputs in `lib/`, rather than an npm webpage URL. The repository distributes these outputs so installation does not need a `prepare` hook or build-script approval. Source maintainers must run `pnpm build` and update the committed outputs whenever the source changes. Existing npm releases remain immutable.
+Alternatively, install or update from the latest GitHub default branch without a tag or commit suffix:
+
+```sh
+dsh plugin --profile web add github:NanmiCoder/dsh-agent-teams
+```
+
+To update, run the command again with the new version, then restart the profile; a bare package name can retain an already installed exact version. For 24 hours after a release, a bare package name or `@latest` installs the previous version. If a registry mirror has not synced the release, append `--registry=https://registry.npmjs.org` to the npm command. GitHub default-branch code may be newer than npm `latest`. The default branch includes the verified server, client, and type build outputs in `lib/`. The repository distributes these outputs so installation does not need a `prepare` hook or build-script approval. Source maintainers must run `pnpm build` and update the committed outputs whenever the source changes. Existing npm releases remain immutable.
 
 For a manually cloned checkout, run `pnpm install --frozen-lockfile` and `pnpm build` after pulling, then restart the corresponding Harness process. Updating Git alone does not update local build output. See the [maintenance guide](./docs/maintenance-workflow.md).
 
-> For older `0.1.0-*` / `0.1.1-*` or unlisted hosts, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
+> For `0.1.0-*` / `0.1.1-*` hosts older than `0.1.2-alpha.2`, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
 
 See the full [compatibility matrix](./compatibility.json), [source installation and Alpha testing guide](./docs/maintenance-workflow.md), and [verification coverage and platform limits](./docs/maintenance-2026-09-06/release/README.md).
 

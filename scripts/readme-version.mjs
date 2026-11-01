@@ -38,10 +38,12 @@ export function findStaleVersionReferences(markdown, version, known) {
   return stale
 }
 
-export function findPinnedInstallVersions(markdown, packageName) {
-  const name = packageName ?? JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name
-  const pattern = new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}@([0-9A-Za-z.-]+)`, 'g')
-  return [...markdown.matchAll(pattern)].map(match => match[1])
+// The scope differs per distribution (upstream publishes @nanmicoder, this fork
+// publishes @chenxu233), so match whichever scope is used.
+const PINNED_INSTALL = /@[a-z0-9-]+\/dsh-agent-teams@([0-9A-Za-z.-]+)/g
+
+export function findPinnedInstallVersions(markdown) {
+  return [...markdown.matchAll(PINNED_INSTALL)].map(match => match[1])
 }
 
 export function checkReadmeVersions({ version, known, files }) {
@@ -50,9 +52,11 @@ export function checkReadmeVersions({ version, known, files }) {
     for (const stale of findStaleVersionReferences(markdown, version, known)) {
       problems.push(`${name} still names ${stale.version} outside a release-notes link`)
     }
-    for (const pinned of findPinnedInstallVersions(markdown)) {
-      if (pinned !== version) {
-        problems.push(`${name} pins @chenxu233/dsh-agent-teams@${pinned} but the package is ${version}`)
+    for (const match of markdown.matchAll(PINNED_INSTALL)) {
+      const pinned = match[1]
+      // The stable channel requests an update without pinning a numeric version.
+      if (pinned !== version && pinned !== 'latest') {
+        problems.push(`${name} pins ${match[0]} but the package is ${version}`)
       }
     }
   }
