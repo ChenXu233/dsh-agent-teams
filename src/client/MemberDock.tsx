@@ -1,59 +1,25 @@
 /**
- * Member controls docked above the host composer (plan 10, revised).
+ * Member controls docked in the host composer (slot-only, 2026-11-01).
  *
- * The host composer keeps the conversation: it is the native input, keyboard
- * and styling, and the host already supports steering continuable subagents.
- * What it cannot do for a member is switch the model, show the member queue or
- * stop the member — those are member-specific and go into the host's additive
- * `conversation.input.dock` slot, the same slot the host uses for its queue and
- * todo docks.
+ * The composer stays the host's: input, keyboard, styling and steering already
+ * work for continuable subagents. This dock adds only what the host has no
+ * surface for on a member page — the queued-message badge and the stop control.
  *
- * The member's command catalog is registered into the host's `commandUi`
- * registry instead of being reimplemented: the host renders the `/` menu, we
- * only say which entries exist for this member session and what they run.
+ * The model seat and the slash-command launcher are separate slot
+ * contributions (`member-model-seat.tsx`, `member-command-menu.tsx`) because
+ * the host's own model seat renders `null` for addressed subagent sessions and
+ * its command menu executes nothing there. Nothing here patches the host.
  * @module dsh-agent-teams/client/MemberDock
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { ModelDirectoryResolver } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import type { MenuCommand } from './member-menu.ts'
-import {
-  modelLabel,
-  modelOptionKey,
-  modelOptions,
-  queuedLabel,
-  stopEnabled,
-  withCurrentOption,
-  type MemberControlView,
-  type MemberModelGroup,
-} from './member-controls.ts'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { queuedLabel, stopEnabled, type MemberControlView } from './member-controls.ts'
 
 const STATE_URL = '/plugins/dsh-agent-teams/member/state'
-const COMMANDS_URL = '/plugins/dsh-agent-teams/member/commands'
-const MODEL_URL = '/plugins/dsh-agent-teams/member/model'
 const STOP_URL = '/plugins/dsh-agent-teams/member/stop'
-const RELAY_URL = '/plugins/dsh-agent-teams/member/relay'
 
-/** Structural view of the host's client command registry. */
-export interface CommandUiHandle {
-  register(definition: {
-    readonly name: string
-    readonly label: () => string
-    readonly available: (session: { readonly sessionId: string }) => boolean
-    readonly ui: { readonly kind: 'action'; readonly run: (session: { readonly sessionId: string }) => void }
-  }): () => void
-}
-
+/** Structural view of one member, as `/member/state` reports it. */
 export interface MemberDockProps {
   readonly sessionId: string
-  readonly modelDirectories?: ModelDirectoryResolver
-  readonly commandUi?: { readonly current?: CommandUiHandle }
-  /**
-   * The host's own model seat already renders for this session (plan 10, task
-   * 9). The dock then keeps only what the host has no seat for: the member
-   * queue badge and the stop control.
-   */
-  readonly modelSeatActive?: boolean
 }
 
 const row: CSSProperties = {
@@ -81,32 +47,21 @@ const pill: CSSProperties = {
   cursor: 'pointer',
   whiteSpace: 'nowrap',
 }
-const control: CSSProperties = { ...pill }
 const hint: CSSProperties = { opacity: 0.7 }
 
-/** Relay one line to this member; commands execute on the member's session. */
-async function relay(sessionId: string, line: string): Promise<void> {
-  await fetch(RELAY_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ sessionId, line, mode: 'queue' }),
-  })
-}
-
 /**
- * One compact control row for a member conversation, plus the member's command
- * catalog in the host's `/` menu. Renders nothing for a non-member session.
+ * Queue badge and stop control for one member conversation.
+ *
+ * Renders nothing until `/member/state` proves this session is a member, so an
+ * ordinary conversation never sees it.
  */
-export function MemberDock({ sessionId, modelDirectories, commandUi, modelSeatActive = false }: MemberDockProps) {
+export function MemberDock({ sessionId }: MemberDockProps) {
   const [view, setView] = useState<MemberControlView | undefined>(undefined)
-  const [groups, setGroups] = useState<readonly MemberModelGroup[]>([])
-  const [commands, setCommands] = useState<readonly MenuCommand[]>([])
   const [busy, setBusy] = useState(false)
-  const [open, setOpen] = useState(false)
   const [feedback, setFeedback] = useState<string | undefined>(undefined)
   const alive = useRef(true)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<void> => {
     try {
       const response = await fetch(`${STATE_URL}?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' })
       if (!response.ok) {
@@ -128,85 +83,7 @@ export function MemberDock({ sessionId, modelDirectories, commandUi, modelSeatAc
     return () => { alive.current = false; window.removeEventListener('focus', onFocus) }
   }, [refresh])
 
-  // Command catalog for this member: fetched once, registered into the host's
-  // menu so `/` is rendered by the host itself.
-  useEffect(() => {
-    // The native catalog patch owns the menu; contributions would duplicate it.
-    if (commandUi?.current === undefined) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const response = await fetch(`${COMMANDS_URL}?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' })
-        if (!response.ok) return
-        const payload = await response.json() as { commands?: MenuCommand[] }
-        if (!cancelled && Array.isArray(payload.commands)) setCommands(payload.commands)
-      } catch {
-        // No catalog: the host menu keeps whatever it already has.
-      }
-    })()
-    return () => { cancelled = true }
-  }, [sessionId])
-
-  useEffect(() => {
-    const registry = commandUi?.current
-    if (registry === undefined || commands.length === 0) return
-    const disposers = commands.map((command) => registry.register({
-      name: command.name,
-      label: () => `/${command.name}`,
-      available: (session) => session.sessionId === sessionId,
-      ui: { kind: 'action', run: () => { void relay(sessionId, `/${command.name}`) } },
-    }))
-    return () => { for (const dispose of disposers) dispose() }
-  }, [commands, commandUi, sessionId])
-
-  const directory = useMemo(() => {
-    try {
-      return modelDirectories?.directoryFor(sessionId as never)
-    } catch {
-      return undefined
-    }
-  }, [modelDirectories, sessionId])
-
-  useEffect(() => {
-    if (directory === undefined) return
-    let cancelled = false
-    void directory.load().then((state) => {
-      if (!cancelled) setGroups(state.groups)
-    }).catch(() => undefined)
-    return () => { cancelled = true }
-  }, [directory])
-
-  const options = useMemo(() => withCurrentOption(modelOptions(groups), view ?? {}), [groups, view])
-  const currentKey = view?.model === null || view?.model === undefined
-    ? ''
-    : modelOptionKey(view.model.provider, view.model.model)
-  const queued = queuedLabel(view?.queued)
-  const canStop = view !== undefined && stopEnabled(view)
-  const archived = view?.archived === true
-
-  const switchModel = useCallback((key: string) => {
-    const option = options.find((candidate) => candidate.key === key)
-    if (option === undefined || busy) return
-    setBusy(true)
-    void (async () => {
-      try {
-        const response = await fetch(MODEL_URL, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sessionId, provider: option.provider, model: option.model }),
-        })
-        const payload = await response.json().catch(() => undefined) as { error?: string } | undefined
-        setFeedback(response.ok ? `已切换到 ${option.label}` : payload?.error ?? `切换失败（HTTP ${response.status}）`)
-        if (response.ok) await refresh()
-      } catch (error: unknown) {
-        setFeedback(`切换失败：${String(error)}`)
-      } finally {
-        setBusy(false)
-      }
-    })()
-  }, [busy, options, refresh, sessionId])
-
-  const stop = useCallback(() => {
+  const stop = useCallback((): void => {
     if (busy) return
     setBusy(true)
     void (async () => {
@@ -228,46 +105,16 @@ export function MemberDock({ sessionId, modelDirectories, commandUi, modelSeatAc
   }, [busy, refresh, sessionId])
 
   if (view === undefined) return null
-  // Rendered inside the host composer's own standardControls cluster, next to
-  // where the host draws its model seat, so it uses the same pill language.
-  const modelItems: MenuEntry[] = options.map((option) => ({ id: option.key, label: option.label }))
-  // Prefer the catalog's display name; a cold member may have no directory, so
-  // fall back to the durable model id plus its pinned effort.
-  const shownLabel = options.find((option) => option.key === currentKey)?.short
-    ?? (view.model === null || view.model === undefined
-      ? modelLabel(view)
-      : `${view.model.model}${view.reasoningEffort === undefined ? '' : ` · ${view.reasoningEffort}`}`)
+  const queued = queuedLabel(view.queued)
+  const canStop = stopEnabled(view)
+  const archived = view.archived === true
+
   return (
     <div style={row} data-agent-teams-member-dock={sessionId}>
       {archived
         ? <span style={hint}>已归档 · 只读</span>
         : (
           <>
-            {modelSeatActive ? null : <Menu
-              open={open}
-              portal
-              align="end"
-              compact
-              items={modelItems}
-              selectedId={currentKey}
-              onSelect={(id: string) => { setOpen(false); switchModel(id) }}
-              onClose={() => setOpen(false)}
-              anchor={(
-                <button
-                  type="button"
-                  style={pill}
-                  disabled={busy || options.length === 0}
-                  aria-haspopup="menu"
-                  aria-expanded={open}
-                  aria-label={modelLabel(view)}
-                  title={modelLabel(view)}
-                  onClick={() => setOpen((value) => !value)}
-                >
-                  {shownLabel}
-                  <span aria-hidden>▾</span>
-                </button>
-              )}
-            />}
             {queued === undefined ? null : <span style={hint}>{queued}</span>}
             {canStop
               ? <button type="button" style={pill} disabled={busy} onClick={stop} title="停止该成员">停止</button>

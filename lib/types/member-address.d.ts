@@ -83,6 +83,7 @@ export declare function resolveMemberAddress(ctx: Context, address: MemberAddres
 export declare function findTeamByMemberSession(ctx: Context, memberSessionId: string, stateDir: string): Promise<{
     team: TeamState;
     member: TeamMember;
+    archived?: true;
 } | undefined>;
 /** One member session discovered across the workspaces this host knows. */
 export interface MemberSessionEntry {

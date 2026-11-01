@@ -88,21 +88,19 @@
   - **非法条目 = 插件加载失败**：条目里没有可用的命令名（空串、`/`、`/ Compact`、`!!!`、数字、全角斜杠或零宽字符等）时，挂载阶段直接抛错，错误首句点明「AgentTeams 插件加载失败 … memberCommandDeny 非法」——工具与路由**都不会注册**，这不是命令执行错误。例外：绕过挂载直接调用 `registerAgentTeamsTools` 的调用方只收到一条 warn（记录差异，同名用例 M3 覆盖）。
   - 合法的超长条目**不截断也不报错**（已核对无实际影响）。
 
-**成员详情页 composer（人手动下发）**
+**成员详情页的控件（人手动下发，纯槽位贡献）**
 
-成员自己的会话里，插件接管了宿主 composer（`conversation.composer` 座位，优先级 -20），渲染与宿主一致的输入框：`/` 开头的行按命令执行，其他内容作为消息投递给该成员。命令目录来自该成员**自己**的会话（`GET /member/commands?sessionId=`），不是队长的目录。
+宿主 composer 不变：输入、键盘、steering 仍是宿主自己的，且对 continuable 子代理可用。插件只在宿主的 `conversation.input.right` 列表槽位里补三个控件，**不修改任何宿主服务**（2026-11-01 起不再有 `directoryFor` / `fetchCommands` / `CommandUiRuntime` 补丁）：
 
 | 控件 | 行为 |
 |---|---|
-| `/` 菜单 | 方向键选择、Enter 执行、Esc 关闭；只列该成员自己的已注册命令 |
-| 发送 | 成员**空闲**时排队为下一回合（`mode=queue`）；成员**运行中**时插入当前回合（`mode=steer`）。模式由 `/member/state` 的实时状态决定 |
-| 模型选择 | 列出宿主模型目录；切换走 `POST /member/model`，只作用于该成员**当前存活**的选择，冷成员与 halted 团队直接拒绝（不为了换模型唤醒成员） |
-| 停止 | 成员运行中时出现，`POST /member/stop` 经其队长打断当前回合 |
-| 排队徽标 | `/member/state` 报的待处理条数；驻留占位不算排队 |
+| 模型药丸 | 目录来自插件自己的 `GET /member/models`（宿主 `ctx.llm` 的 provider 列表），切换走 `POST /member/model`；只作用于该成员**当前存活**的选择，冷成员与 halted 团队直接拒绝（不为了换模型唤醒成员） |
+| `/` 启动器 | 菜单来自该成员**自己**的 `GET /member/commands?sessionId=`；选中后 `POST /member/relay`（`mode` 由 `/member/state` 决定：空闲排队、运行中 steer）。宿主自己的 `/` 菜单在成员页只列出命令、提交不执行，因此不用它 |
+| 停止 / 排队徽标 | `POST /member/stop`、`/member/state` 的待处理条数；驻留占位不算排队 |
 
-- **归档成员只读**：团队 halted 后座位仍在，但输入、模型选择、停止全部禁用，历史可查看。
-- **不唤醒冷成员**：`/member/commands` 只读进程内已存在的 Agent，冷成员返回 409 且菜单为空；只有发消息才会投递（并按其所在团队规则唤醒）。
-- **归属判定在插件侧**：客户端读不到团队状态，先向 `GET /member/membership?sessionId=` 探一次并缓存；未命中（非成员会话）永不接管，交还宿主 composer。
+- **归档成员只读**：团队 halted 后控件仍在，但模型与命令入口按归档态禁用，历史可查看。
+- **不唤醒冷成员**：`/member/commands` 与 `/member/relay` 只读进程内已存在的 Agent，冷成员返回 409；只有发消息才会投递（并按其所在团队规则唤醒）。
+- **归属判定在插件侧**：客户端读不到团队状态，先向 `GET /member/membership?sessionId=` 探一次并缓存；未命中（非成员会话）三个控件都不渲染，交还宿主自带界面。
 - **有意的不对称**：人手路径**不套** `memberCommandDeny`——动手的就是操作者本人，即授权方；只有队长通过工具下发时才受 deny 约束。
 - 附件暂不支持：宿主的附件准入拒绝 subagent 会话，图片目前无法进入成员会话；需要把文件路径写进消息正文。
 

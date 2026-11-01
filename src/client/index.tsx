@@ -32,10 +32,10 @@ import {
   AGENT_TEAMS_LOCALE_NAMESPACE, en, zh, type AgentTeamsLocaleKey,
 } from './locales.ts'
 import { openAgentTeamMember, type AgentTeamsLayoutNavigator, type AgentTeamsWorkspaceNavigator } from './session-navigation.ts'
-import { MemberDock, type CommandUiHandle } from './MemberDock.tsx'
+import { MemberDock } from './MemberDock.tsx'
 import { refreshMemberRoster } from './member-membership.ts'
-import { applyMemberSelection, fetchMemberSelection, installMemberSeat } from './member-seat.ts'
-import { installMemberCommands } from './member-commands.ts'
+import { MemberModelSeat } from './member-model-seat.tsx'
+import { MemberCommandMenu } from './member-command-menu.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -109,48 +109,35 @@ export function apply(ctx: ClientContext): void {
   // membership roster is prefetched so the seat can answer synchronously, and
   // every patched host surface is restored when this plugin unloads.
   void refreshMemberRoster()
-  // The seat is an optional enhancement: a host that changed these internals
-  // must degrade to the dock's own control, never break the plugin boot.
-  let memberSeat = { active: false } as ReturnType<typeof installMemberSeat>
-  try {
-    memberSeat = installMemberSeat(ctx, {
-      readSelection: fetchMemberSelection,
-      writeSelection: applyMemberSelection,
-    })
-  } catch (error: unknown) {
-    console.warn(`agent-teams: member model seat unavailable: ${error instanceof Error ? error.stack : String(error)}`)
-  }
-  if (!memberSeat.active) {
-    console.warn(`agent-teams: member model seat inactive (${memberSeat.reason ?? 'unknown reason'}); the dock keeps its own model control`)
-  }
-  // Plan 10 (task 9): the host's own `/` menu, driven by the member catalog.
-  // Without this patch the menu has to be faked with commandUi contributions,
-  // and the host renders those as completions: picking a row duplicates the
-  // typed token (/compact/compact) instead of executing it.
-  let memberCommands = { active: false } as ReturnType<typeof installMemberCommands>
-  try {
-    memberCommands = installMemberCommands(ctx)
-  } catch (error: unknown) {
-    console.warn(`agent-teams: member command catalog unavailable: ${String(error)}`)
-  }
-  const commandUi: { current?: CommandUiHandle } = {}
-  ctx.inject(['commandUi'], (scope) => {
-    const registry = scope.get('commandUi') as CommandUiHandle | undefined
-    if (registry !== undefined) commandUi.current = registry
-  })
+  // Slot-only member surface (2026-11-01). The host composer keeps the
+  // conversation; three additive contributions from 'conversation.input.right'
+  // supply exactly what the host leaves empty on an addressed subagent page:
+  //
+  // - the model seat (the host's own entry renders null for a member session),
+  // - a slash-command launcher (the host's '/' menu lists a member's commands
+  //   but executes nothing there),
+  // - the queue badge and stop control.
+  //
+  // Nothing here patches a host service: every value comes from this plugin's
+  // own routes, and 'conversation.input.model' is left to its single owner.
+  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+    name: 'conversation.input.right',
+    id: 'agent-teams-member-model-seat',
+    order: 10,
+    inject: (sessionId: string) => ({ sessionId }),
+  }, MemberModelSeat))
+  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+    name: 'conversation.input.right',
+    id: 'agent-teams-member-commands',
+    order: 11,
+    inject: (sessionId: string) => ({ sessionId }),
+  }, MemberCommandMenu))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'agent-teams-member',
     order: 20,
     locale: AGENT_TEAMS_LOCALE_NAMESPACE,
-    inject: (sessionId: string) => ({
-      sessionId,
-      modelDirectories: ctx.modelDirectories,
-      // The native catalog owns the menu when it is installed; the commandUi
-      // contributions are the fallback for a host we could not patch.
-      commandUi: memberCommands.active ? undefined : commandUi,
-      modelSeatActive: memberSeat.active,
-    }),
+    inject: (sessionId: string) => ({ sessionId }),
   }, MemberDock))
   ctx.inject(['sidebarRight', 'sidebarRightTabs'], (native) => {
     const t = native.locale.bind(AGENT_TEAMS_LOCALE_NAMESPACE)
