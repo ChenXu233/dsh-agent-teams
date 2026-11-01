@@ -12,7 +12,7 @@
 - npm 校验 peer 时不带 includePrerelease：peer 写 `>=0.2.1-rc.2` 会让 npm 在同一依赖树中拒绝 0.2.1-rc.3 这类已测宿主（ERESOLVE），而 npm 对 `*` 直接放行。pnpm 与官方安装器不受影响。
 - 0.1.27 及以前把矩阵逐个写进 peer，导致宿主每发一个新 RC（rc.4、rc.5 成为 npm `latest` 时）插件就整体拒装，只能再发插件补救。
 
-不要恢复这种写法，`verify:compatibility` 会拒绝 peer 范围、`engines.dsh` 列表和上限。宿主若确实破坏了插件依赖的接口，应在运行时给出明确诊断（见 `harness-compat` 能力检测），而不是在安装时预先拒绝所有未测版本。
+不要恢复这种写法：`pnpm verify` 的 compatibility 阶段会拒绝 peer 范围、`engines.dsh` 列表和上限。宿主若确实破坏了插件依赖的接口，应在运行时给出明确诊断（见 `harness-compat` 能力检测），而不是在安装时预先拒绝所有未测版本。
 
 升级前运行 `pnpm check:upstream`：只读查询官方宿主 `latest` / `next` 和插件 `latest`，报告已发布插件声明拒装的渠道（`blockedChannels`，用户已无法安装）、低于下限的渠道（`belowFloorChannels`）以及发布包下限高于源码下限的情况（`declarationGap`）。发现差距时退出 1；网络失败、缺失渠道或无法识别的声明不会被当作成功。它不自动修改声明、不安装、不发布，也不作为离线回归的联网前置条件。当前是按需命令，没有定时任务；其他渠道或未挂 tag 的版本仍须显式核对。
 

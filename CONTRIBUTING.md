@@ -43,7 +43,7 @@ Explain the concrete trigger, the resulting behavior, the exact tested host vers
 
 Maintainers review the current head and retain useful contributions. A small independent PR may be merged directly after its checks; overlapping compatibility PRs may be integrated together. When code is adapted or squashed, retain author attribution and link the original PR. A conflict or an outdated base is a request to rebase or narrow scope, not a reason to discard a sound contribution.
 
-Do not overwrite vendored skill files while adapting project policy. Keep upstream files and their provenance lock intact; put local applicability in [skills/README.md](skills/README.md). Run `pnpm sync:skill` and `pnpm verify:skill` after changes to project-owned skills.
+Do not overwrite vendored skill files while adapting project policy. Keep upstream files and their provenance lock intact; put local applicability in [skills/README.md](skills/README.md). Run `pnpm sync:skill` after changes to project-owned skills; `pnpm verify` checks the mirror as part of the chain.
 
 ## Track issues and releases accurately
 

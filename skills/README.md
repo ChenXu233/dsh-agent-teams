@@ -1,6 +1,6 @@
 # 项目维护 Skills
 
-本目录是 canonical source。`.dsh/skills/` 是完整文件镜像，`.agents/skills/` 通过相对符号链接供 Codex 发现。修改本项目自己的 skill 后运行 `pnpm sync:skill`；`pnpm verify:skill` 检查每个 skill 的正文、references、scripts、examples 和其他随附文件。
+本目录是 canonical source。`.dsh/skills/` 是完整文件镜像，`.agents/skills/` 通过相对符号链接供 Codex 发现。修改本项目自己的 skill 后运行 `pnpm sync:skill`；`pnpm verify` 会检查每个 skill 的正文、references、scripts、examples 和其他随附文件。
 
 ## 来源与更新
 
@@ -20,7 +20,7 @@
 # 默认只预览；将 SHA 换为本次已经审阅的完整 commit。
 pnpm update:skills /tmp/dsh-plugin-upgrade-skill-20260924 eeff1cdcffe4013e094d94c8d9b8651a65fbc79a
 pnpm update:skills /tmp/dsh-plugin-upgrade-skill-20260924 eeff1cdcffe4013e094d94c8d9b8651a65fbc79a --apply
-pnpm verify:skill
+node scripts/sync-skill.mjs --check
 pnpm test:skills-updater
 ```
 

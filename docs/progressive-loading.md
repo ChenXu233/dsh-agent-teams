@@ -32,7 +32,7 @@ Web 的 Approve & Run 提交批准并启动调度后，通过 `captain.steer` �
 
 ## 验证标准与证据
 
-`pnpm verify:capabilities` 使用真实 scoped registry、prompt assembly 和 WorkerThreadCodeRuntime，覆盖固定规则、14 工具直接业务调用、重复创建保留原团队、用户 restriction、取消/失败、可信成员身份、暂停、冷恢复、HMR、PTC/both SDK 和实际结果裁剪。
+`pnpm verify` 的 capabilities 用例使用真实 scoped registry、prompt assembly 和 WorkerThreadCodeRuntime，覆盖固定规则、14 工具直接业务调用、重复创建保留原团队、用户 restriction、取消/失败、可信成员身份、暂停、冷恢复、HMR、PTC/both SDK 和实际结果裁剪。
 
 `scripts/harness-runtime-verify.mjs` 将打包产物安装到隔离 profile，通过发布版 CLI 和真实 Loader 启动。只有外部 LLM 是确定性 fixture；工具、会话、持久化、调度和成员创建均走生产实现。
 

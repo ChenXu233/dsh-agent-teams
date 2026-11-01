@@ -621,7 +621,7 @@ node scripts/verify.mjs
 && node scripts/quality-gates-tdd.mjs
 && node scripts/lifecycle-verify.mjs
 && node scripts/stress-verify.mjs
-&& pnpm verify:skill
+&& node scripts/sync-skill.mjs --check
 ```
 
 `scripts/verify.mjs` 可补充少量纯函数断言，但质量门禁主清单必须集中在 `quality-gates-tdd.mjs`，方便对照本文。
