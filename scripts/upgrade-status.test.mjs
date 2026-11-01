@@ -2,66 +2,58 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { inspectUpgradeStatus, fetchUpgradeStatus } from './upgrade-status.mjs'
-import { policy } from './compatibility.mjs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-const fixture = () => ({ hostTags: { latest: policy.recommendedHost, next: '0.2.1-rc.3' }, pluginManifest: structuredClone(pkg) })
+const fixture = () => ({ hostTags: { latest: '0.2.1-rc.4', next: '0.2.1-rc.4' }, pluginManifest: structuredClone(pkg) })
 
-test('a known supported and published combination has no declaration gap', () => {
+test('a published floor at the source floor has no declaration gap', () => {
   const result = inspectUpgradeStatus(fixture())
   assert.equal(result.needsAttention, false)
-  assert.deepEqual(result.unpublishedSupport, [])
+  assert.equal(result.declarationGap, null)
+  assert.deepEqual(result.belowFloorChannels, [])
 })
 
-test('a published exact allowlist that rejects the host channels is reported as blocking users', () => {
-  // The 0.1.27 shape: npm latest moved to 0.2.1-rc.5 and the plugin could not be installed.
+test('a host released after the plugin is accepted without a policy edit', () => {
   const input = fixture()
-  input.hostTags = { latest: '0.2.1-rc.5', next: '0.2.1-rc.5' }
-  delete input.pluginManifest.engines.dsh
-  for (const name of Object.keys(input.pluginManifest.peerDependencies)) {
-    if (name.startsWith('@deepseek-ai/dsh-')) input.pluginManifest.peerDependencies[name] = policy.supportedHosts.map(host => host.version).join(' || ')
-  }
+  input.hostTags = { latest: '0.2.1-rc.999', next: '0.2.1-rc.999' }
+  const result = inspectUpgradeStatus(input)
+  assert.equal(result.needsAttention, false, 'the floor is open-ended; newer hosts need no declaration change')
+  assert.deepEqual(result.blockedChannels, [])
+  assert.deepEqual(result.belowFloorChannels, [])
+})
+
+test('a channel older than the floor is reported as blocking users', () => {
+  const input = fixture()
+  input.hostTags = { latest: '0.2.0', next: '0.2.0' }
   const result = inspectUpgradeStatus(input)
   assert.equal(result.needsAttention, true)
-  assert.deepEqual(result.blockedChannels, [{ channel: 'latest', version: '0.2.1-rc.5' }, { channel: 'next', version: '0.2.1-rc.5' }])
-  assert.deepEqual(result.unpublishedSupport, [])
-  assert.deepEqual(result.unrecognizedDeclarations, [])
+  assert.deepEqual(result.belowFloorChannels, [{ channel: 'latest', version: '0.2.0' }, { channel: 'next', version: '0.2.0' }])
+  assert.deepEqual(result.blockedChannels, [{ channel: 'latest', version: '0.2.0' }, { channel: 'next', version: '0.2.0' }])
 })
 
-test('same plugin version does not hide support merged into source but absent on npm', () => {
-  // This fork's matrix is 0.2.1-rc.2 .. rc.4; a published floor of rc.4 hides the
-  // two older tested hosts while still accepting the published channels.
+test('a published floor above the source floor hides hosts users could otherwise use', () => {
   const input = fixture()
   input.hostTags = { latest: '0.2.1-rc.4', next: '0.2.1-rc.4' }
   input.pluginManifest.engines.dsh = '>=0.2.1-rc.4'
   const result = inspectUpgradeStatus(input)
-  assert.equal(result.pluginVersion, pkg.version)
   assert.equal(result.needsAttention, true)
   assert.deepEqual(result.blockedChannels, [])
-  assert.ok(result.unpublishedSupport.includes('0.2.1-rc.2'))
-  assert.ok(result.unpublishedSupport.includes('0.2.1-rc.3'))
-  assert.ok(!result.unpublishedSupport.includes('0.2.1-rc.4'))
-})
-
-test('a new upstream host is installable but still asks maintainers to run the matrix', () => {
-  const input = fixture(), before = structuredClone(policy)
-  input.hostTags.next = '0.2.1-rc.999'
-  const result = inspectUpgradeStatus(input)
-  assert.equal(result.needsAttention, true)
-  assert.deepEqual(result.blockedChannels, [])
-  assert.deepEqual(result.unverifiedChannels, [{ channel: 'next', version: '0.2.1-rc.999' }])
-  assert.deepEqual(policy, before)
+  assert.deepEqual(result.declarationGap, { sourceFloor: '0.2.1-rc.2', publishedFloor: '0.2.1-rc.4' })
 })
 
 test('engines precedence, missing declarations and unfamiliar ranges cannot report a false all-clear', () => {
-  for (const dsh of [null, '^0.2.1-rc.2', '>=0.2.1-rc.2 <0.3.0', '0.2.1-rc.2']) {
+  for (const dsh of [null, '^0.2.1-rc.2', '>=0.2.1-rc.2 <0.3.0']) {
     const input = fixture()
     input.pluginManifest.engines.dsh = dsh
     const result = inspectUpgradeStatus(input)
     assert.equal(result.needsAttention, true)
-    if (dsh !== '0.2.1-rc.2') assert.deepEqual(result.unrecognizedDeclarations, ['engines.dsh'])
-    else assert.ok(result.unpublishedSupport.includes('0.2.1-rc.3'))
+    assert.deepEqual(result.unrecognizedDeclarations, ['engines.dsh'])
+    assert.equal(result.declarationGap, null)
   }
+  // An exact engines.dsh only accepts that one host, so a newer channel is blocked.
+  const exact = fixture()
+  exact.pluginManifest.engines.dsh = '0.2.1-rc.2'
+  assert.equal(inspectUpgradeStatus(exact).needsAttention, true)
   // Without engines.dsh (hosts before 0.2.1-alpha.4 and older manifests) every DSH peer must be readable.
   const input = fixture()
   delete input.pluginManifest.engines.dsh
@@ -71,7 +63,7 @@ test('engines precedence, missing declarations and unfamiliar ranges cannot repo
 })
 
 test('registry errors, invalid JSON and wrong identities fail instead of becoming a green empty status', async () => {
-  for (const input of [ { ...fixture(), hostTags: {} }, { ...fixture(), hostTags: { latest: policy.recommendedHost } }, { ...fixture(), hostTags: { next: '0.2.1-rc.3' } }, { ...fixture(), pluginManifest: { name: 'other', version: pkg.version } } ]) {
+  for (const input of [ { ...fixture(), hostTags: {} }, { ...fixture(), hostTags: { latest: '0.2.1-rc.4' } }, { ...fixture(), hostTags: { next: '0.2.1-rc.4' } }, { ...fixture(), pluginManifest: { name: 'other', version: pkg.version } } ]) {
     assert.throws(() => inspectUpgradeStatus(input))
   }
   await assert.rejects(fetchUpgradeStatus(async () => ({ ok: false, status: 503 })), /HTTP 503/)

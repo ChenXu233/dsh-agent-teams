@@ -74,14 +74,15 @@ jobs:
           import { join } from 'node:path'
           import { policy, validatePackageCompatibility } from './scripts/compatibility.mjs'
           const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
-          const hosts = validatePackageCompatibility(pkg)
-          assert.deepEqual(hosts, JSON.parse(process.env.VERIFIED_HOSTS))
+          const [floor] = validatePackageCompatibility(pkg)
+          const verified = JSON.parse(process.env.VERIFIED_HOSTS)
+          assert.ok(Array.isArray(verified) && verified.length > 0, 'Verification exercised no host')
+          assert.ok(verified.includes(floor), `Verification did not exercise the declared floor ${floor}`)
           const artifact = readFileSync(join(process.env.RUNNER_TEMP, 'candidate/candidate.tgz'))
           assert.equal(createHash('sha256').update(artifact).digest('hex'), process.env.EXPECTED_SHA256)
           if (process.env.NPM_DIST_TAG === 'latest') {
-            assert.equal(pkg.devDependencies['@deepseek-ai/dsh'], policy.recommendedHost)
-            assert.ok(hosts.includes(policy.recommendedHost))
-            assert.ok(!/-(alpha|beta)\./.test(policy.recommendedHost))
+            // A stable release may use any host at or above the floor, just not an alpha/beta one.
+            assert.ok(!/-(alpha|beta)\./.test(pkg.devDependencies['@deepseek-ai/dsh']), 'latest must not be developed against an alpha/beta host')
           } else {
             assert.equal(process.env.NPM_DIST_TAG, policy.previewTag)
           }

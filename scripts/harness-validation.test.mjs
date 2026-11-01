@@ -3,72 +3,68 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { policy } from './compatibility.mjs'
+import { minimumHost } from './compatibility.mjs'
 import { hostVerification, runtimeTargets, requiredRuntimeScenarios, validateRuntimeReport, validateRuntimeReports } from './harness-validation.mjs'
 import { runPluginInstallation } from './harness-runtime-scenarios.mjs'
 
 const PLUGIN_NAME = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name
 const futureVersion = '0.2.1-rc.999' // Fictional regression input, never a support claim.
-const future = { ...policy, supportedHosts: [...policy.supportedHosts, { version: futureVersion, track: 'preview' }] }
+const hosts = [minimumHost(), futureVersion]
 const expected = { pluginVersion: '0.1.26', artifactSha256: 'a'.repeat(64) }
-function reportFor(target, install = true) {
+function reportFor(target) {
   return { passed: true, version: target.host, platform: target.os === 'windows-latest' ? 'win32' : 'linux', ...expected,
-    runs: [...requiredRuntimeScenarios, ...(install ? ['plugin-manager-install'] : [])].map(scenario => ({ scenario, passed: true })) }
+    runs: [...requiredRuntimeScenarios, 'plugin-manager-install'].map(scenario => ({ scenario, passed: true })) }
 }
 
-test('future targets automatically receive both platforms and a required install probe', () => {
-  assert.deepEqual(runtimeTargets(future).filter(t => t.host === futureVersion), [
+test('every requested host receives both platforms and a required install probe', () => {
+  assert.deepEqual(runtimeTargets([futureVersion]), [
     { host: futureVersion, os: 'ubuntu-latest' }, { host: futureVersion, os: 'windows-latest' },
   ])
-  assert.equal(hostVerification(futureVersion).pluginManagerInstall, true, 'Unlisted prequalification candidates must also exercise installation')
-  for (const target of runtimeTargets(future).filter(t => t.host === futureVersion)) {
-    assert.throws(() => validateRuntimeReport(reportFor(target, false), target, expected, future), /plugin-manager-install/)
-    assert.doesNotThrow(() => validateRuntimeReport(reportFor(target), target, expected, future))
+  // A host above the floor has no exemption: it must still exercise the plugin-manager install.
+  assert.equal(hostVerification(futureVersion).pluginManagerInstall, true)
+  for (const target of runtimeTargets(hosts)) {
+    const withoutInstall = { ...reportFor(target), runs: reportFor(target).runs.filter(run => run.scenario !== 'plugin-manager-install') }
+    assert.throws(() => validateRuntimeReport(withoutInstall, target, expected, hosts), /plugin-manager-install/)
+    assert.doesNotThrow(() => validateRuntimeReport(reportFor(target), target, expected, hosts))
   }
 })
 
-test('historical coverage remains explicit without exempting adjacent or unknown versions', () => {
-  for (const host of ['0.2.1-rc.2', '0.2.1-rc.3']) {
-    for (const os of ['ubuntu-latest', 'windows-latest']) assert.ok(runtimeTargets().some(target => target.host === host && target.os === os))
+test('the floor and any extra host both expand to the same platform plan', () => {
+  for (const host of [minimumHost(), futureVersion]) {
+    for (const os of ['ubuntu-latest', 'windows-latest']) assert.ok(runtimeTargets(hosts).some(target => target.host === host && target.os === os))
   }
-  // This fork's matrix has no historical-only host, so declare one to exercise the rule.
-  const historicalPolicy = { ...policy, supportedHosts: [...policy.supportedHosts, { version: '0.2.1-rc.1', track: 'legacy', platforms: ['ubuntu-latest'], legacyDirectInstallReason: 'Historical direct-fixture coverage only.' }] }
-  const legacy = { host: '0.2.1-rc.1', os: 'ubuntu-latest' }
-  assert.ok(hostVerification(legacy.host, historicalPolicy).legacyDirectInstallReason)
-  assert.doesNotThrow(() => validateRuntimeReport(reportFor(legacy, false), legacy, expected, historicalPolicy))
-  for (const host of ['0.2.1-rc.2', '0.2.1-rc.3', futureVersion, '0.3.0']) assert.equal(hostVerification(host).pluginManagerInstall, true)
+  assert.deepEqual(runtimeTargets(), runtimeTargets([minimumHost()]), 'the floor is the default matrix')
   for (const version of ['latest', '*', futureVersion + '\n']) assert.throws(() => hostVerification(version), /exact host/)
-  for (const properties of [{ platforms: [] }, { platforms: ['windows-latest'] }, { platforms: ['ubuntu-latest', 'macos-latest'] }, { legacyDirectInstallReason: '' }]) {
-    const invalid = { ...policy, supportedHosts: policy.supportedHosts.map((host, i) => i ? host : { ...host, ...properties }) }
-    assert.throws(() => runtimeTargets(invalid))
-  }
+  for (const invalid of [[], 'latest', [futureVersion + '\n']]) assert.throws(() => runtimeTargets(invalid))
 })
 
 test('missing scenarios, failed runs, wrong platform or a different candidate cannot pass', () => {
   const target = { host: futureVersion, os: 'windows-latest' }
   const valid = reportFor(target)
   for (const scenario of [...requiredRuntimeScenarios, 'plugin-manager-install']) {
-    assert.throws(() => validateRuntimeReport({ ...valid, runs: valid.runs.filter(run => run.scenario !== scenario) }, target, expected, future), new RegExp(scenario))
+    assert.throws(() => validateRuntimeReport({ ...valid, runs: valid.runs.filter(run => run.scenario !== scenario) }, target, expected, hosts), new RegExp(scenario))
   }
   for (const change of [{ passed: false }, { version: '0.2.1-rc.3' }, { platform: 'linux' }, { pluginVersion: 'old' }, { artifactSha256: 'b'.repeat(64) }, { runs: [...valid.runs, { scenario: 'extra', passed: false }] }]) {
-    assert.throws(() => validateRuntimeReport({ ...valid, ...change }, target, expected, future))
+    assert.throws(() => validateRuntimeReport({ ...valid, ...change }, target, expected, hosts))
   }
+  // A report for a host that was not requested is not part of this run's plan.
+  assert.throws(() => validateRuntimeReport(valid, { host: '0.2.0', os: 'windows-latest' }, expected, hosts), /not in the verification plan/)
 })
 
-test('collection consumes the same platform plan and refuses missing Windows evidence', t => {
+test('collection consumes the same host plan and refuses missing Windows evidence', t => {
   const root = mkdtempSync(join(tmpdir(), 'harness-evidence-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
-  for (const target of runtimeTargets(future)) {
+  for (const target of runtimeTargets(hosts)) {
     const directory = join(root, `harness-${target.os}-${target.host}`)
     mkdirSync(directory)
     writeFileSync(join(directory, 'result.json'), JSON.stringify(reportFor(target)))
   }
-  assert.equal(validateRuntimeReports(root, expected, future), runtimeTargets(future).length)
+  assert.equal(validateRuntimeReports(root, expected, hosts), runtimeTargets(hosts).length)
   rmSync(join(root, `harness-windows-latest-${futureVersion}`, 'result.json'))
-  assert.throws(() => validateRuntimeReports(root, expected, future), /ENOENT/)
+  assert.throws(() => validateRuntimeReports(root, expected, hosts), /ENOENT/)
 })
 
-test('real installation entry is invoked for an unknown candidate and preserves its failures', async t => {
+test('real installation entry is invoked for every host, including the floor and unknown candidates', async t => {
   const report = mkdtempSync(join(tmpdir(), 'harness-install-'))
   t.after(() => rmSync(report, { recursive: true, force: true }))
   let calls = 0
@@ -93,7 +89,8 @@ test('real installation entry is invoked for an unknown candidate and preserves 
   installedVersion = expected.pluginVersion; timedOut = true
   assert.equal((await runPluginInstallation(options))[0].passed, false)
   assert.equal(calls, 4)
-  const historicalPolicy = { ...policy, supportedHosts: [...policy.supportedHosts, { version: '0.2.1-rc.1', track: 'legacy', platforms: ['ubuntu-latest'], legacyDirectInstallReason: 'Historical direct-fixture coverage only.' }] }
-  assert.deepEqual(await runPluginInstallation({ ...options, version: '0.2.1-rc.1', support: historicalPolicy }), [])
-  assert.equal(calls, 4, 'Historical limitation must not silently change coverage')
+  // The floor host is not exempt either: it runs the same install probe.
+  timedOut = false
+  assert.equal((await runPluginInstallation({ ...options, version: minimumHost() }))[0].passed, true)
+  assert.equal(calls, 5)
 })

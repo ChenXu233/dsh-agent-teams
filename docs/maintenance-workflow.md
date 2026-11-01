@@ -2,11 +2,11 @@
 
 这套流程将社区 skills 用于真实仓库维护：记录问题和精确版本，审查贡献，实现与验证，再发布已经验收的同一份产物。先读 [skills/README.md](../skills/README.md)；上游 skill 的旧版本示例不覆盖本项目政策，已获用户授权的工作不重复确认。
 
-## 一份支持清单
+## 一个下限，没有清单
 
-[compatibility.json](../compatibility.json) 是宿主测试矩阵的唯一来源。`scripts/compatibility.mjs` 校验精确开发依赖、生成的安装下限和依赖覆盖策略，并通过 `--github-output` 输出 CI matrix。不要在另一个脚本里维护第二份版本数组。
+[compatibility.json](../compatibility.json) 只声明一件事：`minimumHost`。`scripts/compatibility.mjs` 校验开发基线（必须不低于下限）、`engines.dsh` 和依赖覆盖策略，`--github-output` 输出 `floor=<版本>`。不要在另一个脚本里维护第二份版本数组。
 
-**测试矩阵不是安装白名单。** 发布包只在 `engines.dsh` 声明一个下限 `>=<最旧的已测宿主或源码候选>`（当前 `>=0.2.1-rc.2`），不设上限、不枚举版本；全部 DSH peer 写 `*`，只用于列出由宿主提供的包名。原因：
+**不枚举宿主，也不设上限。** 发布包只在 `engines.dsh` 声明 `>=0.2.1-rc.2`，全部 DSH peer 写 `*`（只用于列出由宿主提供的包名）。原因：
 
 - 官方安装器从 0.2.1-alpha.4 起优先读 `engines.dsh`，0.1.7-rc.1 到 0.2.1-alpha.3 读 peer，两者都用 `semver.satisfies(..., { includePrerelease: true })`，下限之后发布的 RC/Alpha/正式版都能安装。
 - npm 校验 peer 时不带 includePrerelease：peer 写 `>=0.2.1-rc.2` 会让 npm 在同一依赖树中拒绝 0.2.1-rc.3 这类已测宿主（ERESOLVE），而 npm 对 `*` 直接放行。pnpm 与官方安装器不受影响。
@@ -14,26 +14,24 @@
 
 不要恢复这种写法，`verify:compatibility` 会拒绝 peer 范围、`engines.dsh` 列表和上限。宿主若确实破坏了插件依赖的接口，应在运行时给出明确诊断（见 `harness-compat` 能力检测），而不是在安装时预先拒绝所有未测版本。
 
-升级前运行 `pnpm check:upstream`：只读查询官方宿主 `latest` / `next` 和插件 `latest`，分别报告已发布插件声明拒装的宿主渠道（`blockedChannels`，用户已无法安装，最紧急）、尚未进入测试矩阵的宿主（`unverifiedChannels`，可安装但待验证）与发布包尚未覆盖的已测目标。发现差距时退出 1；网络失败、缺失渠道或无法识别的声明不会被当作成功。它不自动修改清单、安装、发布，也不作为离线回归的联网前置条件。当前是按需命令，没有自动定时任务；其他渠道或未挂 tag 的版本仍须显式核对。
+升级前运行 `pnpm check:upstream`：只读查询官方宿主 `latest` / `next` 和插件 `latest`，报告已发布插件声明拒装的渠道（`blockedChannels`，用户已无法安装）、低于下限的渠道（`belowFloorChannels`）以及发布包下限高于源码下限的情况（`declarationGap`）。发现差距时退出 1；网络失败、缺失渠道或无法识别的声明不会被当作成功。它不自动修改声明、不安装、不发布，也不作为离线回归的联网前置条件。当前是按需命令，没有定时任务；其他渠道或未挂 tag 的版本仍须显式核对。
 
-完成精确源码/产物审计后修改测试矩阵。新增较新的宿主只扩大 CI 矩阵，不改变发布的安装下限。下限仍取自矩阵：加入更旧的宿主或源码候选会降低它，删除当前最旧的宿主会抬高它（被删版本此后安装会被拒绝）。变化后运行 `pnpm sync:compatibility` 改写 `engines.dsh`，再运行 `pnpm verify:compatibility`。生成器不会添加宿主、改变开发基线或修复混装；后两者仍按明确迁移另行处理。
+新增宿主不需要改任何文件：高出下限的版本默认可以安装，CI 仍只跑下限。要实测某个新宿主，用 `verify.yml` 的手动触发输入 `host`（工作流内以 `DSH_TEST_HOSTS` 传递），不改声明也不改 YAML。只有确实要抬高支持边界时才改 `minimumHost`：同时改开发依赖与 overrides、运行 `pnpm sync:compatibility` 改写 `engines.dsh`、更新文档，再跑一次完整的 `pnpm verify`。生成器不会改变开发基线或修复混装，那两件事仍按明确迁移另行处理。
 
-`scripts/harness-validation.mjs` 从同一清单生成执行目标并校验对应报告。新目标默认 Ubuntu + Windows，并必须通过真实 `plugin-manager-install`；无需更新脚本或 YAML 中的版本数组。旧目标的 `platforms` 与 `legacyDirectInstallReason` 显式记录历史覆盖限制，不能作为新增目标时复制的默认模板。新增例外须说明实际原因并审查。尚未列入支持清单的候选也会运行安装探针；探针通过本身不授予支持资格。
+`scripts/harness-validation.mjs` 为本次请求的每个宿主生成 Ubuntu + Windows 目标并校验对应报告；每个目标都必须通过真实 `plugin-manager-install`，没有按宿主配置的豁免表。默认请求集合就是下限本身。
 
-发布前源码预适配记录在同一清单的 `sourceCandidates`，包含预计版本、官方源码完整 SHA 和证据路径。源码候选只要不低于下限即自动可安装；`--github-output` 仍只输出 `supportedHosts`，不会尝试下载尚未发布的 npm 版本。doctor 将候选标为 `source-preview`，保留完整依赖闭包检查，不将文件版本检查当作正式产物验收。发布后核对最终 SHA 与分包产物，完成 npm 和桌面验收，再把该目标从 `sourceCandidates` 移入 `supportedHosts` 并按需要更新开发基线。当前工作见 [0.2.1-rc.3 适配](./harness-0.2.1-rc.3/README.md)。
+发布前源码预适配仍记录在 `sourceCandidates`（预计版本、官方源码完整 SHA、证据路径），但它只用于 `harness-source-verify` 的源码验收，**不影响下限**：下限是声明的，不从候选推导。doctor 将候选标为 `source-preview`，保留完整依赖闭包检查，不把文件版本检查当作正式产物验收。
 
-`scripts/compatibility.mjs` 校验上述约束（全部 DSH peer 必须为 `*`、`engines.dsh` 必须恰好等于由矩阵最旧宿主推导出的下限、开发依赖与 overrides 必须等于推荐宿主、实测目标不得低于下限），`doctor` 用同一个下限判断安装是否可用。不要在另一个脚本里维护第二份版本数组。
+`scripts/compatibility.mjs` 校验上述约束（全部 DSH peer 必须为 `*`、`engines.dsh` 必须恰好等于 `>=minimumHost`、开发依赖与 overrides 必须一致且不低于下限），`doctor` 用同一个下限判断安装是否可用。schema v1 的 `supportedHosts` / `recommendedHost` 已移除：它们只要还在文件里就直接报错，避免出现“看起来仍在维护清单”的假象。
 
 | 当前宿主 | 定位 | 说明 |
 | --- | --- | --- |
-| `0.2.1-rc.4` | recommended | 开发基线；npm 已发布；RC 不是 GA |
-| `0.2.1-rc.3` | preview | 桌面端自带内核版本；同一套用例结果一致 |
-| `0.2.1-rc.2` | legacy | 最低兼容下限；同一套用例结果一致 |
-| 高于下限的任何新宿主 | floor | 无需改声明即可安装；未进入实测矩阵 |
+| `0.2.1-rc.2` | floor | 唯一声明的下限；CI 默认只跑它 |
+| 高于下限的任何宿主 | assumed compatible | 无需改声明即可安装；需要用 `host` 输入按需实测 |
 
-升级下限时同时调整清单、开发依赖与 overrides、`engines.dsh` 和文档，并跑完整矩阵；下限不会因为 semver 落在宽范围内就自动承认一个未验证的宿主。
+升级下限是一次显式决定，不会因为 semver 落在宽范围内自动发生。
 
-不在矩阵内但高于下限的宿主可以安装，doctor 将其标为 `untested`（不算失败）；“已测”与“允许安装”是两件事。
+高于下限的宿主可以安装，doctor 将其标为 `newer-than-floor`（不算失败）；“下限已验证”与“这一版宿主被实测过”是两件事。
 
 旧的 `0.1.x` 宿主已退出支持：保留其已工作的精确插件版本，或整体迁移到验收过的宿主/插件组合，不要只更新一端。历史组合（例如 `0.1.1-rc.2` 配插件 `0.1.10`）只在旧宿主上有效：
 
@@ -107,21 +105,21 @@ node scripts/harness-runtime-verify.mjs \
 | --- | --- | --- |
 | Ubuntu / Windows 静态检查 | Node 24、pnpm 10.33.0、frozen lockfile、typecheck、build、verify | 两个平台各自的任务日志 |
 | Ubuntu 打包 | `pnpm pack --out` 生成真实 tgz，只生成一份候选 | `agent-teams-candidate` artifact 与文件 SHA-256 |
-| 清单内全部真实宿主 | 从清单生成 matrix，每个精确宿主安装同一 tgz、检查闭包并运行产品入口 | 各宿主 `result.json`、闭包清单、fixture traces 与 stdout/stderr |
+| 真实宿主（默认下限，可加一个指定版本） | 由 `DSH_TEST_HOSTS` 生成 matrix，每个宿主安装同一 tgz、检查闭包并运行产品入口 | 各宿主 `result.json`、闭包清单、fixture traces 与 stdout/stderr |
 | 汇总门禁 | 所有任务成功；每份报告的宿主、插件版本、摘要与候选一致 | `Complete compatibility gate` |
 
 runner 为 `scripts/harness-runtime-verify.mjs --host-version <exact> --artifact <tgz> --report-dir <directory>`。模型适配器使用可重复 fixture，宿主 CLI、profile、插件、工具、子代理和会话是真实实现。当前运行十个场景：正常生命周期及冷恢复、fallback 及冷恢复、最终失败、队长 idle 唤醒、渐进入口、Web 审批、协议兼容和稳定性。测试同时检查队员执行、忙/闲消息、顺序和推理力度；改变这些能力时需增加会准确变红的场景。
 
 CI 仅上传报告、日志和 fixture 状态，不上传 runtime 的 node_modules、缓存、隔离 HOME 或整份 profile 存储。报告保留 14 天；发布维护者应将关键版本、摘要、结果和限制归档到发布记录，不能只留下会过期的临时目录。
 
-当前自动矩阵包括全部 11 个目标的 Ubuntu runtime，以及 rc.2 / rc.3 的 Windows runtime，共 13 个宿主/平台目标。真实模型 API、原生 Desktop 交互和用户数据迁移仍需要额外证据。UI 改动按 Ego Lite 规则验证真实宿主挂载和交互；有凭据的 provider 验证记录结果，不在仓库保存凭据。跳过、不适用和失败应分别记录，不能统一写“全部通过”。
+当前自动矩阵只有下限宿主 `0.2.1-rc.2` 的 Ubuntu 与 Windows 两个目标；需要覆盖新宿主时用 `workflow_dispatch` 的 `host` 输入显式指定。真实模型 API、原生 Desktop 交互和用户数据迁移仍需要额外证据。UI 改动按 Ego Lite 规则验证真实宿主挂载和交互；有凭据的 provider 验证记录结果，不在仓库保存凭据。跳过、不适用和失败应分别记录，不能统一写“全部通过”。
 
 ## 发布同一份验收产物
 
 [publish.yml](../.github/workflows/publish.yml) 必须等待整个 `verify` 可复用工作流成功。发布 job 下载该 run 的候选 tgz，重新核验 SHA-256、版本和完整宿主清单，再通过现有 npm OIDC trusted publishing 发布该文件；发布 job 不重新构建，也不以 `pack --dry-run` 作为门禁。
 
 - 新的预发布插件版本（alpha / beta / rc）首次发布进入项目的 `next` 渠道；已验收的 RC 产物可经维护者明确决定，用 `npm dist-tag add` 将同一不可变版本提升为 `latest`，不重新打包。
-- 无后缀插件首次发布及 RC 产物提升到 `latest` 时，开发基线必须是清单中的 recommended 宿主，全部支持目标都要通过。当前 recommended 为 `0.2.1-rc.2`，不得把只在 Alpha 通过的包提升为普通用户默认版本。
+- 无后缀插件首次发布及 RC 产物提升到 `latest` 时，开发基线必须不低于下限且不能是 alpha/beta 宿主（`publish.yml` 检查），下限宿主必须出现在本次验证里。不得把只在 Alpha 宿主上通过的包提升为普通用户默认版本。
 - 发版 tag 必须等于 `v<package.version>`，GitHub prerelease 标志与插件版本后缀一致；将 RC 提升到 npm `latest` 不会改变其 GitHub 预发布身份。稳定发布前查询 npm 当前 latest，拒绝倒退。
 - 准备 PR、版本或产物不表示已经发布。发布后读取 registry 的版本、integrity 与 dist-tag，并从 registry 再安装精确版本做消费者复验，记录与候选是否一致。
 - **已发布不等于桌面端 npm 入口已就绪。** 桌面端实际观察到 pnpm 11.28.5；默认 `minimumReleaseAge=1440` 分钟可能把 `@latest` 解析为旧版。精确版本、tgz 和 pnpm 10 的成功不能代替这个入口。CI 在 Ubuntu/Windows 用真实 pnpm 11 和临时 registry 验证“新发布回退旧版 / 满等待期选择新版 / registry 错误不能报成功”。

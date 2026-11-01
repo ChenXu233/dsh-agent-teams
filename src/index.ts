@@ -80,7 +80,7 @@ const WORKSPACE_KEYS = ['workspaceRegistry', 'workspace'] as const
 export const name = 'agent-teams'
 // Required services only — exactly what upstream v0.1.25 required.
 //
-// The optional per-member context budget (plan 02) reads `tokenMeter` and
+// The optional per-member context budget reads `tokenMeter` and
 // `compaction` STRUCTURALLY at the watchdog boundary (see
 // `optionalMemberTokenMeter` / `optionalMemberCompaction` in members.ts). Never
 // list them here: a real deployment may keep them out of this plugin's scope.

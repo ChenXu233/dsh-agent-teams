@@ -34,7 +34,7 @@ export interface MemberRuntimeConfig {
         model: string;
     };
     /**
-     * Plugin-level per-member context budget (plan 02); `undefined` when the
+     * Plugin-level per-member context budget; `undefined` when the
      * `memberContext` block is unconfigured, which installs nothing.
      */
     memberContext?: MemberContextConfig;

@@ -29,7 +29,7 @@ export interface ActivityMember {
     readonly currentTask: string;
     readonly unread: number;
     /**
-     * Latest context usage of this member (plan 02). Durable team.json sample
+     * Latest context usage of this member. Durable team.json sample
      * mirrored from the host projection; `null` is tolerated exactly like an
      * absent sample so a partial payload never renders as an empty badge shell.
      */

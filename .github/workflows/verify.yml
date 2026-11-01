@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      host:
+        description: Extra exact DSH host version to test (optional; the declared floor always runs)
+        required: false
+        type: string
   workflow_call:
     outputs:
       artifact_name:
@@ -14,7 +19,7 @@ on:
         description: SHA-256 of candidate.tgz
         value: ${{ jobs.build.outputs.artifact_sha256 }}
       hosts:
-        description: Exact host versions required by compatibility.json
+        description: Host versions exercised by this run (declared floor plus any requested version)
         value: ${{ jobs.build.outputs.hosts }}
 
 permissions:
@@ -42,8 +47,10 @@ jobs:
         run: |
           npm install --global pnpm@10.33.0
           pnpm install --frozen-lockfile
-      - name: Validate the single compatibility policy
+      - name: Resolve the compatibility floor and test matrix
         id: policy
+        env:
+          DSH_TEST_HOSTS: ${{ inputs.host }}
         run: |
           node scripts/compatibility.mjs --github-output >> "$GITHUB_OUTPUT"
           node scripts/harness-validation.mjs --github-output >> "$GITHUB_OUTPUT"

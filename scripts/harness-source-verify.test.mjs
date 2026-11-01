@@ -19,13 +19,13 @@ test('source invocation cannot masquerade as an npm host-version verification', 
 });
 
 test('candidate acceptance requires the policy SHA and a clean source checkout', () => {
-    const policy = { supportedHosts: [{ version: '0.1.7-rc.2' }], sourceCandidates: [candidate] };
+    const policy = { sourceCandidates: [candidate] };
     assert.equal(selectSourceCandidate(policy, undefined, commit, true), candidate);
     assert.equal(selectSourceCandidate(policy, '0.2.0', commit, true), candidate);
     assert.throws(() => selectSourceCandidate(policy, '0.1.7-rc.2', commit, true), /No matching/);
     assert.throws(() => selectSourceCandidate(policy, '0.2.0', 'b'.repeat(40), true), /does not match/);
     assert.throws(() => selectSourceCandidate(policy, '0.2.0', commit, false), /clean tracked/);
-    assert.throws(() => selectSourceCandidate({ supportedHosts: ['0.2.0'] }, '0.2.0', commit, true), /No matching/);
+    assert.throws(() => selectSourceCandidate({ sourceCandidates: [] }, '0.2.0', commit, true), /No matching/);
 });
 
 function sandbox(t) {

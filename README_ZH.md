@@ -30,7 +30,7 @@
 
 ## 版本更新
 
-[v0.2.1-rc.2](./release-notes/v0.2.1-rc.2.md) 发布到 npm `next` 而非 `latest`。这一版把成员页的模型座位与 `/` 命令启动器改成纯槽位贡献（宿主 composer 继续负责对话，插件不再修改任何宿主服务），并采用上游的单一宿主下限策略：只声明一个安装下限（`engines.dsh: >=0.2.1-rc.2`），不再逐个列出已测宿主，Harness 发新版本不必再发插件；CI 测试矩阵仅作参考。正式线仍为 [v0.2.0](./release-notes/v0.2.0.md)（npm `latest`），推荐宿主为 Harness `0.2.1-rc.4`。精确范围见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
+[v0.2.1-rc.2](./release-notes/v0.2.1-rc.2.md) 发布到 npm `next` 而非 `latest`。这一版把成员页的模型座位与 `/` 命令启动器改成纯槽位贡献（宿主 composer 继续负责对话，插件不再修改任何宿主服务），并彻底去掉宿主钉版：`compatibility.json` 只声明一个安装下限（`minimumHost: 0.2.1-rc.2`，发布为 `engines.dsh: >=0.2.1-rc.2`），不再维护已测列表，也不再有需要同步的「推荐宿主」，Harness 发新版本不必再发插件。正式线仍为 [v0.2.0](./release-notes/v0.2.0.md)（npm `latest`）。下限声明见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
 
 ## 为什么需要 AgentTeams？
 
@@ -48,15 +48,14 @@
 
 ## 安装与版本选择
 
-**推荐组合：DeepSeek Harness `0.2.1-rc.4` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md)。插件只声明一个下限 `>=0.2.1-rc.2`；此后发布的宿主（含预发布）都能直接安装，无需版本豁免；宿主仍为 RC。**
+**支持组合：DeepSeek Harness `>=0.2.1-rc.2` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md)。插件只声明一个下限，别的一概不列。**
 
 | 使用场景 | DeepSeek Harness | AgentTeams 插件 |
 | --- | --- | --- |
-| **推荐版本** | **`0.2.1-rc.4`** | **[v0.2.0](./release-notes/v0.2.0.md)** |
-| 同样验证过（同一套用例结果一致） | `0.2.1-rc.3`, `0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
-| 更新的正式版 / RC / 预发布 | `>=0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
+| 下限（最老的受支持宿主） | `0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
+| 此后任何 RC / 预发布 / 正式版 | `>=0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
 
-上表只是 CI 测试矩阵，不是白名单。宿主在读取 peer 之前先看 `engines.dsh` 这一个下限，所以更新（含预发布）的宿主可以直接安装。
+这里没有需要同步的已测列表。宿主在读取 peer 之前先看 `engines.dsh` 这一个下限，所以更新的宿主可以直接安装；CI 只跑下限，比下限新的宿主按兼容处理。低于下限的宿主的会被安装器拒绝。
 
 ### 桌面端
 
@@ -66,22 +65,22 @@
 @chenxu233/dsh-agent-teams
 ```
 
-不带版本号的包名会安装 npm `latest`；需要锁定版本时可追加 `@0.2.1-rc.2`（当前预发布）或上表中的正式版本。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
+不带版本号的包名会安装 npm `latest`；需要锁定插件版本时可追加 `@0.2.1-rc.2`（当前预发布）或上表中的正式版本。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
 
-桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。当前推荐目标是已发布的 `0.2.1-rc.4`，最低兼容 `0.2.1-rc.2`，仍属于 RC；此前仅依据源码做出的正式版宿主预测已退出支持声明。peer 声明是最低版本（`>=0.2.1-rc.2`），自带任何更高宿主的桌面端都不需要版本豁免即可安装；`0.2.1-rc.2`、`rc.3`、`rc.4` 上的用例结果完全一致。详见[迁移验收记录](./docs/harness-0.2.1-rc.2/README.md)。
+桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。判断标准只有一个：内嵌内核是否不低于下限 `0.2.1-rc.2`；等于或更高即可安装，不存在需要维护的分版本豁免。详见[迁移验收记录](./docs/harness-0.2.1-rc.2/README.md)。
 
 ### CLI / Web：1. 安装 DeepSeek Harness
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.2.1-rc.4
+npm install --global @deepseek-ai/dsh
 dsh --version
 ```
 
-此命令安装宿主的 npm `latest`；升级后请用 `dsh --version` 对照兼容清单。Alpha 仅供主动测试：手动指定表中的 Alpha 版本，并按[维护指南](./docs/maintenance-workflow.md)锁定整组宿主依赖。
+此命令安装宿主的 npm `latest`；升级后只要 `dsh --version` 不低于下限 `0.2.1-rc.2` 即可。Alpha 仅供主动测试：手动指定表中的 Alpha 版本，并按[维护指南](./docs/maintenance-workflow.md)锁定整组宿主依赖。
 
 ### CLI / Web：2. 安装 AgentTeams 插件
 
-从 npm 安装或升级插件（不带版本号时使用 npm `latest`；预览渠道 `next` 当前为 `0.2.1-rc.2`）：
+从 npm 安装或升级插件（不带版本号时使用 npm `latest`；预览渠道 `next` 承载最新的预发布版本）：
 
 ```sh
 dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams

@@ -1,7 +1,7 @@
-/** Read-only release visibility. Registry discovery never adds a host to the tested matrix. */
+/** Read-only release visibility. Registry discovery never changes the declared floor. */
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { compareHostVersions, policy, requiredHostPeers, validatePolicy } from './compatibility.mjs'
+import { compareHostVersions, minimumHost, policy, requiredHostPeers } from './compatibility.mjs'
 
 // The published identity differs per distribution (upstream @nanmicoder, this fork
 // @chenxu233); read it instead of hard-coding one scope.
@@ -22,32 +22,55 @@ function parseDeclaration(value) {
   return version => versions.includes(version)
 }
 
+/** The lowest host a declaration accepts; null when it accepts every host, undefined when unparseable. */
+function declarationFloor(value) {
+  if (value === '*') return null
+  const lower = /^>=(\S+)$/.exec(typeof value === 'string' ? value : '')
+  if (lower && exactVersion(lower[1])) return lower[1]
+  const versions = typeof value === 'string' ? value.split('||').map(v => v.trim()) : []
+  if (!versions.length || !versions.every(exactVersion)) return undefined
+  return [...versions].sort(compareHostVersions)[0]
+}
+
 export function inspectUpgradeStatus({ hostTags, pluginManifest }, support = policy) {
-  const supported = validatePolicy(support)
+  const floor = minimumHost(support)
   if (!hostTags || !exactVersion(hostTags.latest)
       || !exactVersion(hostTags.next)) throw new Error('Registry must return exact latest/next host identities')
   if (pluginManifest?.name !== PACKAGE_NAME || !exactVersion(pluginManifest.version)) throw new Error('Registry plugin identity mismatch')
   const channels = Object.fromEntries(['latest', 'next'].filter(tag => hostTags[tag]).map(tag => [tag, hostTags[tag]]))
-  const unverifiedChannels = Object.entries(channels).filter(([, version]) => !supported.includes(version)).map(([channel, version]) => ({ channel, version }))
+  // A host below the floor is genuinely unsupported; anything newer is assumed compatible.
+  const belowFloorChannels = Object.entries(channels)
+    .filter(([, version]) => compareHostVersions(version, floor) < 0)
+    .map(([channel, version]) => ({ channel, version }))
   const fields = Object.hasOwn(pluginManifest.engines ?? {}, 'dsh')
     ? { 'engines.dsh': pluginManifest.engines.dsh }
     : Object.fromEntries([
       ...requiredHostPeers.filter(name => name.startsWith('@deepseek-ai/dsh-')),
       ...Object.keys(pluginManifest.peerDependencies ?? {}).filter(name => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')),
     ].map(name => [name, pluginManifest.peerDependencies?.[name]]))
-  const declarations = Object.entries(fields).map(([name, value]) => ({ name, accepts: parseDeclaration(value) }))
+  const declarations = Object.entries(fields).map(([name, value]) => ({ name, accepts: parseDeclaration(value), floor: declarationFloor(value) }))
   const unrecognizedDeclarations = declarations.filter(({ accepts }) => !accepts).map(({ name }) => name)
   const accepted = version => declarations.every(({ accepts }) => accepts(version))
   // Users on these host channels cannot install the published plugin at all.
   const blockedChannels = unrecognizedDeclarations.length ? null
     : Object.entries(channels).filter(([, version]) => !accepted(version)).map(([channel, version]) => ({ channel, version }))
-  const unpublishedSupport = unrecognizedDeclarations.length ? null : supported.filter(version => !accepted(version))
+  // The published floor can be higher than the source floor; hosts in between are supported here but not installable from npm.
+  const publishedFloor = unrecognizedDeclarations.length ? undefined
+    : declarations.reduce((highest, { floor: value }) => {
+      if (value === null) return highest
+      if (value === undefined) return highest
+      return highest === undefined || compareHostVersions(value, highest) > 0 ? value : highest
+    }, undefined)
+  const declarationGap = publishedFloor !== undefined && compareHostVersions(publishedFloor, floor) > 0
+    ? { sourceFloor: floor, publishedFloor }
+    : null
   return {
-    needsAttention: unverifiedChannels.length > 0 || unrecognizedDeclarations.length > 0 || blockedChannels?.length > 0 || unpublishedSupport?.length > 0,
+    needsAttention: belowFloorChannels.length > 0 || unrecognizedDeclarations.length > 0 || blockedChannels?.length > 0 || declarationGap !== null,
     hostChannels: channels,
     pluginChannel: 'latest', pluginVersion: pluginManifest.version,
-    blockedChannels, unverifiedChannels, unpublishedSupport, unrecognizedDeclarations,
-    limits: ['Compares declarations only; does not prove runtime compatibility or publish anything.', 'Checks host latest/next and plugin latest; other tags and untagged releases require an explicit audit.'],
+    sourceFloor: floor,
+    blockedChannels, belowFloorChannels, declarationGap, unrecognizedDeclarations,
+    limits: ['Compares declarations only; does not prove runtime compatibility or publish anything.', 'Hosts above the floor are accepted without being listed; only the floor is exercised by CI.', 'Checks host latest/next and plugin latest; other tags and untagged releases require an explicit audit.'],
   }
 }
 

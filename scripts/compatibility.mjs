@@ -43,17 +43,27 @@ export function compareHostVersions(left, right) {
 }
 
 /**
- * Oldest declared host, source candidates included. Every later host may install the plugin, including
- * hosts released after this package. Removing the oldest tested host therefore raises the requirement.
+ * The declared floor. This is the whole compatibility policy: hosts at or above it install, and later
+ * hosts are assumed compatible instead of being enumerated. Removing a host from the support surface
+ * means raising this one version, never editing a list.
  */
 export function minimumHost(input = policy) {
-  return declaredHostVersions(input).sort(compareHostVersions)[0]
+  return input.minimumHost
+}
+
+function validateMinimumHost(input) {
+  const floor = input.minimumHost
+  if (typeof floor !== 'string' || floor.trim() !== floor
+      || !/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(floor)) {
+    throw new Error('minimumHost must be one exact DSH version')
+  }
+  return floor
 }
 
 /**
  * The published install requirement, written to `engines.dsh`. The official installer reads that field
  * before peers (since 0.2.1-alpha.4) and evaluates it with includePrerelease, so later RC/alpha hosts pass.
- * supportedHosts is the tested CI matrix, not an allowlist: enumerating it blocked every new host release.
+ * There is deliberately no upper bound and no version list: either one rejects hosts released after the plugin.
  */
 export function hostRequirement(input = policy) {
   return `>=${minimumHost(input)}`
@@ -67,33 +77,17 @@ export function hostRequirement(input = policy) {
 export const HOST_PEER_RANGE = '*'
 
 export function validatePolicy(input) {
-  if (input.schemaVersion !== 1 || input.previewTag !== 'next') throw new Error('Unsupported compatibility policy')
-  const hosts = input.supportedHosts
-  if (!Array.isArray(hosts) || hosts.length === 0) throw new Error('supportedHosts must list exact tested host targets')
-  const versions = new Set()
-  for (const host of hosts) {
-    if (typeof host.version !== 'string' || !/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(host.version)
-        || host.version.trim() !== host.version || versions.has(host.version)
-        || !['recommended', 'preview', 'legacy'].includes(host.track)) {
-      throw new Error('Host targets must be unique exact versions with an explicit track')
-    }
-    versions.add(host.version)
-    if (host.platforms !== undefined && (!Array.isArray(host.platforms)
-        || !host.platforms.includes('ubuntu-latest')
-        || new Set(host.platforms).size !== host.platforms.length
-        || host.platforms.some(platform => !['ubuntu-latest', 'windows-latest'].includes(platform)))) {
-      throw new Error('Host platforms must include Ubuntu and only unique supported CI platforms')
-    }
-    if (host.legacyDirectInstallReason !== undefined && (typeof host.legacyDirectInstallReason !== 'string'
-        || !host.legacyDirectInstallReason.trim())) {
-      throw new Error('Legacy direct-install coverage requires an explicit reason')
+  if (input.schemaVersion !== 2 || input.previewTag !== 'next') throw new Error('Unsupported compatibility policy')
+  const floor = validateMinimumHost(input)
+  // The retired fields were the pinning mechanism; keep them failing loudly instead of silently ignored.
+  for (const retired of ['supportedHosts', 'recommendedHost']) {
+    if (Object.hasOwn(input, retired)) {
+      throw new Error(`compatibility.json declares one floor (minimumHost); ${retired} is retired because it pinned hosts that DSH has already superseded`)
     }
   }
-  const recommended = hosts.filter(host => host.track === 'recommended')
-  if (recommended.length !== 1 || recommended[0].version !== input.recommendedHost) throw new Error('Exactly one recommended host is required')
-  if (/-(alpha|beta)\./.test(input.recommendedHost)) throw new Error('Alpha/beta hosts cannot be the ordinary-user recommendation')
   const candidates = input.sourceCandidates ?? []
   if (!Array.isArray(candidates)) throw new Error('sourceCandidates must be an array')
+  const versions = new Set([floor])
   for (const candidate of candidates) {
     if (typeof candidate.version !== 'string' || candidate.version.trim() !== candidate.version
         || !/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(candidate.version)
@@ -105,15 +99,14 @@ export function validatePolicy(input) {
     }
     versions.add(candidate.version)
   }
-  // Only published targets enter the npm download/CI matrix.
-  return hosts.map(host => host.version)
+  return [floor]
 }
 
 export function declaredHostVersions(input = policy) {
   return [...validatePolicy(input), ...(input.sourceCandidates ?? []).map(candidate => candidate.version)]
 }
 
-/** Explicit maintenance operation: derive engines.dsh and DSH peers from the oldest declared host. */
+/** Explicit maintenance operation: derive engines.dsh and DSH peers from the floor. */
 export function generateHostPeers(pkg, input = policy, workspace = workspacePolicy) {
   const generated = structuredClone(pkg)
   // A deleted import declaration is a different defect; do not hide it during synchronization.
@@ -129,15 +122,19 @@ export function generateHostPeers(pkg, input = policy, workspace = workspacePoli
 }
 
 export function validatePackageCompatibility(pkg, input = policy, workspace = workspacePolicy) {
-  const versions = validatePolicy(input)
+  const hosts = validatePolicy(input)
   const requirement = hostRequirement(input)
+  const floor = minimumHost(input)
   for (const name of requiredHostPeers) {
     if (typeof pkg.peerDependencies?.[name] !== 'string' || pkg.peerDependencies[name].trim() === '') {
       throw new Error(`Missing required host peer declaration: ${name}`)
     }
   }
   const baseline = pkg.devDependencies?.['@deepseek-ai/dsh']
-  if (!versions.includes(baseline)) throw new Error('Development host must be an exact supported target')
+  const order = compareHostVersions(baseline, floor)
+  if (order === undefined || order < 0) {
+    throw new Error(`Development host must be one exact version at or above the floor ${floor}`)
+  }
   for (const [name, version] of Object.entries(pkg.devDependencies ?? {})) {
     if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) {
       if (version !== baseline) throw new Error(`${name} must match the exact development host ${baseline}`)
@@ -166,7 +163,7 @@ export function validatePackageCompatibility(pkg, input = policy, workspace = wo
       throw new Error(`${name} peer range must be ${HOST_PEER_RANGE}; ranges reject prerelease hosts under npm or future hosts`)
     }
   }
-  return versions
+  return hosts
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -178,11 +175,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const text = JSON.stringify(generated, null, 2).replace(/[\u0080-\uffff]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
       writeFileSync(new URL('../package.json', import.meta.url), text + '\n')
     }
-    console.log(`Generated engines.dsh ${hostRequirement()} and DSH peers ${HOST_PEER_RANGE} from compatibility.json; tested targets unchanged.`)
+    console.log(`Generated engines.dsh ${hostRequirement()} and DSH peers ${HOST_PEER_RANGE} from the compatibility floor; no host list is maintained.`)
     process.exit(0)
   }
   const hosts = validatePackageCompatibility(pkg)
-  if (process.argv[2] === '--github-output') console.log(`hosts=${JSON.stringify(hosts)}`)
-  else if (process.argv.length === 2) console.log(`Compatibility targets: ${hosts.join(', ')}`)
+  if (process.argv[2] === '--github-output') console.log(`floor=${hosts[0]}`)
+  else if (process.argv.length === 2) console.log(`Compatibility floor: ${hosts[0]}`)
   else throw new Error('Usage: node scripts/compatibility.mjs [--github-output | --write-peers]')
 }

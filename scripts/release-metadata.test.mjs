@@ -9,25 +9,30 @@ const fixture = (version, tag) => ({
   version, publishConfig: { tag },
 })
 
-test('stable latest requires the recommended host and bounded compatibility', () => {
+test('stable latest accepts any host at or above the floor but never an alpha/beta one', () => {
   assert.deepEqual(releaseMetadata(fixture('0.1.16', 'latest')), {
     value: '0.1.16', dist_tag: 'latest', prerelease: false,
   })
-  // This fork narrowed the matrix to 0.2.1-rc.2 .. rc.4; rc.2 is the oldest
-  // SUPPORTED host that is not the recommended one, so the same rule applies.
-  const legacyOnly = fixture('0.1.16', 'latest')
-  for (const name of Object.keys(legacyOnly.devDependencies)) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) legacyOnly.devDependencies[name] = '0.2.1-rc.2'
-  }
+  // The floor itself is a valid baseline for a stable release; nothing pins one recommended host.
+  const atFloor = fixture('0.1.16', 'latest')
   const workspace = structuredClone(workspacePolicy)
-  for (const name of Object.keys(workspace.overrides)) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) workspace.overrides[name] = '0.2.1-rc.2'
+  for (const name of Object.keys(atFloor.devDependencies)) {
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) atFloor.devDependencies[name] = '0.2.1-rc.2'
   }
-  assert.throws(() => releaseMetadata(legacyOnly, policy, workspace), /recommended host/)
-  assert.throws(() => releaseMetadata(fixture('0.1.16', 'latest'), {
-    ...policy, recommendedHost: '0.1.2-alpha.2',
-    supportedHosts: [{ version: '0.1.2-alpha.2', track: 'recommended' }],
-  }), /Alpha\/beta/)
+  for (const name of Object.keys(workspace.overrides)) {
+    if (name.startsWith('@deepseek-ai/dsh')) workspace.overrides[name] = '0.2.1-rc.2'
+  }
+  assert.equal(releaseMetadata(atFloor, policy, workspace).dist_tag, 'latest')
+  // An alpha/beta host above the floor installs, but it must not back a stable release.
+  const prereleaseBaseline = fixture('0.1.16', 'latest')
+  for (const name of Object.keys(prereleaseBaseline.devDependencies)) {
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) prereleaseBaseline.devDependencies[name] = '0.2.2-alpha.2'
+  }
+  const alphaWorkspace = structuredClone(workspacePolicy)
+  for (const name of Object.keys(alphaWorkspace.overrides)) {
+    if (name.startsWith('@deepseek-ai/dsh')) alphaWorkspace.overrides[name] = '0.2.2-alpha.2'
+  }
+  assert.throws(() => releaseMetadata(prereleaseBaseline, policy, alphaWorkspace), /alpha\/beta/)
 })
 
 for (const suffix of ['alpha', 'beta', 'rc']) {

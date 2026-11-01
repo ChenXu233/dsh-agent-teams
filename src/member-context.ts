@@ -1,5 +1,5 @@
 /**
- * Per-member context budgets (plan 02 — #190/#162, plugin-level).
+ * Per-member context budgets (#190/#162, plugin-level).
  *
  * Harness auto-compaction runs inside a turn (`agent/pre-step`), while
  * `CompactionEngine.compactNow` requires a fully idle agent with no queued

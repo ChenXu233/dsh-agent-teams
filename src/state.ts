@@ -762,7 +762,7 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-/** Validate the optional sampled context-usage record (plan 02). */
+/** Validate the optional sampled context-usage record. */
 function isMemberContextUsage(value: unknown): value is MemberContextUsage {
   return isRecord(value)
     && isFiniteNumber(value['tokens'])

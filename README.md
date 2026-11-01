@@ -30,7 +30,7 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
 
 ## Releases
 
-[v0.2.1-rc.2](./release-notes/v0.2.1-rc.2.md) ships on npm `next`, not `latest`. It turns the member page's model seat and slash-command launcher into pure slot contributions — the host composer keeps the conversation and no host service is patched — and adopts upstream's single-host-requirement policy: one install floor (`engines.dsh: >=0.2.1-rc.2`) instead of an enumerated tested list, so a newer Harness release installs without a plugin release while the CI-tested matrix stays advisory. The stable line remains [v0.2.0](./release-notes/v0.2.0.md) on npm `latest`; the recommended Harness host is `0.2.1-rc.4`. See the exact [support matrix](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
+[v0.2.1-rc.2](./release-notes/v0.2.1-rc.2.md) ships on npm `next`, not `latest`. It turns the member page's model seat and slash-command launcher into pure slot contributions — the host composer keeps the conversation and no host service is patched — and drops host pinning entirely: `compatibility.json` now declares one install floor (`minimumHost: 0.2.1-rc.2`, published as `engines.dsh: >=0.2.1-rc.2`) with no enumerated tested list and no "recommended" host to keep in sync, so any newer Harness release installs without a plugin release. The stable line remains [v0.2.0](./release-notes/v0.2.0.md) on npm `latest`. See the [floor declaration](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
 
 ## Why AgentTeams?
 
@@ -49,15 +49,14 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Recommended pair: DeepSeek Harness `0.2.1-rc.4` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md). The plugin declares one floor, `>=0.2.1-rc.2`; every later host installs without a version exemption, and the host remains an RC.**
+**Supported pair: DeepSeek Harness `>=0.2.1-rc.2` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md). The plugin declares one floor and nothing else.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| **Recommended** | **`0.2.1-rc.4`** | **[v0.2.0](./release-notes/v0.2.0.md)** |
-| Also tested (identical suite results) | `0.2.1-rc.3`, `0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
-| Any newer release, RC or prerelease | `>=0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
+| The floor (oldest supported host) | `0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
+| Any later RC, prerelease or stable release | `>=0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
 
-Only the rows above are the CI-tested matrix; it is a tested list, not an allowlist. `engines.dsh` carries the single floor and the host reads it before peers, so newer hosts (including prereleases) install directly.
+There is no enumerated tested list to keep in sync. `engines.dsh` carries the floor and the host reads it before peers, so newer hosts install directly; CI exercises the floor, and everything above it is assumed compatible. A host below the floor is rejected by the installer.
 
 ### Desktop app
 
@@ -67,22 +66,22 @@ In the app sidebar, open **Plugins → Add plugin**. You can install directly fr
 @chenxu233/dsh-agent-teams
 ```
 
-The package name resolves npm `latest`. To pin a version, append `@0.2.1-rc.2` for the current prerelease, or the stable tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
+The package name resolves npm `latest`. To pin a plugin version, append `@0.2.1-rc.2` for the current prerelease, or the stable tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
-The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Check the embedded core against the compatibility list. Harness `0.2.1-rc.4` is the newest published target; the floor stays `0.2.1-rc.2` and the RC status is unchanged. The earlier source-only prediction of a later stable host is no longer a support declaration. The peer declaration is a floor (`>=0.2.1-rc.2`), so a desktop build that embeds any later host installs without a version exemption; `0.2.1-rc.2`, `rc.3` and `rc.4` report identical suite results. See the [release migration evidence](./docs/harness-0.2.1-rc.2/README.md).
+The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Compare the embedded core with the floor `0.2.1-rc.2`: anything equal or newer installs, and no per-version exemption exists to maintain. See the [release migration evidence](./docs/harness-0.2.1-rc.2/README.md).
 
 ### CLI / Web: 1. Install DeepSeek Harness
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.2.1-rc.4
+npm install --global @deepseek-ai/dsh
 dsh --version
 ```
 
-The command selects the host's npm `latest`; check `dsh --version` against the support matrix after upgrading. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/maintenance-workflow.md).
+The command selects the host's npm `latest`; after upgrading, `dsh --version` only has to be at or above the floor `0.2.1-rc.2`. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/maintenance-workflow.md).
 
 ### CLI / Web: 2. Install the AgentTeams plugin
 
-Install or upgrade from npm using the package name (resolves npm `latest`; the preview channel `next` carries `0.2.1-rc.2`):
+Install or upgrade from npm using the package name (resolves npm `latest`; the preview channel `next` carries the newest prerelease):
 
 ```sh
 dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams
@@ -102,7 +101,7 @@ For a manually cloned checkout, run `pnpm install --frozen-lockfile` and `pnpm b
 
 > For `0.1.0-*` / `0.1.1-*` hosts older than `0.1.2-alpha.2`, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
 
-See the full [compatibility matrix](./compatibility.json), [source installation and Alpha testing guide](./docs/maintenance-workflow.md), and [verification coverage and platform limits](./docs/maintenance-2026-09-06/release/README.md).
+See the [compatibility floor](./compatibility.json), [source installation and Alpha testing guide](./docs/maintenance-workflow.md), and [verification coverage and platform limits](./docs/maintenance-2026-09-06/release/README.md).
 
 Then ask for a team directly:
 

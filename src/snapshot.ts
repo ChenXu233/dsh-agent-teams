@@ -40,7 +40,7 @@ export interface TeamActivityMember {
   readonly currentTask: string
   readonly unread: number
   /**
-   * Latest context usage of this member (plan 02, frozen client shape).
+   * Latest context usage of this member (frozen client shape).
    * Durable team.json sample; live agents may carry fresher tokens. Absent
    * until the first idle sample, so unconfigured deployments keep the exact
    * previous payload.

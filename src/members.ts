@@ -43,12 +43,12 @@ function brandedSessionId(value: string): SessionId {
   return value as SessionId
 }
 
-/** Structural view of the optional host compaction service (plan 02). */
+/** Structural view of the optional host compaction service. */
 interface CompactionView {
   compactNow(agent: Agent, signal: AbortSignal, sourceCommandId?: unknown): Promise<{ shadowedTokenCount?: number } | null>
 }
 
-/** Structural view of the optional host token-meter service (plan 02). */
+/** Structural view of the optional host token-meter service. */
 interface MeterView {
   measure(session: Session): { totalTokens: number }
 }
@@ -94,7 +94,7 @@ export interface MemberRuntimeConfig {
   /** Plugin-wide fallback route. */
   fallback?: { provider: string; model: string }
   /**
-   * Plugin-level per-member context budget (plan 02); `undefined` when the
+   * Plugin-level per-member context budget; `undefined` when the
    * `memberContext` block is unconfigured, which installs nothing.
    */
   memberContext?: MemberContextConfig
@@ -731,7 +731,7 @@ export function installMemberSelectionRuntime(
       return next()
     })
 
-    // Per-member context budget watchdog (plan 02). Installed only when a
+    // Per-member context budget watchdog. Installed only when a
     // budget resolves: the member's own `context_max_tokens` beats the plugin
     // `memberContext` default, `onLimit: 'off'` disables it, and a ratio-only
     // budget without a knowable context window stays off (no guessing). With no
@@ -1340,7 +1340,7 @@ function installMemberContextGuard(input: {
       return
     }
     let lastSampleWrittenAt = 0
-    // Throttle durable sampling (plan 02: >= 5s between writes) so idle events
+    // Throttle durable sampling (>= 5s between writes) so idle events
     // cannot hammer team.json; the watchdog still evaluates every idle event.
     const SAMPLE_THROTTLE_MS = 5_000
     const COMPACT_TIMEOUT_MS = 120_000

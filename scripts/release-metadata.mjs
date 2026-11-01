@@ -11,8 +11,10 @@ export function releaseMetadata(pkg, support = policy, workspace) {
   if (pkg.publishConfig?.tag !== distTag) {
     throw new Error(`publishConfig.tag must be "${distTag}" for ${pkg.version}`)
   }
-  if (!match[4] && pkg.devDependencies['@deepseek-ai/dsh'] !== support.recommendedHost) {
-    throw new Error('latest must use the recommended host as its development baseline')
+  // A stable release must not be developed against an alpha/beta host, but it may use any RC at or
+  // above the declared floor: the policy deliberately does not pin one "recommended" host.
+  if (!match[4] && /-(alpha|beta)\./.test(pkg.devDependencies['@deepseek-ai/dsh'])) {
+    throw new Error('latest must not be developed against an alpha/beta host')
   }
   return { value: pkg.version, dist_tag: distTag, prerelease: Boolean(match[4]) }
 }

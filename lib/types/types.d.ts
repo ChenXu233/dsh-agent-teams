@@ -217,7 +217,7 @@ export interface TeamTask {
 /** Member lifecycle status. */
 export type MemberStatus = 'idle' | 'working' | 'removed';
 /**
- * Latest sampled context usage of one member (plan 02). Written only by the
+ * Latest sampled context usage of one member. Written only by the
  * plugin-side idle watchdog; every field except `measuredAt` is optional so
  * older team.json records keep reading unchanged.
  */
@@ -284,7 +284,7 @@ export interface TeamMember {
     spawnError?: string;
     /**
      * Per-member context budget from the roster row (`context_max_tokens`);
-     * beats the plugin-level `memberContext` default (plan 02). Absent for
+     * beats the plugin-level `memberContext` default. Absent for
      * members without a member-level override.
      */
     contextMaxTokens?: number;

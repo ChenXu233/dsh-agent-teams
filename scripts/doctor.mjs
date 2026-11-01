@@ -24,7 +24,7 @@ function locatePackage(name, from) {
 
 /** Inspect manifests only; never execute packages or read credentials/configuration. */
 export function inspectInstallation(hostRoot, profileRoot, support = policy) {
-  const allowed = validatePolicy(support)
+  validatePolicy(support)
   const root = resolve(hostRoot)
   const own = join(root, 'package.json')
   const hostPath = existsSync(own) && manifest(own).name === '@deepseek-ai/dsh'
@@ -76,13 +76,13 @@ export function inspectInstallation(hostRoot, profileRoot, support = policy) {
   if (plugin && plugin.version !== policyPackage.version) {
     problems.push(`Installed plugin ${plugin.version} differs from this policy's plugin ${policyPackage.version}; verify its own host compatibility`)
   }
-  const tested = allowed.includes(host.version)
   const minimum = minimumHost(support)
-  // Matches the published peer range: hosts at or above the oldest tested host may run the plugin.
+  // Matches the published requirement: the declared floor and every later host run the plugin.
   const order = compareHostVersions(host.version, minimum)
-  const installable = tested || sourceCandidate || order >= 0
-  if (order === undefined && !tested && !sourceCandidate) problems.push(`Unsupported host ${host.version}: unrecognized version format`)
-  else if (!installable) problems.push(`Unsupported host ${host.version}; requires >=${minimum}, recommended target is ${support.recommendedHost}`)
+  const atFloor = order === 0
+  const installable = Boolean(sourceCandidate) || order >= 0
+  if (order === undefined && !sourceCandidate) problems.push(`Unsupported host ${host.version}: unrecognized version format`)
+  else if (!installable) problems.push(`Unsupported host ${host.version}; requires >=${minimum}`)
   if (mixed.length) problems.push(`${mixed.length} resolved DSH packages differ from host ${host.version}`)
   if (missing.length) problems.push(`Missing packages: ${[...new Set(missing)].join(', ')}`)
   const identities = new Map()
@@ -97,14 +97,14 @@ export function inspectInstallation(hostRoot, profileRoot, support = policy) {
     ok: problems.length === 0,
     host: { version: host.version, path: dirname(hostPath) },
     ...(plugin ? { plugin } : {}),
-    checkedPackages: packages.length, supportedHosts: allowed,
+    checkedPackages: packages.length, minimumHost: minimum,
     validation: sourceCandidate ? { kind: 'source-preview', ...sourceCandidate, sourceCommitVerified: false }
-      : { kind: tested ? 'published-matrix' : installable ? 'untested' : 'unsupported' },
+      : { kind: atFloor ? 'declared-floor' : installable ? 'newer-than-floor' : 'unsupported' },
     problems, packages,
     limits: [
       'Checks files resolved from the supplied roots; does not identify the running process or prove plugin behavior.',
       ...(sourceCandidate ? [`Host ${host.version} is pre-adapted against source ${sourceCandidate.commit}; this inspection does not verify that the installed release matches that source.`] : []),
-      ...(!tested && !sourceCandidate && installable ? [`Host ${host.version} is allowed but not in this release's tested matrix; report failures at https://github.com/NanmiCoder/dsh-agent-teams/issues.`] : []),
+      ...(!atFloor && !sourceCandidate && installable ? [`Host ${host.version} is above this release's floor ${minimum} and is assumed compatible instead of being exercised by its CI matrix; report failures at https://github.com/NanmiCoder/dsh-agent-teams/issues.`] : []),
     ],
   }
 }

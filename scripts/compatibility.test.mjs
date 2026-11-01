@@ -23,14 +23,14 @@ const dshPeers = pkg => Object.keys(pkg.peerDependencies).filter(name => name.st
 // Hosts from 0.1.7-rc.1 to 0.2.1-alpha.3 have the same check but do not read engines.dsh.
 const withoutEngines = pkg => ({ ...pkg, engines: { node: pkg.engines.node } })
 
-test('hosts released after the plugin pass the official install check; older hosts do not', () => {
+test('the declared floor and every later host pass the official install check; older hosts do not', () => {
   const pkg = readPackage()
   for (const version of [...validatePolicy(policy), '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.3.0', '1.0.0-rc.1']) {
     assert.equal(evaluatePluginCompatibility(pkg, {}, version), undefined, `${version} must be installable`)
     assert.equal(evaluatePluginCompatibility(withoutEngines(pkg), {}, version), undefined, `${version} must pass a peer-reading installer`)
   }
   for (const version of ['0.2.1-rc.1', '0.2.0-rc.2', '0.1.5-rc.3']) {
-    assert.deepEqual(evaluatePluginCompatibility(pkg, {}, version).requirements, { 'engines.dsh': hostRequirement() }, `${version} predates the oldest tested host`)
+    assert.deepEqual(evaluatePluginCompatibility(pkg, {}, version).requirements, { 'engines.dsh': hostRequirement() }, `${version} predates the declared floor`)
   }
 })
 
@@ -38,11 +38,11 @@ test('DSH peers stay * because npm checks ranges without prereleases', () => {
   const pkg = readPackage()
   assert.equal(dshPeers(pkg).length, 22)
   for (const name of dshPeers(pkg)) assert.equal(pkg.peerDependencies[name], HOST_PEER_RANGE)
-  // npm's peer validation is semver.satisfies(version, range, loose): a lower bound rejects tested hosts,
+  // npm's peer validation is semver.satisfies(version, range, loose): a lower bound rejects newer hosts,
   // and npm accepts * without consulting semver. The official installer accepts both.
   assert.equal(semver.satisfies('0.2.2-alpha.2', hostRequirement(), true), false)
   assert.equal(semver.satisfies('0.2.2-alpha.2', hostRequirement(), { includePrerelease: true }), true)
-  for (const range of [hostRequirement(), '>=0.1.2-alpha.2 <0.3.0', '^0.2.1-rc.2', validatePolicy(policy).join(' || ')]) {
+  for (const range of [hostRequirement(), '>=0.1.2-alpha.2 <0.3.0', '^0.2.1-rc.2', '0.2.1-rc.4']) {
     const ranged = structuredClone(pkg)
     ranged.peerDependencies['@deepseek-ai/dsh-agent'] = range
     assert.throws(() => validatePackageCompatibility(ranged), /peer range must be \*/)
@@ -51,39 +51,45 @@ test('DSH peers stay * because npm checks ranges without prereleases', () => {
 
 test('the 0.1.27 exact allowlist is rejected because it blocked every later host', () => {
   const allowlist = withoutEngines(readPackage())
-  for (const name of dshPeers(allowlist)) allowlist.peerDependencies[name] = validatePolicy(policy).join(' || ')
+  for (const name of dshPeers(allowlist)) allowlist.peerDependencies[name] = '0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4'
   assert.ok(evaluatePluginCompatibility(allowlist, {}, '0.2.1-rc.5'), 'the old declaration reproduces the reported failure')
   assert.throws(() => validatePackageCompatibility(allowlist), /engines\.dsh must be >=0\.2\.1-rc\.2/)
-  for (const dsh of ['*', '>=0.1.0', '>=0.1.2-alpha.2 <0.3.0', policy.recommendedHost, validatePolicy(policy).join(' || '), null]) {
+  for (const dsh of ['*', '>=0.1.0', '>=0.1.2-alpha.2 <0.3.0', '0.2.1-rc.4', '0.2.1-rc.2 || 0.2.1-rc.3', null]) {
     const pkg = readPackage()
     pkg.engines.dsh = dsh
     assert.throws(() => validatePackageCompatibility(pkg), /engines\.dsh/)
   }
 })
 
-test('testing a new host changes the CI matrix, not the published requirement', () => {
+test('the policy is one floor: later hosts need no policy edit and retired pinning fields fail loudly', () => {
   const original = readPackage()
-  const newer = { ...structuredClone(policy), supportedHosts: [{ version: '0.2.1-rc.999', track: 'preview' }, ...policy.supportedHosts] }
-  assert.deepEqual(generateHostPeers(original, newer), original)
-  assert.doesNotThrow(() => validatePackageCompatibility(original, newer))
-  // Qualifying an older host lowers the requirement; dropping the oldest tested host raises it.
-  const older = { ...structuredClone(policy), supportedHosts: [...policy.supportedHosts, { version: '0.1.1-rc.2', track: 'legacy' }] }
-  const dropped = { ...structuredClone(policy), supportedHosts: policy.supportedHosts.filter(host => host.version !== '0.2.1-rc.2') }
-  assert.equal(hostRequirement(dropped), '>=0.2.1-rc.3')
-  const saved = structuredClone(older)
-  assert.throws(() => validatePackageCompatibility(original, older), /engines\.dsh/)
-  const generated = generateHostPeers(original, older)
-  assert.doesNotThrow(() => validatePackageCompatibility(generated, older))
-  assert.deepEqual(older, saved, 'Generating metadata must not modify targets')
-  assert.deepEqual(generateHostPeers(generated, older), generated, 'Idempotent generation')
-  assert.equal(generated.engines.dsh, '>=0.1.1-rc.2')
+  assert.deepEqual(validatePolicy(policy), ['0.2.1-rc.2'])
+  assert.deepEqual(validatePackageCompatibility(original), ['0.2.1-rc.2'])
+  // Raising the floor is the only way to drop support, and it moves engines.dsh with it.
+  const raised = { ...structuredClone(policy), minimumHost: '0.2.1-rc.3' }
+  assert.equal(hostRequirement(raised), '>=0.2.1-rc.3')
+  assert.throws(() => validatePackageCompatibility(original, raised), /engines\.dsh/)
+  const generated = generateHostPeers(original, raised)
+  assert.doesNotThrow(() => validatePackageCompatibility(generated, raised))
+  assert.equal(generated.engines.dsh, '>=0.2.1-rc.3')
   assert.deepEqual({ ...generated, engines: original.engines }, original, 'No peer, dependency baseline, scripts or other metadata changes')
+  assert.deepEqual(generateHostPeers(generated, raised), generated, 'Idempotent generation')
+  // A host above the floor is a valid development baseline without touching the policy.
+  const newerBaseline = structuredClone(original)
+  for (const name of Object.keys(newerBaseline.devDependencies)) {
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) newerBaseline.devDependencies[name] = '0.2.1-rc.5'
+  }
+  const newerWorkspace = structuredClone(workspacePolicy)
+  for (const name of Object.keys(newerWorkspace.overrides)) {
+    if (name.startsWith('@deepseek-ai/dsh')) newerWorkspace.overrides[name] = '0.2.1-rc.5'
+  }
+  assert.doesNotThrow(() => validatePackageCompatibility(newerBaseline, policy, newerWorkspace))
   const missing = structuredClone(original)
   delete missing.peerDependencies['@deepseek-ai/dsh-agent']
-  assert.throws(() => generateHostPeers(missing, older), /Missing required/)
+  assert.throws(() => generateHostPeers(missing, raised), /Missing required/)
   const mixed = structuredClone(original)
   mixed.devDependencies['@deepseek-ai/dsh-agent'] = '0.1.2-alpha.2'
-  assert.throws(() => generateHostPeers(mixed, older), /exact development host/)
+  assert.throws(() => generateHostPeers(mixed, raised), /exact development host/)
 })
 
 test('synchronizing from the 0.1.27 manifest keeps the checked-in ASCII escapes', t => {
@@ -95,7 +101,7 @@ test('synchronizing from the 0.1.27 manifest keeps the checked-in ASCII escapes'
     writeFileSync(join(root, file), readFileSync(new URL(`../${file}`, import.meta.url)))
   }
   const old = withoutEngines(readPackage())
-  for (const name of dshPeers(old)) old.peerDependencies[name] = validatePolicy(policy).join(' || ')
+  for (const name of dshPeers(old)) old.peerDependencies[name] = '0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4'
   writeFileSync(join(root, 'package.json'), JSON.stringify(old, null, 2).replace(/[\u0080-\uffff]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`) + '\n')
   const run = spawnSync(process.execPath, [join(root, 'scripts/compatibility.mjs'), '--write-peers'], { encoding: 'utf8' })
   assert.equal(run.status, 0, run.stderr)
@@ -119,28 +125,28 @@ test('host versions order like semver prereleases', () => {
 // A source candidate above this fork's floor (0.2.1-rc.2) keeps the requirement unchanged.
 const sourcePolicy = { ...policy, sourceCandidates: [{ version: '0.2.2-alpha.2', repository: 'https://github.com/deepseek-ai/deepseek-harness', commit: '21638c56315ae6a2b552d6091945d3144c9af32e', evidence: 'docs/harness-0.2.0-pre-adaptation/README.md' }] }
 
-test('source candidates are covered by the requirement without entering the published download matrix', () => {
+test('source candidates are covered by the requirement without becoming the floor', () => {
   const pkg = readPackage()
   assert.ok(declaredHostVersions(sourcePolicy).includes('0.2.2-alpha.2'))
-  assert.ok(!validatePackageCompatibility(pkg, sourcePolicy).includes('0.2.2-alpha.2'))
+  assert.deepEqual(validatePackageCompatibility(pkg, sourcePolicy), ['0.2.1-rc.2'])
   assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.2-alpha.2'), undefined)
-  // A candidate older than every tested host lowers the requirement instead of passing doctor while uninstallable.
+  // A candidate never moves the floor: the floor is declared, not derived from the candidate list.
   const olderCandidate = { ...sourcePolicy, sourceCandidates: [{ ...sourcePolicy.sourceCandidates[0], version: '0.2.0' }] }
-  assert.equal(hostRequirement(olderCandidate), '>=0.2.0')
-  assert.throws(() => validatePackageCompatibility(pkg, olderCandidate), /engines\.dsh/)
-  const matrix = spawnSync(process.execPath, [fileURLToPath(new URL('./compatibility.mjs', import.meta.url)), '--github-output'], { encoding: 'utf8' })
-  assert.equal(matrix.status, 0, matrix.stderr)
-  assert.ok(!JSON.parse(matrix.stdout.trim().slice('hosts='.length)).includes('0.2.2-alpha.2'))
+  assert.equal(hostRequirement(olderCandidate), '>=0.2.1-rc.2')
+  assert.doesNotThrow(() => validatePackageCompatibility(pkg, olderCandidate))
+  const floor = spawnSync(process.execPath, [fileURLToPath(new URL('./compatibility.mjs', import.meta.url)), '--github-output'], { encoding: 'utf8' })
+  assert.equal(floor.status, 0, floor.stderr)
+  assert.equal(floor.stdout.trim(), 'floor=0.2.1-rc.2')
   for (const sourceCandidates of [
     [...sourcePolicy.sourceCandidates, sourcePolicy.sourceCandidates[0]],
     [{ ...sourcePolicy.sourceCandidates[0], version: '^0.2.0' }],
     [{ ...sourcePolicy.sourceCandidates[0], version: '0.2.0\n' }],
     [{ ...sourcePolicy.sourceCandidates[0], commit: 'master' }],
-    [{ ...sourcePolicy.sourceCandidates[0], version: policy.recommendedHost }],
+    [{ ...sourcePolicy.sourceCandidates[0], version: '0.2.1-rc.2' }],
   ]) assert.throws(() => validatePolicy({ ...policy, sourceCandidates }), /Source candidates/)
 })
 
-test('doctor distinguishes source-preview acceptance from released host validation', t => {
+test('doctor distinguishes source-preview acceptance from a released host', t => {
   const root = mkdtempSync(join(tmpdir(), 'agent-teams-doctor-source-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: sourcePolicy.sourceCandidates[0].version }))
@@ -149,7 +155,7 @@ test('doctor distinguishes source-preview acceptance from released host validati
   assert.equal(result.validation.kind, 'source-preview')
   assert.equal(result.validation.sourceCommitVerified, false)
   assert.equal(result.validation.commit, sourcePolicy.sourceCandidates[0].commit)
-  assert.ok(!result.supportedHosts.includes(sourcePolicy.sourceCandidates[0].version))
+  assert.equal(result.minimumHost, '0.2.1-rc.2')
   assert.match(result.limits.join(), /does not verify that the installed release matches/)
 })
 
@@ -158,7 +164,7 @@ test('doctor runs through an installed bin symlink and reports success or failur
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const host = join(root, 'host')
   mkdirSync(host)
-  writeFileSync(join(host, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: policy.recommendedHost }))
+  writeFileSync(join(host, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.1-rc.4' }))
   const bin = join(root, 'dsh-agent-teams-doctor')
   symlinkSync(fileURLToPath(new URL('./doctor.mjs', import.meta.url)), bin, 'file')
   // Unix executes the installed shebang directly. Windows does not implement
@@ -168,27 +174,31 @@ test('doctor runs through an installed bin symlink and reports success or failur
   const executable = windows ? process.execPath : bin
   const args = [...(windows ? [bin] : []), '--host-root', host, '--json']
   const run = () => spawnSync(executable, args, { encoding: 'utf8', timeout: 5_000 })
-  const supported = run()
-  assert.equal(supported.error, undefined)
-  assert.equal(supported.status, 0, supported.stderr)
-  assert.match(supported.stdout, /"checkedPackages"/, 'bin must execute instead of silently importing the script')
-  assert.equal(JSON.parse(supported.stdout).ok, true)
-  writeFileSync(join(host, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.1-rc.5' }))
-  const untested = run()
-  assert.equal(untested.status, 0, untested.stderr)
-  assert.equal(JSON.parse(untested.stdout).validation.kind, 'untested')
+  const aboveFloor = run()
+  assert.equal(aboveFloor.error, undefined)
+  assert.equal(aboveFloor.status, 0, aboveFloor.stderr)
+  assert.match(aboveFloor.stdout, /"checkedPackages"/, 'bin must execute instead of silently importing the script')
+  assert.equal(JSON.parse(aboveFloor.stdout).ok, true)
+  assert.equal(JSON.parse(aboveFloor.stdout).validation.kind, 'newer-than-floor')
+  writeFileSync(join(host, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.1-rc.2' }))
+  const atFloor = run()
+  assert.equal(atFloor.status, 0, atFloor.stderr)
+  assert.equal(JSON.parse(atFloor.stdout).validation.kind, 'declared-floor')
   writeFileSync(join(host, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.0-rc.8' }))
   const unsupported = run()
   assert.equal(unsupported.status, 1, unsupported.stderr)
   assert.equal(JSON.parse(unsupported.stdout).ok, false)
 })
 
-test('policy rejects floating targets, duplicates, and alpha recommendation', () => {
-  assert.deepEqual(validatePolicy(policy), policy.supportedHosts.map(host => host.version))
-  for (const version of ['latest', '^0.1.2-rc.1', '0.1.2-rc.1\n']) {
-    assert.throws(() => validatePolicy({ ...policy, supportedHosts: [{ version, track: 'recommended' }] }))
+test('policy rejects retired pinning fields, malformed floors and floating development hosts', () => {
+  assert.deepEqual(validatePolicy(policy), ['0.2.1-rc.2'])
+  for (const retired of [{ supportedHosts: [{ version: '0.2.1-rc.4', track: 'recommended' }] }, { recommendedHost: '0.2.1-rc.4' }]) {
+    assert.throws(() => validatePolicy({ ...policy, ...retired }), /retired/)
   }
-  assert.throws(() => validatePolicy({ ...policy, supportedHosts: [...policy.supportedHosts, policy.supportedHosts[0]] }))
+  for (const minimumHost of ['latest', '^0.2.1-rc.2', '0.2.1-rc.2\n', '', undefined]) {
+    assert.throws(() => validatePolicy({ ...policy, minimumHost }), /minimumHost/)
+  }
+  assert.throws(() => validatePolicy({ ...policy, schemaVersion: 1 }), /Unsupported compatibility policy/)
   assert.throws(() => validatePackageCompatibility({ devDependencies: { '@deepseek-ai/dsh': '^0.1.2-rc.1' } }))
 })
 
@@ -215,8 +225,8 @@ test('doctor detects transitive cohort mixing even with an exact CLI version', t
   pkg(root, '@deepseek-ai/dsh', '0.2.2-alpha.2')
   const later = inspectInstallation(root)
   assert.equal(later.ok, true, later.problems.join())
-  assert.equal(later.validation.kind, 'untested')
-  assert.match(later.limits.join(), /not in this release's tested matrix/)
+  assert.equal(later.validation.kind, 'newer-than-floor')
+  assert.match(later.limits.join(), /above this release's floor/)
 })
 
 test('doctor follows profile peers and rejects duplicate runtime identities', t => {
@@ -257,7 +267,7 @@ test('policy rejects removed host peers and range-qualified or conditional DSH o
   for (const selector of ['parent>@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent@^0.1.2', '@deepseek-ai/dsh@>=0.1>react']) {
     const pkg = structuredClone(original)
     const workspace = structuredClone(workspacePolicy)
-    workspace.overrides[selector] = policy.recommendedHost
+    workspace.overrides[selector] = '0.2.1-rc.4'
     assert.throws(() => validatePackageCompatibility(pkg, policy, workspace), /bare DSH package name/)
   }
 })
@@ -269,13 +279,13 @@ test('doctor reports missing nonoptional Cordis peers and required plugin import
     mkdirSync(path, { recursive: true })
     writeFileSync(join(path, 'package.json'), JSON.stringify(data))
   }
-  write(root, { name: '@deepseek-ai/dsh', version: policy.recommendedHost, peerDependencies: { '@deepseek-ai/cordis': '^4.0.2' } })
+  write(root, { name: '@deepseek-ai/dsh', version: '0.2.1-rc.4', peerDependencies: { '@deepseek-ai/cordis': '^4.0.2' } })
   assert.match(inspectInstallation(root).problems.join(), /Missing packages.*cordis/)
   write(join(root, 'node_modules/@deepseek-ai/cordis'), { name: '@deepseek-ai/cordis', version: '4.0.2' })
   const profile = join(root, 'profile')
   write(join(profile, 'node_modules', PLUGIN_NAME), {
     name: PLUGIN_NAME, version: '0.1.16-rc.1',
-    peerDependencies: { '@deepseek-ai/dsh-subagent': policy.recommendedHost },
+    peerDependencies: { '@deepseek-ai/dsh-subagent': '0.2.1-rc.4' },
     peerDependenciesMeta: { '@deepseek-ai/dsh-subagent': { optional: true } },
   })
   assert.match(inspectInstallation(root, profile).problems.join(), /dsh-subagent \(plugin runtime\)/)
@@ -301,10 +311,10 @@ test('doctor detects peer-only drift and a mismatched installed plugin', t => {
   assert.match(inspectInstallation(root, profile).problems.join(), /0\.1\.15/)
 })
 
-test('released target enters the download matrix and replaces the old source prediction', () => {
-  assert.equal(policy.recommendedHost, '0.2.1-rc.4')
-  assert.ok(validatePolicy(policy).includes('0.2.1-rc.4'))
-  assert.ok(validatePolicy(policy).includes('0.2.1-rc.3'))
-  assert.ok(validatePolicy(policy).includes('0.2.1-rc.2'))
+test('the checked-in policy declares one floor and no host list', () => {
+  assert.equal(policy.schemaVersion, 2)
+  assert.equal(policy.minimumHost, '0.2.1-rc.2')
+  assert.equal(policy.supportedHosts, undefined)
+  assert.equal(policy.recommendedHost, undefined)
   assert.ok(!declaredHostVersions().includes('0.2.0'))
 })

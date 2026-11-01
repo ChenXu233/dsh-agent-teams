@@ -44,7 +44,7 @@ export interface TeamProfileMemberConfig {
    */
   tool_policy?: string
   /**
-   * Per-member context budget in tokens (plan 02). Beats the plugin-level
+   * Per-member context budget in tokens. Beats the plugin-level
    * `memberContext` default; a member row without it uses the default.
    */
   context_max_tokens?: number
@@ -86,7 +86,7 @@ export interface NormalizedProfileMember {
   executionPrompt?: string
   fallback?: TeamModelFallbackConfig
   toolPolicy?: string
-  /** Resolved per-member context budget in tokens (plan 02). */
+  /** Resolved per-member context budget in tokens. */
   contextMaxTokens?: number
 }
 
