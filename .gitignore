@@ -5,3 +5,8 @@ node_modules/
 
 # Local immutable candidate used by the Harness compatibility lab.
 /artifacts/harness-0.2.1-rc.1/
+
+# Private fork notes, local memory store and scratch space.
+/docs/private-fork/
+.dsh-meow/
+.tmp/
