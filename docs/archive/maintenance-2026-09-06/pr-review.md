@@ -301,4 +301,4 @@
 - `/tmp/dsh-open-prs-20260906.json`
 - `/tmp/dsh-pr-details-20260906/{number}-detail.json`
 - `/tmp/dsh-pr-details-20260906/{number}-files.json`
-- 前轮详细语义审查：`docs/compatibility-audit-2026-09-05/pull-requests.md`（本轮逐个确认head未变化）
+- 前轮详细语义审查：`docs/archive/compatibility-audit-2026-09-05/pull-requests.md`（本轮逐个确认head未变化）

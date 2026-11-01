@@ -13,7 +13,7 @@
 - 项目旧开发 skill 标注历史 API 范围，修正“无 tag、不固定版本”和复用 checkout 时 reset 的旧建议。
 - 项目使用规则独立记录，9 个上游 skill 内容未改。没有升级 Harness、改动插件运行时代码或依赖、发布包、合并 PR 或运行真实模型。
 
-入口：[项目 skills 使用说明](../../skills/README.md)。两个独立报告：[README 与接入审查](skills-review.md)、[benchmark 与测试审查](benchmark-review.md)。
+入口：[项目 skills 使用说明](../../../skills/README.md)。两个独立报告：[README 与接入审查](skills-review.md)、[benchmark 与测试审查](benchmark-review.md)。
 
 ## 仓库提供了什么
 

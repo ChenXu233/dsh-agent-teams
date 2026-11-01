@@ -2,7 +2,7 @@
 
 日期：2026-09-10。本地功能验收已完成；本版通过 tag `v0.1.17-rc.1` 触发 GitHub Actions，发布到 npm `next`。发布后的远端运行、最终 tarball 和 npm 消费者验收另记于本目录 `publication.md`。
 
-目标宿主固定为 `@deepseek-ai/dsh@0.1.5-rc.1`，官方 tag `dsh-v0.1.5-rc.1` / `183f08e9c6dde7e36cd2318eaee70b0da08fb35e`。插件基线 `502dd6c6bb1d0f59cb5f902cda4b68494e7aedf4`，实现分支 `codex/harness-015-support`。初始接口审查见 [审查报告](../../harness-0.1.5-rc.1-audit-2026-09-10/README.md)。
+目标宿主固定为 `@deepseek-ai/dsh@0.1.5-rc.1`，官方 tag `dsh-v0.1.5-rc.1` / `183f08e9c6dde7e36cd2318eaee70b0da08fb35e`。插件基线 `502dd6c6bb1d0f59cb5f902cda4b68494e7aedf4`，实现分支 `codex/harness-015-support`。初始接口审查见 [审查报告](../../archive/harness-0.1.5-rc.1-audit-2026-09-10/README.md)。
 
 ## 实现
 

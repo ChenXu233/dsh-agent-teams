@@ -101,7 +101,7 @@ For a manually cloned checkout, run `pnpm install --frozen-lockfile` and `pnpm b
 
 > For `0.1.0-*` / `0.1.1-*` hosts older than `0.1.2-alpha.2`, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
 
-See the [compatibility floor](./compatibility.json), [source installation and Alpha testing guide](./docs/maintenance-workflow.md), and [verification coverage and platform limits](./docs/maintenance-2026-09-06/release/README.md).
+See the [compatibility floor](./compatibility.json), [source installation and Alpha testing guide](./docs/maintenance-workflow.md), and [verification coverage and platform limits](./docs/archive/maintenance-2026-09-06/release/README.md).
 
 Then ask for a team directly:
 

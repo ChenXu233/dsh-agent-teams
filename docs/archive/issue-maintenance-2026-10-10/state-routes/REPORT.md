@@ -60,9 +60,9 @@ Logs: `logs/188write-baseline.log`, `logs/188write-candidate.log`.
 
 | Issue | File | Candidate | Baseline |
 | --- | --- | --- | --- |
-| #188 | [scripts/issue-188.test.mjs](../../../scripts/issue-188.test.mjs) — real disk read/write | 9/9 pass | 1/9 pass (8 fail) |
-| #189 | [scripts/issue-189.test.mjs](../../../scripts/issue-189.test.mjs) — pure route composition | 9/9 pass | 0/1 fail |
-| #205 | [scripts/issue-205.test.mjs](../../../scripts/issue-205.test.mjs) — pure failure disposition | 6/6 pass | fails |
+| #188 | [scripts/issue-188.test.mjs](../../../../scripts/issue-188.test.mjs) — real disk read/write | 9/9 pass | 1/9 pass (8 fail) |
+| #189 | [scripts/issue-189.test.mjs](../../../../scripts/issue-189.test.mjs) — pure route composition | 9/9 pass | 0/1 fail |
+| #205 | [scripts/issue-205.test.mjs](../../../../scripts/issue-205.test.mjs) — pure failure disposition | 6/6 pass | fails |
 
 All three are wired into `pnpm verify:issue-regressions`, which `pnpm verify` runs.
 

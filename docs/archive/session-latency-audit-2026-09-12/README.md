@@ -52,7 +52,7 @@ DeepSeek 官方说明请求可能等待服务器响应，并通过 SSE keep-aliv
 
 实际子会话 `3484f46a-66c2-4879-bd86-86392da5ade9` 的 seq 72 把这条消息加入 `next-turn`。直到该文件最后事件 15:01:02.584，它仍在队列里，未形成消费后的 `user/message`，等待至少 2,285.083 秒。该成员仍在第一轮，已执行 69 个完整模型步骤。
 
-对应实现：[`tools.ts`](../../src/tools.ts) 的 `agent_teams_send_message`（约 1840 行）将协作消息交给 `deliverToMember`；[`harness-compat.ts`](../../src/harness-compat.ts) 的 `queueMemberPrompt`（119–133 行）在 0.1.5 固定使用 `delivery='queue'`。任务分派需要独立轮次，但“修正当前任务”也走同一条路径。宿主 `SubagentInbox.deliver` 将 queue 映射为 `agent.followup`，steer 才映射为 `agent.steer`。
+对应实现：[`tools.ts`](../../../src/tools.ts) 的 `agent_teams_send_message`（约 1840 行）将协作消息交给 `deliverToMember`；[`harness-compat.ts`](../../../src/harness-compat.ts) 的 `queueMemberPrompt`（119–133 行）在 0.1.5 固定使用 `delivery='queue'`。任务分派需要独立轮次，但“修正当前任务”也走同一条路径。宿主 `SubagentInbox.deliver` 将 queue 映射为 `agent.followup`，steer 才映射为 `agent.steer`。
 
 本次不是“几十条积压”：完整重建各成员 inbox splice 后，每个子会话的单个目的队列峰值均为 1。确凿问题是**一条关键消息一直没有读到**。若持续催促或纠正，同一机制能累计多条消息。
 
@@ -62,13 +62,13 @@ DeepSeek 官方说明请求可能等待服务器响应，并通过 SSE keep-aliv
 
 同一条补充消息在插件持久邮箱中 `readAt=14:22:57.502`，仅比宿主入队晚 1 ms，但 38 分钟后仍没有被成员消费。
 
-原因：发送工具在 `deliverToMember` 返回成功后立即执行 `acknowledgeMailbox`；[`state.ts`](../../src/state.ts) 的这个函数同时写 `deliveredAt` 和 `readAt`。随后 status 只统计 `readAt` 不存在的插件邮箱消息，而不是宿主尚未消费的队列。
+原因：发送工具在 `deliverToMember` 返回成功后立即执行 `acknowledgeMailbox`；[`state.ts`](../../../src/state.ts) 的这个函数同时写 `deliveredAt` 和 `readAt`。随后 status 只统计 `readAt` 不存在的插件邮箱消息，而不是宿主尚未消费的队列。
 
 这是两个队列状态混淆：插件邮箱可以显示没有未读消息，宿主却仍有 pending 输入。修复应拆开持久化、入队、消费、完成几个状态，以宿主消费事件或等价的精确消息 ID 确认更新“已读”；同时保持投递去重，避免用“不标已读”制造重复发送。
 
 ### 3. 归档只中断直接成员，旧队列与后代生命周期未闭合
 
-[`tools.ts`](../../src/tools.ts) 的 delete 路径（2050–2108 行）依次撤销成员/attempt、记录退休 ID、interrupt、waitForMemberIdle、移动归档目录；remove_member（约 1168 行）有同类结构。
+[`tools.ts`](../../../src/tools.ts) 的 delete 路径（2050–2108 行）依次撤销成员/attempt、记录退休 ID、interrupt、waitForMemberIdle、移动归档目录；remove_member（约 1168 行）有同类结构。
 
 精确宿主源码显示：
 
@@ -84,13 +84,13 @@ DeepSeek 官方说明请求可能等待服务器响应，并通过 SSE keep-aliv
 
 例如 perf-reviewer seq 18 与 finding-verifier seq 18 的 status 结果中，6 个任务全部为 pending，却同时输出 `Loop: deliverable`、`All required quality gates passed. The captain may report delivery.`、`Delivery: ok`。
 
-[`quality-gates.ts`](../../src/quality-gates.ts) 的 `canDeclareDelivery`（669 行）只检查 quality kinds，忽略普通 `kind=work`。本次 6 个任务都是 work，于是 blockers 为空；`describeQualityLoop`（946 行）把它升级成整个团队可交付。直接调用已安装产物的纯函数也复现了该结果。
+[`quality-gates.ts`](../../../src/quality-gates.ts) 的 `canDeclareDelivery`（669 行）只检查 quality kinds，忽略普通 `kind=work`。本次 6 个任务都是 work，于是 blockers 为空；`describeQualityLoop`（946 行）把它升级成整个团队可交付。直接调用已安装产物的纯函数也复现了该结果。
 
 这可能误导队长提前收尾，但本次日志**没有** `agent_teams_delete`，所以不能说本次已经因此提前归档。修复需要把“质量门禁通过”和“团队所有必要工作已完成”分开；普通任务、空团队、失败/取消策略及混合质量任务都需验收。
 
 ### 5. 成员先执行欢迎轮，反而绕过正式分派并产生额外协调
 
-`spawnMember` 立即执行 `memberWelcome`。[`tools.ts`](../../src/tools.ts) 的审批流程先创建所有成员，再 kick scheduler；此时欢迎轮已使成员处于 running，scheduler 的可用性检查会跳过它们。
+`spawnMember` 立即执行 `memberWelcome`。[`tools.ts`](../../../src/tools.ts) 的审批流程先创建所有成员，再 kick scheduler；此时欢迎轮已使成员处于 running，scheduler 的可用性检查会跳过它们。
 
 本次所有会话实际消费的 `AgentTeams automatic task assignment...` 提示数量为 **0**。三个执行成员先查 status，再自行 claim t1/t2/t4，然后从 team.json 读取详细任务契约；不是调度器给出完整任务上下文后直接工作。被依赖阻挡的 verifier 也被提前启动，先尝试 claim t6，报错后自行做范围调查，得到错误统计，再触发队长纠正及二次唤醒。report-writer 则花两个模型步骤声明等待。
 
@@ -101,7 +101,7 @@ DeepSeek 官方说明请求可能等待服务器响应，并通过 SSE keep-aliv
 - 建任务的 4 次错误均围绕 `reviewedTaskId`：一次引用不存在的任务，其余缺少它。用户要的是审查已有代码，插件 `review` 却用于复核团队内部产物。队长最后把任务改为 work。工具 schema 应明确“外部代码审计”与“团队质量门禁”的区别，给出正确的一次性用法。
 - 日志中的实际审查范围是 90 个提交、497 个变动文件，另有独立核查和最终报告。这本身不是轻量测速。
 - 5 名成员中只有 3 名能开始主审查；t2→t3 同成员串行，t6 等全部审查，t5 再等 t6。这段 DAG 在前序未完成时保持 pending 是正常依赖等待，不是调度死锁。
-- `memberMaxDepth` 默认 1（[`index.ts`](../../src/index.ts) 131 行），允许成员再委派一层。perf-reviewer 在 14:28:59 新增 4 个原生子代理，团队任务图没有把这些作为可调度的独立任务纳入预算。
+- `memberMaxDepth` 默认 1（[`index.ts`](../../../src/index.ts) 131 行），允许成员再委派一层。perf-reviewer 在 14:28:59 新增 4 个原生子代理，团队任务图没有把这些作为可调度的独立任务纳入预算。
 - 主要成员运行数十轮，后期输入上下文已达约 12.8 万 token（包括缓存命中），仍在查代码和验证。缓存降低重复输入成本，不代表没有请求准备、服务端等待或生成时间。
 
 优化方向：明确每项审查的范围和交付界限；将需要并行的工作放入队长可见的图；设置全团队及后代的并发/步骤预算；用阶段结果与明确的停手条件收敛探索。对简单规划/汇总尝试较低 reasoning effort，需要用相同任务做 A/B 验证质量；不能仅降低 maxTokens 就承诺提速。
@@ -118,8 +118,8 @@ DeepSeek 官方说明请求可能等待服务器响应，并通过 SSE keep-aliv
 ## 复算
 
 ```sh
-python3 docs/session-latency-audit-2026-09-12/analyze-session.py /path/to/export > /tmp/session-metrics.json
-node docs/session-latency-audit-2026-09-12/host-boundary-probe.mjs /path/to/dsh /path/to/dsh-agent-teams > /tmp/host-boundary-result.json
+python3 docs/archive/session-latency-audit-2026-09-12/analyze-session.py /path/to/export > /tmp/session-metrics.json
+node docs/archive/session-latency-audit-2026-09-12/host-boundary-probe.mjs /path/to/dsh /path/to/dsh-agent-teams > /tmp/host-boundary-result.json
 ```
 
 边界探针要求精确 `0.1.5-rc.1` 宿主，临时复制 bundle 后仅追加私有类导出，通过 fixture Agents 执行原始方法。它证明这些方法的行为和当前插件适配选择，不证明完整 CLI、真实模型或其他宿主版本的行为。

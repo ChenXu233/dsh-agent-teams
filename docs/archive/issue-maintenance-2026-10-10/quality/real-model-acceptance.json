@@ -105,7 +105,7 @@
     "dom": "2 elements with data-verdict-stale=\"true\" (assignment chip t2, DAG node t2 · review-round-1)",
     "visual": "DAG node border-style dashed with the warning color (contrast: t1 impl keeps its solid border)",
     "tooltip": "t2 · review-round-1 · review · r1 · pass · ⚠ t2 (review) verdict covers a revision that no longer exists: lib/sum.js changed (sha256 53f09f70 -> af01ed6d) — re-review the current bytes; do not report this revision as verified · deepseek-account/deepseek-flash",
-    "screenshot": "docs/issue-maintenance-2026-10-10/quality/panel-stale-verdict.png",
+    "screenshot": "docs/archive/issue-maintenance-2026-10-10/quality/panel-stale-verdict.png",
     "screenshotSha256": "f53d102443f15d51a4c1d7f18c537596f753b531c937f08be0257db0a6ceb83b",
     "note": "the supervisor 3081 GUI was not used; this is this branch own instance"
   },

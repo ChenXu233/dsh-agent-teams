@@ -209,8 +209,8 @@ pnpm typecheck                                                                ->
 
 ### 11.2 验收资料入库（大日志仍留在 /tmp）
 
-- `docs/issue-maintenance-2026-10-10/quality/real-model-acceptance.json`：sanitized 摘要（环境、模型路由、四个真实场景的逐字关键行、请求计数、面板 DOM/视觉证据、artifact 与 TAP 的 sha256、未覆盖项、`lib` 哈希与 `git-artifact-stamp.json`）。已核对不含 token / API key / 凭据内容。
-- `docs/issue-maintenance-2026-10-10/quality/panel-stale-verdict.png`：本分支自有实例上面板显示 stale verdict 的截图（sha256 `f53d102443f15d51a4c1d7f18c537596f753b531c937f08be0257db0a6ceb83b`）。
+- `docs/archive/issue-maintenance-2026-10-10/quality/real-model-acceptance.json`：sanitized 摘要（环境、模型路由、四个真实场景的逐字关键行、请求计数、面板 DOM/视觉证据、artifact 与 TAP 的 sha256、未覆盖项、`lib` 哈希与 `git-artifact-stamp.json`）。已核对不含 token / API key / 凭据内容。
+- `docs/archive/issue-maintenance-2026-10-10/quality/panel-stale-verdict.png`：本分支自有实例上面板显示 stale verdict 的截图（sha256 `f53d102443f15d51a4c1d7f18c537596f753b531c937f08be0257db0a6ceb83b`）。
 - 原始日志、workspace、profile、baseline 插件树仍在 `/private/tmp/agentteams-issues-20261010/quality/`，供独立复核（未入库）。
 
 ### 11.3 lib 与源码一致性核对

@@ -10,6 +10,6 @@
 
 发布后将 npm 包装入隔离的 `0.1.5-rc.1` 宿主，再跑完整回归。首轮 9/10 通过；Web 审批场景在测试收尾的 `ctx.sessions.flush` 处出现 `SessionHandleClosedError`，未到达最终断言。原始结果及 stderr 保留。未改源码、包或断言，在新隔离 profile 单独复跑 Web 审批后通过。不能将首轮记录改写成全部通过；测试收尾的会话关闭/flush 竞态仍是已知测试稳定性限制。
 
-CI 四宿主为 `0.1.5-rc.1`、`0.1.2-rc.1`、`0.1.2-alpha.5`、`0.1.2-alpha.2`，模型为确定性 fixture，Harness CLI、插件、会话与工具为实际运行。发布后复验同样使用 fixture，没有重复调用真实 API。此前六成员、十七任务真实 DeepSeek 测试、外部 32 项断言及限制见[完整报告](../../session-latency-audit-2026-09-12/complex-test-report.md)。本次发布没有新增浏览器或 Windows Desktop GUI 验证，保留此前 UI 验收边界。
+CI 四宿主为 `0.1.5-rc.1`、`0.1.2-rc.1`、`0.1.2-alpha.5`、`0.1.2-alpha.2`，模型为确定性 fixture，Harness CLI、插件、会话与工具为实际运行。发布后复验同样使用 fixture，没有重复调用真实 API。此前六成员、十七任务真实 DeepSeek 测试、外部 32 项断言及限制见[完整报告](../../archive/session-latency-audit-2026-09-12/complex-test-report.md)。本次发布没有新增浏览器或 Windows Desktop GUI 验证，保留此前 UI 验收边界。
 
 本地 main 已快进合并当前 worktree，原 main 已提交的修复全部保留。main 中未跟踪的历史分析文档保持原状，未混入发布。

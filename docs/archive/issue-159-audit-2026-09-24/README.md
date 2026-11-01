@@ -59,7 +59,7 @@
 4. 已成功送达团队完成汇报后，抑制重复的原生成功 settle 唤醒。
 5. 允许 captain 直接取消 `pending && attempt === 0` 的未启动成员任务，解除附件 S2 的取消死结。
 
-[0.1.18 release notes](../../release-notes/v0.1.18.md) 也记录了这些行为。本次额外运行实际 0.1.18 包，确认它已经具有修复后的消息行为，而非只依据发布文案归因。
+[0.1.18 release notes](../../../release-notes/v0.1.18.md) 也记录了这些行为。本次额外运行实际 0.1.18 包，确认它已经具有修复后的消息行为，而非只依据发布文案归因。
 
 **归因限制：** 同成员改派的 `invalidateTaskAttempt` 早在 `8efbac8` 已存在；这次三版均从 attempt 1 到 2。附件 P1/S1 的“同成员永远 no-op”没有在本次条件下复现，不能把它单独笼统归因于 68fe529。同样，显式 assignee 三版都保留，未复现 P2 的丢失。原报告的特定 quality pipeline、旧上下文及 P3/P4/P6 的组合状态没有完整重放。
 
@@ -82,7 +82,7 @@
 从仓库根目录执行，用全新的目录，避免覆盖历史证据：
 
 ```sh
-node docs/issue-159-audit-2026-09-24/prepare-runner.mjs /tmp/issue159-runner-new
+node docs/archive/issue-159-audit-2026-09-24/prepare-runner.mjs /tmp/issue159-runner-new
 mkdir -p /tmp/issue159-artifacts-new
 npm pack @nanmicoder/dsh-agent-teams@0.1.20 --ignore-scripts --pack-destination /tmp/issue159-artifacts-new
 node /tmp/issue159-runner-new/harness-runtime-verify.mjs --host-version 0.1.5-rc.1 --artifact /tmp/issue159-artifacts-new/nanmicoder-dsh-agent-teams-0.1.20.tgz --scenario stability --report-dir /tmp/issue159-latest-new

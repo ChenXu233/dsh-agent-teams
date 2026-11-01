@@ -22,7 +22,7 @@
 
 已固定引入 `oh-my-dsh/dsh-plugin-upgrade-skill` 的 `cd4d497588cdd4f16300622779b62a78fe803169`，保留 MIT 和 115 个上游文件摘要，包含 9 个 skills。规范源是 `skills/`，`.dsh/skills` 为完整同步副本，`.agents/skills` 通过相对链接发现。本地适用规则单独记录，未改写上游指导。
 
-已检查其迁移卡、benchmarks 和更新测试：它们帮助选择审查路径，不是本插件的产品验收，也不会保证扫描零命中就没有接口风险。细节见 [skills 研究](../upgrade-skill-study-2026-09-06/README.md)、[维护流程](../maintenance-workflow.md)和 [贡献指南](../../CONTRIBUTING.md)。
+已检查其迁移卡、benchmarks 和更新测试：它们帮助选择审查路径，不是本插件的产品验收，也不会保证扫描零命中就没有接口风险。细节见 [skills 研究](../upgrade-skill-study-2026-09-06/README.md)、[维护流程](../../maintenance-workflow.md)和 [贡献指南](../../../CONTRIBUTING.md)。
 
 ## 验证证据
 

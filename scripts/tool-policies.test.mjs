@@ -21,7 +21,7 @@ import { createTeamDir, readTeam } from '../lib/state.js'
  * Issue #59: reusable per-member tool policies. These are the pure resolver /
  * helper contracts; the real host path (child schema assembly, forced
  * invocation rejection, cold resume) is covered by the acceptance case under
- * `docs/issue-maintenance-2026-10-10/policies/REPORT.md`.
+ * `docs/archive/issue-maintenance-2026-10-10/policies/REPORT.md`.
  */
 
 test('policy resolution trims, de-duplicates, and keeps declaration order', () => {

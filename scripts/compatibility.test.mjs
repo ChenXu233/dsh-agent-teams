@@ -123,7 +123,7 @@ test('host versions order like semver prereleases', () => {
 })
 
 // A source candidate above this fork's floor (0.2.1-rc.2) keeps the requirement unchanged.
-const sourcePolicy = { ...policy, sourceCandidates: [{ version: '0.2.2-alpha.2', repository: 'https://github.com/deepseek-ai/deepseek-harness', commit: '21638c56315ae6a2b552d6091945d3144c9af32e', evidence: 'docs/harness-0.2.0-pre-adaptation/README.md' }] }
+const sourcePolicy = { ...policy, sourceCandidates: [{ version: '0.2.2-alpha.2', repository: 'https://github.com/deepseek-ai/deepseek-harness', commit: '21638c56315ae6a2b552d6091945d3144c9af32e', evidence: 'docs/archive/harness-0.2.0-pre-adaptation/README.md' }] }
 
 test('source candidates are covered by the requirement without becoming the floor', () => {
   const pkg = readPackage()

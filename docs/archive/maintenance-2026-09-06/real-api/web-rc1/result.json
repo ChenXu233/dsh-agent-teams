@@ -41,7 +41,7 @@
   "taskOutput": "计算 1²+2²+…+10²：各平方为 [1,4,9,16,25,36,49,64,81,100]，累加和与公式 n(n+1)(2n+1)/6 (n=10) 两种方法均得 385。已独立完成并通过 AgentTeams 向 captain 报告。",
   "entry": "Parent sent one initial prompt through Ego Lite in the actual Web UI; no prompt was injected by the driver. Workspace registration used the real workspaceRegistry API.",
   "uiAcceptance": "Parent confirmed actual /tmp workspace, real model badge, delivered worker, 1/1 completed, captain confirmation of 385 and notification; screenshot was saved and visually inspected.",
-  "screenshot": "/Users/nanmi/workspace/myself_code/dsh-agent-teams-compat/docs/maintenance-2026-09-06/web-real-api-rc1.png",
+  "screenshot": "/Users/nanmi/workspace/myself_code/dsh-agent-teams-compat/docs/archive/maintenance-2026-09-06/web-real-api-rc1.png",
   "extraModelToolCalls": [
     {
       "name": "bash",

@@ -9,7 +9,7 @@
  *
  * These tests import the BUILT client helper the browser bundle is generated
  * from. The fixtures are the values recorded by the real runs documented in
- * docs/issue-maintenance-2026-10-10/card/REPORT.md (dsh 0.2.0-rc.2 +
+ * docs/archive/issue-maintenance-2026-10-10/card/REPORT.md (dsh 0.2.0-rc.2 +
  * deepseek-account/deepseek-flash); the canonical ids are re-checked against
  * the real host key function rather than hard-coded twice.
  */

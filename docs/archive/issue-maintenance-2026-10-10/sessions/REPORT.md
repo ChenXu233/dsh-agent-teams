@@ -182,7 +182,7 @@ node node_modules/@nanmicoder/dsh-agent-teams/scripts/legacy-session-source-repa
 
 `scripts/lineage-identity.test.mjs`（接入 `pnpm verify:lineage-identity`，也在 `pnpm verify` 内）以**普通值**直接调用 `teamLeadMatch` / `isTopLevelSession`（不 mock Context/Agents/Registry/LLM），固定"权限只收不放"的方向：原 captain、任意层级 top-level fork 后代、普通 member/subagent、**已 removed 的 member 及其后代**、member 自己的 fork、无关 lineage、以及无 roster 行的精确 id 合同、`isTopLevelSession` 的三类头部。
 
-写这组用例时发现一处合同缺口并做了最小收紧（`src/lineage.ts`，仅此一处判断）：此前"本会话 id 命中成员行"只排除**非 removed** 行，因此一个被移除成员的行若以 `inheritsLead` 为真的身份出现会经祖先链拿到队长身份。现任何列在成员行里的会话 id 都不再是 lead（不论状态），成员**参与权**仍由 team 查询里的 removed 过滤控制。该收紧不改变已验收的 #176 流程：收紧后重新完整跑了一遍真实宿主 fork matrix（warm/cold/多层/成员投递/成员无越权/跨 workspace/归属不变）全部通过（`candidate/issue-176-matrix-final.json` 摘要见 `docs/issue-maintenance-2026-10-10/sessions/evidence.json`）。
+写这组用例时发现一处合同缺口并做了最小收紧（`src/lineage.ts`，仅此一处判断）：此前"本会话 id 命中成员行"只排除**非 removed** 行，因此一个被移除成员的行若以 `inheritsLead` 为真的身份出现会经祖先链拿到队长身份。现任何列在成员行里的会话 id 都不再是 lead（不论状态），成员**参与权**仍由 team 查询里的 removed 过滤控制。该收紧不改变已验收的 #176 流程：收紧后重新完整跑了一遍真实宿主 fork matrix（warm/cold/多层/成员投递/成员无越权/跨 workspace/归属不变）全部通过（`candidate/issue-176-matrix-final.json` 摘要见 `docs/archive/issue-maintenance-2026-10-10/sessions/evidence.json`）。
 
 同宿主 `pnpm verify` 全套（含 lifecycle/capabilities/member-failure/quality-gates/harness-contract/lineage-identity/legacy-session-repair）通过：`0` 失败（`logs/candidate-verify-final4.log`，末尾 `Git artifacts match source and build settings.`）。
 
@@ -222,7 +222,7 @@ node node_modules/@nanmicoder/dsh-agent-teams/scripts/legacy-session-source-repa
 
 ## 6. 交付物与复核入口
 
-- 可审阅小结：`docs/issue-maintenance-2026-10-10/sessions/evidence.json`（真实 matrix 结论 + 纯函数合同用例 + 恢复工具调用方式；不含大日志与凭据）
+- 可审阅小结：`docs/archive/issue-maintenance-2026-10-10/sessions/evidence.json`（真实 matrix 结论 + 纯函数合同用例 + 恢复工具调用方式；不含大日志与凭据）
 - 提交：`38a84b9f3133ccd12ce2740a865cb7850239bdad`（主体修复）、`5b21ccd`（报告）、`d64bc21`（#160 恢复工具 review 收紧）
   （分支 `codex/issues-20261010-sessions`，未合回 main、未推送、未发布）
 - 打包哈希：`pnpm pack` → `/private/tmp/agentteams-issues-20261010/sessions/pack/nanmicoder-dsh-agent-teams-0.1.22.tgz`

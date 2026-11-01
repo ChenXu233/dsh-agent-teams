@@ -1,5 +1,5 @@
 # AgentTeams 适配 DeepSeek Harness 0.1.5-rc.1
-> 后续状态：本审查下述结论针对旧基线。适配已在本地候选 `0.1.17-rc.1` 实现；最终包的四版本矩阵、Ego Lite 真实 API 与会话迁移证据见 [实现验收](../releases/v0.1.17-rc.1/README.md)。npm 发布与远端验收状态见实现验收目录的 publication.md。
+> 后续状态：本审查下述结论针对旧基线。适配已在本地候选 `0.1.17-rc.1` 实现；最终包的四版本矩阵、Ego Lite 真实 API 与会话迁移证据见 [实现验收](../../releases/v0.1.17-rc.1/README.md)。npm 发布与远端验收状态见实现验收目录的 publication.md。
 
 审查日期：2026-09-10。结论：**当前 AgentTeams 0.1.16-rc.3 不能直接宣称支持 0.1.5-rc.1。至少两个宿主接口阻塞已经由精确 tag 源码确认；此外需要适配 Web 主面板导航，并验证会话迁移。Skills 已升级，但其迁移卡还未覆盖目标版本。**
 
@@ -129,7 +129,7 @@ Session wire 证据：[session-controller/types.ts](https://github.com/deepseek-
 - 来源从 `cd4d497588cdd4f16300622779b62a78fe803169` 更新为查询时 main 的 `ecab245c6c1831c51b0240aca13573b94a6e525e`；审阅后导入，9 个 skill / 120 文件，5 新增 + 15 修改，许可证及 4 个执行文件模式未变。
 - 保留 `skills/` canonical、`.dsh/skills/` 镜像和 `.agents/skills/` 符号链接；项目自维护 `dsh-plugin-development` 不纳入上游清单，合计 10 skills / 121 文件。
 - 新增 0.1.3-alpha.1/alpha.2 卡、SQLite 历史删除回填、precision checklist、inject-lint、workflow 编排修订。卡仍止于 **0.1.3-alpha.2**，缺失到 **0.1.5-rc.1** 的迁移段；不能一键自动迁移 AgentTeams。[上游固定 commit](https://github.com/oh-my-dsh/dsh-plugin-upgrade-skill/tree/ecab245c6c1831c51b0240aca13573b94a6e525e)。
-- 增加 `pnpm update:skills <upstream-checkout> <full-commit> [--apply]`：默认预览，显式 commit，保护本地修改，同时更新两份内容、模式与锁定清单；拒绝未审阅的 roster/删除/许可证变化。[项目操作说明](../../skills/README.md)。
+- 增加 `pnpm update:skills <upstream-checkout> <full-commit> [--apply]`：默认预览，显式 commit，保护本地修改，同时更新两份内容、模式与锁定清单；拒绝未审阅的 roster/删除/许可证变化。[项目操作说明](../../../skills/README.md)。
 - 通用安装可用上游推荐的 `npx skills add oh-my-dsh/dsh-plugin-upgrade-skill`；[Skills CLI](https://github.com/vercel-labs/skills) 提供 `npx skills update [skills]`。它不管理本项目自有锁定清单，因此这里采用项目更新器。
 - 新 inject-lint 把 Cordis 固定检查为 `^4.0.1`，仅适用于其 alpha.2 范围；本项目 `^4.0.2` 不应因此降级。上游发布配方仍包含重打已发布 tag 的历史做法，项目规则明确不直接采用；上游文件保持原样。
 
