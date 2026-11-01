@@ -219,7 +219,16 @@ export function apply(ctx) {
     const settledAgent = ctx.agents.get(settledId);
     memberResponses.set(settledId, { finish: true }); gates.get(settledId)();
     await settledAgent.whenIdle();
-    await until(() => ctx.agents.get(settledId) === undefined, 'native activation settles');
+    // This fork keeps a settled member resident (a pending next-step placeholder
+    // whose source kind is the plugin's). The child Agent stays idle instead of
+    // being disposed; both states are quiescent, which is what the dedup checks
+    // below need.
+    await until(() => {
+      const agent = ctx.agents.get(settledId);
+      if (agent === undefined) return true;
+      if (agent.status !== 'idle') return false;
+      return (agent.inbox?.nextStep ?? []).every(message => message.source?.kind === 'agent-teams');
+    }, 'native activation settles or stays parked idle');
     await captain.agent.whenIdle();
     assert.equal(requests.filter(r => r.sessionId === captainId).length, parentAfterReport, 'a delivered completion must not wake the parent again');
     record({ event: 'stability-settlement-dedup-passed', reportWakes: parentAfterReport - parentBeforeReport, duplicateModelRequests: 0 });
