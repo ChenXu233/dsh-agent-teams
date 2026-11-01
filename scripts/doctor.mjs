@@ -4,6 +4,9 @@ import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { compareHostVersions, minimumHost, policy, serverRuntimePeers, validatePolicy } from './compatibility.mjs'
 
+// The installed plugin's name differs per distribution (upstream @nanmicoder, this fork @chenxu233).
+const PLUGIN_NAME = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name
+
 function manifest(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
 }
@@ -51,8 +54,8 @@ export function inspectInstallation(hostRoot, profileRoot, support = policy) {
   walk(hostPath)
   let plugin
   if (profileRoot) {
-    const path = locatePackage('@nanmicoder/dsh-agent-teams', resolve(profileRoot))
-    if (!path) missing.push('@nanmicoder/dsh-agent-teams (profile)')
+    const path = locatePackage(PLUGIN_NAME, resolve(profileRoot))
+    if (!path) missing.push(`${PLUGIN_NAME} (profile)`)
     else {
       const pkg = manifest(path)
       plugin = { version: pkg.version, path: dirname(path) }

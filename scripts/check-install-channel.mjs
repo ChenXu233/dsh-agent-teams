@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const packageName = '@nanmicoder/dsh-agent-teams'
+const packageName = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name
 export async function checkInstallChannel({ pnpmCli, registry, expectedVersion }) {
   const url = new URL(registry)
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && url.hostname === '127.0.0.1')) throw Error('Use HTTPS or a loopback fixture registry')

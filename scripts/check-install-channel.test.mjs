@@ -3,7 +3,10 @@ import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 import { checkInstallChannel } from './check-install-channel.mjs'
+
+const PLUGIN_NAME = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name
 
 // Use the exact desktop pnpm supplied by CI; never silently skip this regression.
 const pnpmCli = process.env.DESKTOP_PNPM_CLI
@@ -11,7 +14,7 @@ assert.ok(pnpmCli, 'DESKTOP_PNPM_CLI must point at pnpm 11.28.5/bin/pnpm.mjs')
 
 test('desktop pnpm latest is not ready until the release ages; no policy exemption is added', async () => {
   let matured = false, unavailable = false
-  const name = '@nanmicoder/dsh-agent-teams'
+  const name = PLUGIN_NAME
   const server = createServer((request, response) => {
     if (unavailable) { response.writeHead(503).end('unavailable'); return }
     if (decodeURIComponent(request.url).split('?')[0] !== `/${name}`) { response.writeHead(404).end(); return }
