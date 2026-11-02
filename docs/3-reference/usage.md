@@ -53,6 +53,8 @@
 | 工具 | 作用 |
 |---|---|
 | `agent_teams_create` | 创建团队，调用者成为队长（一个队长同时只带一个团队） |
+| `agent_teams_edit_plan` | 原子改写计划：staged 阶段改任务与名册但不启动任何工作；running 阶段只允许改尚未执行的 pending 任务 |
+| `agent_teams_approve` | 批准并启动 staged 计划：只在用户新回合显式批准后调用；Web 的 Approve & Run 走同一运行时 |
 | `agent_teams_add_member` | 拉成员入队（spawn 可续聊子代理 + 成员 persona） |
 | `agent_teams_remove_member` | 安全移除成员：撤销 attempt、回收其未完成任务、等待中断收敛后重新调度 |
 | `agent_teams_create_task` | 创建任务，支持合同字段、`dependencies`、`assignee`；halted 时默认拒绝，除非显式 `resume` |

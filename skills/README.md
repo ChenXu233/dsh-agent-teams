@@ -51,8 +51,8 @@ pnpm test:skills-updater
 2026-09-11 补充：维护者已明确将验收过的 `0.1.17-rc.1` 提升至 npm `latest`。RC 首发仍走 `next`，通过验收后可显式提升同一不可变产物；GitHub Release 保留预发布标志。此项目规则覆盖上游 skill 的“预发布只能进入非 latest”默认约定，流程见[维护指南](../docs/2-how-to/release.md)。
 
 1. **版本卡是线索，不是完整 API 差异。** 当前库没有 `registerContinuableSetup`、`followup`、`sendMessage` 的专项迁移指导。`report → send_message` 工具卡不等同于子代理 runtime API 迁移。#130 必须继续用精确官方实现和本项目生命周期测试核验。
-2. **宿主、插件、发布渠道分别记录。** GitHub tag 不代表 npm 已发布；宿主 `latest` 与插件 `latest` 不保证兼容。普通用户默认组合只能来自 AgentTeams 验收矩阵；Alpha 预览须显式选择。
-3. **精确 CLI 版本还不够。** 固定并检查完整宿主依赖闭包和实际 profile。不要将 `npm install -g @deepseek-ai/dsh@<exact>` 视为所有分包已固定。发布包的 `engines.dsh` 是开放下限（安装门槛），DSH peer 一律为 `*`，都不是“已测”承诺；已测范围只记录在 `compatibility.json`。不要把测试矩阵枚举进 peer 或 `engines.dsh`：0.1.27 因此在宿主每发一个新 RC 时整体拒装。
+2. **宿主、插件、发布渠道分别记录。** GitHub tag 不代表 npm 已发布；宿主 `latest` 与插件 `latest` 不保证兼容，也不要求落在同一版本线。默认组合就是「不低于下限的宿主 + npm `latest` 插件」，没有按宿主维护的验收矩阵，也没有需要跟进的支持清单（见[兼容性参考](../docs/3-reference/compatibility.md)）。预发布须显式选择 `next` 或精确版本。
+3. **精确 CLI 版本还不够。** 固定并检查完整宿主依赖闭包和实际 profile。不要将 `npm install -g @deepseek-ai/dsh@<exact>` 视为所有分包已固定。发布包的 `engines.dsh` 是开放下限（安装门槛），DSH peer 一律为 `*`，都不是“已测”承诺——`compatibility.json` 只声明下限，已测范围是 CI 每次跑出来的一次性证据，不写进任何声明文件。不要把测试矩阵枚举进 peer 或 `engines.dsh`：0.1.27 因此在宿主每发一个新 RC 时整体拒装。
 4. **发布文档中的历史基线不直接采用。** 当前导入版本仍出现“npm 基线 0.1.1-rc.2”“所有 0.1.2-alpha.* 未发布”和宽 peer `<0.2.0` 的陈旧或矛盾说明。以当次 registry 查询、精确产物和实测矩阵为准。
 5. **发布校验需包含宿主支持证据。** 上游 `verify-release` 只校验插件自身版本/标签；无后缀插件可能仍然只支持 Alpha 宿主。通过该脚本不能直接进入 `latest`。它还强制无后缀版本使用 `latest`，因此并不支持所有候选包推广流程。
 6. **回退要区分对象。** Git tag、GitHub release、npm tarball、dist-tag、用户 profile 和持久化数据是不同对象。不要套用“删除/重指向 Git tag”来回滚 npm 包或用户安装。
