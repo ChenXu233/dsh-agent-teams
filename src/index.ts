@@ -48,7 +48,7 @@ import { applyMemberRoute } from './member-route-registry.ts'
 import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
-import { deliverToMember, interruptMember, liveMemberAgent, resolveMemberAgent } from './members.ts'
+import { deliverToMember, interruptMember, liveMemberAgent, memberActivity, resolveMemberAgent } from './members.ts'
 import { installTeamCapabilities } from './capabilities.ts'
 import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
@@ -513,8 +513,9 @@ export function apply(ctx: Context, config: Config): void {
             send(404, { error: 'archived team not found' })
             return
           }
-          const attached = archived.members.filter((member) => member.id !== '' && ctx.agents.get(member.id as import('@deepseek-ai/dsh-session').SessionId) !== undefined)
-          if (attached.length > 0) {
+          const activity = memberActivity(ctx, archived.members.map((member) => member.id))
+          const running = [...activity.values()].filter((state) => state === 'running')
+          if (running.length > 0) {
             send(409, { error: 'a member of this team is still running; stop it before deleting the archive' })
             return
           }
