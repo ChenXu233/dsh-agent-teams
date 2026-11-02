@@ -30,7 +30,7 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
 
 ## Releases
 
-[v0.2.1-rc.2](./release-notes/v0.2.1-rc.2.md) ships on npm `next`, not `latest`. It turns the member page's model seat and slash-command launcher into pure slot contributions — the host composer keeps the conversation and no host service is patched — and drops host pinning entirely: `compatibility.json` now declares one install floor (`minimumHost: 0.2.1-rc.2`, published as `engines.dsh: >=0.2.1-rc.2`) with no enumerated tested list and no "recommended" host to keep in sync, so any newer Harness release installs without a plugin release. The stable line remains [v0.2.0](./release-notes/v0.2.0.md) on npm `latest`. See the [floor declaration](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
+[v0.2.1](./release-notes/v0.2.1.md) is the stable release on npm `latest`. It drops host pinning entirely: `compatibility.json` declares one install floor (`minimumHost: 0.2.1-rc.2`, published as `engines.dsh: >=0.2.1-rc.2`) with no enumerated tested list and no "recommended" host to keep in sync, so any newer Harness release installs without a plugin release. Member page controls remain pure slot contributions — the host composer keeps the conversation and no host service is patched. The previous stable was [v0.2.0](./release-notes/v0.2.0.md). See the [floor declaration](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
 
 ## Why AgentTeams?
 
@@ -49,12 +49,12 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Supported pair: DeepSeek Harness `>=0.2.1-rc.2` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md). The plugin declares one floor and nothing else.**
+**Supported pair: DeepSeek Harness `>=0.2.1-rc.2` + AgentTeams [v0.2.1](./release-notes/v0.2.1.md). The plugin declares one floor and nothing else.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| The floor (oldest supported host) | `0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
-| Any later RC, prerelease or stable release | `>=0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
+| The floor (oldest supported host) | `0.2.1-rc.2` | [v0.2.1](./release-notes/v0.2.1.md) |
+| Any later RC, prerelease or stable release | `>=0.2.1-rc.2` | [v0.2.1](./release-notes/v0.2.1.md) |
 
 There is no enumerated tested list to keep in sync. `engines.dsh` carries the floor and the host reads it before peers, so newer hosts install directly; CI exercises the floor, and everything above it is assumed compatible. A host below the floor is rejected by the installer.
 
@@ -66,7 +66,7 @@ In the app sidebar, open **Plugins → Add plugin**. You can install directly fr
 @chenxu233/dsh-agent-teams
 ```
 
-The package name resolves npm `latest`. To pin a plugin version, append `@0.2.1-rc.2` for the current prerelease, or the stable tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
+The package name resolves npm `latest`. To pin a plugin version, append `@0.2.1`, or the tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
 The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Compare the embedded core with the floor `0.2.1-rc.2`: anything equal or newer installs, and no per-version exemption exists to maintain. See the [release migration evidence](./docs/harness-0.2.1-rc.2/README.md).
 

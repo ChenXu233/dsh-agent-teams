@@ -30,7 +30,7 @@
 
 ## 版本更新
 
-[v0.2.1-rc.2](./release-notes/v0.2.1-rc.2.md) 发布到 npm `next` 而非 `latest`。这一版把成员页的模型座位与 `/` 命令启动器改成纯槽位贡献（宿主 composer 继续负责对话，插件不再修改任何宿主服务），并彻底去掉宿主钉版：`compatibility.json` 只声明一个安装下限（`minimumHost: 0.2.1-rc.2`，发布为 `engines.dsh: >=0.2.1-rc.2`），不再维护已测列表，也不再有需要同步的「推荐宿主」，Harness 发新版本不必再发插件。正式线仍为 [v0.2.0](./release-notes/v0.2.0.md)（npm `latest`）。下限声明见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
+[v0.2.1](./release-notes/v0.2.1.md) 是 npm `latest` 上的正式版本。这一版彻底去掉宿主钉版：`compatibility.json` 只声明一个安装下限（`minimumHost: 0.2.1-rc.2`，发布为 `engines.dsh: >=0.2.1-rc.2`），不再维护已测列表，也不再有需要同步的「推荐宿主」，Harness 发新版本不必再发插件。成员页控件仍是纯槽位贡献：宿主 composer 继续负责对话，插件不修改任何宿主服务。上一版正式版为 [v0.2.0](./release-notes/v0.2.0.md)。下限声明见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
 
 ## 为什么需要 AgentTeams？
 
@@ -48,12 +48,12 @@
 
 ## 安装与版本选择
 
-**支持组合：DeepSeek Harness `>=0.2.1-rc.2` + AgentTeams [v0.2.0](./release-notes/v0.2.0.md)。插件只声明一个下限，别的一概不列。**
+**支持组合：DeepSeek Harness `>=0.2.1-rc.2` + AgentTeams [v0.2.1](./release-notes/v0.2.1.md)。插件只声明一个下限，别的一概不列。**
 
 | 使用场景 | DeepSeek Harness | AgentTeams 插件 |
 | --- | --- | --- |
-| 下限（最老的受支持宿主） | `0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
-| 此后任何 RC / 预发布 / 正式版 | `>=0.2.1-rc.2` | [v0.2.0](./release-notes/v0.2.0.md) |
+| 下限（最老的受支持宿主） | `0.2.1-rc.2` | [v0.2.1](./release-notes/v0.2.1.md) |
+| 此后任何 RC / 预发布 / 正式版 | `>=0.2.1-rc.2` | [v0.2.1](./release-notes/v0.2.1.md) |
 
 这里没有需要同步的已测列表。宿主在读取 peer 之前先看 `engines.dsh` 这一个下限，所以更新的宿主可以直接安装；CI 只跑下限，比下限新的宿主按兼容处理。低于下限的宿主的会被安装器拒绝。
 
@@ -65,7 +65,7 @@
 @chenxu233/dsh-agent-teams
 ```
 
-不带版本号的包名会安装 npm `latest`；需要锁定插件版本时可追加 `@0.2.1-rc.2`（当前预发布）或上表中的正式版本。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
+不带版本号的包名会安装 npm `latest`；需要锁定插件版本时可追加 `@0.2.1`。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
 
 桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。判断标准只有一个：内嵌内核是否不低于下限 `0.2.1-rc.2`；等于或更高即可安装，不存在需要维护的分版本豁免。详见[迁移验收记录](./docs/harness-0.2.1-rc.2/README.md)。
 

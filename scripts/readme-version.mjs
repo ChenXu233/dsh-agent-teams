@@ -24,11 +24,15 @@ export function publishedVersions(notesDirectory) {
     .sort()
 }
 
-export function findStaleVersionReferences(markdown, version, known) {
+// A README names two different version spaces: the plugin it publishes and the DSH host it
+// requires. The host floor can coincide with an older plugin version number (0.2.1-rc.2 was both),
+// so host versions may appear in prose; pinning one in an install command is still rejected below.
+export function findStaleVersionReferences(markdown, version, known, hosts = []) {
   const body = stripReleaseNoteLinks(markdown)
+  const exempt = new Set(hosts)
   const stale = []
   for (const candidate of known) {
-    if (candidate === version) continue
+    if (candidate === version || exempt.has(candidate)) continue
     // Match whole versions only: `0.1.5` must not be found inside `0.1.5-rc.1`.
     const pattern = new RegExp(`(?<![0-9A-Za-z.-])${escapeForRegExp(candidate)}(?![0-9A-Za-z.-])`, 'g')
     for (const match of body.matchAll(pattern)) {
@@ -46,10 +50,10 @@ export function findPinnedInstallVersions(markdown) {
   return [...markdown.matchAll(PINNED_INSTALL)].map(match => match[1])
 }
 
-export function checkReadmeVersions({ version, known, files }) {
+export function checkReadmeVersions({ version, known, files, hosts = [] }) {
   const problems = []
   for (const [name, markdown] of Object.entries(files)) {
-    for (const stale of findStaleVersionReferences(markdown, version, known)) {
+    for (const stale of findStaleVersionReferences(markdown, version, known, hosts)) {
       problems.push(`${name} still names ${stale.version} outside a release-notes link`)
     }
     for (const match of markdown.matchAll(PINNED_INSTALL)) {
@@ -69,10 +73,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const files = Object.fromEntries(
     README_FILES.map(name => [name, readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')])
   )
+  const support = JSON.parse(readFileSync(new URL('../compatibility.json', import.meta.url), 'utf8'))
   const problems = checkReadmeVersions({
     version: pkg.version,
     known: publishedVersions(notesDirectory),
-    files
+    files,
+    hosts: [support.minimumHost]
   })
   if (problems.length > 0) {
     console.error(`README version check failed for ${pkg.version}:`)

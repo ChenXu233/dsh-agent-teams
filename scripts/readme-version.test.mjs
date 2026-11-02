@@ -57,6 +57,18 @@ test('latest updates are allowed while stale pins and undeclared channels remain
   assert.ok(check('next').length > 0)
 })
 
+test('a host floor that shares a number with an older plugin version is allowed in prose but not as a pin', () => {
+  const hosts = ['0.1.17']
+  const prose = 'Requires Harness \`>=0.1.17\`; the floor is \`0.1.17\` or newer.'
+  assert.deepEqual(findStaleVersionReferences(prose, '0.1.20', KNOWN, hosts), [])
+  assert.ok(findStaleVersionReferences(prose, '0.1.20', KNOWN).length > 0, 'without the host exemption it is still stale')
+  const pinned = checkReadmeVersions({
+    version: '0.1.20', known: KNOWN, hosts,
+    files: { 'README.md': 'dsh plugin add @chenxu233/dsh-agent-teams@0.1.17' },
+  })
+  assert.ok(pinned.length > 0, 'a stale install pin is still rejected')
+})
+
 test('published versions come from the release notes themselves', () => {
   const known = publishedVersions(fileURLToPath(new URL('../release-notes', import.meta.url)))
   assert.ok(known.includes('0.1.18') && known.includes('0.1.16-rc.2'), known.join(', '))
@@ -68,5 +80,6 @@ test('the checked-in READMEs match the package version', () => {
     ['README.md', 'README_ZH.md'].map(name => [name, readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')])
   )
   const known = publishedVersions(fileURLToPath(new URL('../release-notes', import.meta.url)))
-  assert.deepEqual(checkReadmeVersions({ version: pkg.version, known, files }), [])
+  const support = JSON.parse(readFileSync(new URL('../compatibility.json', import.meta.url), 'utf8'))
+  assert.deepEqual(checkReadmeVersions({ version: pkg.version, known, files, hosts: [support.minimumHost] }), [])
 })
