@@ -4,6 +4,14 @@ on:
   pull_request:
   push:
     branches: [main]
+    # A documentation-only push cannot change the package, the host matrix or
+    # the README version references that this workflow gates. Release tags are
+    # unaffected: publish.yml calls this workflow through workflow_call, which
+    # ignores path filters.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.github/ISSUE_TEMPLATE/**'
   workflow_dispatch:
     inputs:
       host:
@@ -24,6 +32,12 @@ on:
 
 permissions:
   contents: read
+
+# Superseded pull-request pushes are cheap to abandon; a push to main is not
+# cancelled, so the branch always keeps a complete result for the commit.
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
