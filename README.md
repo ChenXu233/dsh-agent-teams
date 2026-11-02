@@ -30,7 +30,7 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
 
 ## Releases
 
-[v0.2.1](./release-notes/v0.2.1.md) is the stable release on npm `latest`. It drops host pinning entirely: `compatibility.json` declares one install floor (`minimumHost: 0.2.1-rc.2`, published as `engines.dsh: >=0.2.1-rc.2`) with no enumerated tested list and no "recommended" host to keep in sync, so any newer Harness release installs without a plugin release. Member page controls remain pure slot contributions — the host composer keeps the conversation and no host service is patched. The previous stable was [v0.2.0](./release-notes/v0.2.0.md). See the [floor declaration](./compatibility.json) and [verification scope](./docs/maintenance-workflow.md).
+[v0.2.1](./release-notes/v0.2.1.md) is the stable release on npm `latest`. It drops host pinning entirely: `compatibility.json` declares one install floor (`minimumHost: 0.2.1-rc.2`, published as `engines.dsh: >=0.2.1-rc.2`) with no enumerated tested list and no "recommended" host to keep in sync, so any newer Harness release installs without a plugin release. Member page controls remain pure slot contributions — the host composer keeps the conversation and no host service is patched. The previous stable was [v0.2.0](./release-notes/v0.2.0.md). See the [floor declaration](./compatibility.json) and [verification scope](./docs/2-how-to/verify.md).
 
 ## Why AgentTeams?
 
@@ -43,7 +43,7 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
 | **Direct messaging** | Members send durable mailbox messages directly to teammates or the captain—no relay required. |
 | **Live activity panel** | The Web UI combines segmented progress, a collapsible roster, and an interactive task DAG; running tasks show the member's model, and completed archives retain their full member and task history. |
 | **Plan before execution** | Normal `/agent-teams` runs stage an unspawned roster and DAG first. The Web panel uses the host model catalog for member routes. Returning to chat stops the planning turn, asks what should change, and revises the same draft; discarding archives the draft, aborts the turn, and explicitly prevents automatic recreation. Only **Approve & Run** enables scheduling; each member starts with its first ready task. |
-| **Quality gates** | Opt-in quality tasks support requirements → implementation → verification → review → integration contracts, automatic repair/re-review, and explicit resume. Scope control is a completion-time audit, not host write interception. See [docs/quality-gates.md](./docs/quality-gates.md). |
+| **Quality gates** | Opt-in quality tasks support requirements → implementation → verification → review → integration contracts, automatic repair/re-review, and explicit resume. Scope control is a completion-time audit, not host write interception. See [docs/3-reference/quality-gates.md](./docs/3-reference/quality-gates.md). |
 
 The conversation card and activity panel use Harness's official locale service. They follow live language changes between English and Simplified Chinese—including status labels, dynamic summaries, controls, archive markers, and accessibility text—without a page reload or a separate plugin setting.
 
@@ -68,7 +68,7 @@ In the app sidebar, open **Plugins → Add plugin**. You can install directly fr
 
 The package name resolves npm `latest`. To pin a plugin version, append `@0.2.1`, or the tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
-The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Compare the embedded core with the floor `0.2.1-rc.2`: anything equal or newer installs, and no per-version exemption exists to maintain. See the [release migration evidence](./docs/harness-0.2.1-rc.2/README.md).
+The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Compare the embedded core with the floor `0.2.1-rc.2`: anything equal or newer installs, and no per-version exemption exists to maintain. See the [compatibility floor](./docs/3-reference/compatibility.md).
 
 ### CLI / Web: 1. Install DeepSeek Harness
 
@@ -77,7 +77,7 @@ npm install --global @deepseek-ai/dsh
 dsh --version
 ```
 
-The command selects the host's npm `latest`; after upgrading, `dsh --version` only has to be at or above the floor `0.2.1-rc.2`. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/maintenance-workflow.md).
+The command selects the host's npm `latest`; after upgrading, `dsh --version` only has to be at or above the floor `0.2.1-rc.2`. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/2-how-to/release.md).
 
 ### CLI / Web: 2. Install the AgentTeams plugin
 
@@ -97,11 +97,11 @@ dsh plugin --profile web add github:NanmiCoder/dsh-agent-teams
 
 To update, run the command again with the new version, then restart the profile; a bare package name can retain an already installed exact version. For 24 hours after a release, a bare package name or `@latest` installs the previous version. If a registry mirror has not synced the release, append `--registry=https://registry.npmjs.org` to the npm command. GitHub default-branch code may be newer than npm `latest`. The default branch includes the verified server, client, and type build outputs in `lib/`. The repository distributes these outputs so installation does not need a `prepare` hook or build-script approval. Source maintainers must run `pnpm build` and update the committed outputs whenever the source changes. Existing npm releases remain immutable.
 
-For a manually cloned checkout, run `pnpm install --frozen-lockfile` and `pnpm build` after pulling, then restart the corresponding Harness process. Updating Git alone does not update local build output. See the [maintenance guide](./docs/maintenance-workflow.md).
+For a manually cloned checkout, run `pnpm install --frozen-lockfile` and `pnpm build` after pulling, then restart the corresponding Harness process. Updating Git alone does not update local build output. See the [maintenance guide](./docs/2-how-to/release.md).
 
-> For `0.1.0-*` / `0.1.1-*` hosts older than `0.1.2-alpha.2`, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
+> A host below the floor cannot install this plugin. Keep the exact plugin version that worked on that host, or raise both ends together; the rule is in the [compatibility floor](./docs/3-reference/compatibility.md).
 
-See the [compatibility floor](./compatibility.json), [source installation and Alpha testing guide](./docs/maintenance-workflow.md), and [verification coverage and platform limits](./docs/archive/maintenance-2026-09-06/release/README.md).
+See the [compatibility floor](./compatibility.json), [source installation and Alpha testing guide](./docs/2-how-to/release.md), and [verification scope and platform limits](./docs/2-how-to/verify.md).
 
 Then ask for a team directly:
 
@@ -126,7 +126,7 @@ Team state is stored under `<workspace>/.agent-teams/`; the Web panel reads that
 
 Member creation is zero-interaction by default: a member on the captain's current LLM route snapshots that provider, model, and the captain's chosen reasoning effort, while a member on any other route keeps following that model's own default effort; later continuations restore the pinned selection. Only an explicit heterogeneous-team request (for example, “backend on provider A/model X, frontend on provider B/model Y”) supplies a member-specific `provider` + `model`; there is no per-member model or reasoning prompt.
 
-Captain sessions keep the concise core protocol and all 15 native team tools (the original 14 plus `agent_teams_run_command`) from their first request. All business tools are directly available; no loading tool or extra activation call is needed. Configured profiles retain their bounded directory in the fixed system prompt. Creating, approving, continuing or ending a team does not rewrite the system prompt or tool schemas. Core rules remain available after history compaction or discarded code-mode tool results. Members receive four team tools, fixed member instructions, and their ordinary coding/research tools. Web approval wakes the captain with a control message; later member reports wake it again. See the [fixed protocol and benchmark contract](./docs/progressive-loading.md).
+Captain sessions keep the concise core protocol and all 15 native team tools (the original 14 plus `agent_teams_run_command`) from their first request. All business tools are directly available; no loading tool or extra activation call is needed. Configured profiles retain their bounded directory in the fixed system prompt. Creating, approving, continuing or ending a team does not rewrite the system prompt or tool schemas. Core rules remain available after history compaction or discarded code-mode tool results. Members receive four team tools, fixed member instructions, and their ordinary coding/research tools. Web approval wakes the captain with a control message; later member reports wake it again. See the [fixed protocol and benchmark contract](./docs/3-reference/tool-surface.md).
 
 ## Slash command
 
@@ -195,7 +195,7 @@ This is model tool visibility and invocation policy for global tools, not an OS 
 
 `memberCommandDeny` is the deny list for the captain-only `agent_teams_run_command` tool (default `["agent-teams"]`, this plugin's own activation surface). Write command names **without** the leading slash: entries are normalized (surrounding whitespace, any number of leading slashes and case are ignored), so `compact`, `/Compact` and ` /COMPACT ` are the same switch; every entry also blocks its whole `<entry>-*` family (`review` denies `/review-tools`). An explicit `[]` denies **nothing** — the built-in `agent-teams` protection included — because the array is a literal replacement rather than an addition. An entry with no usable command name fails the plugin **load** with a readable first sentence instead of silently denying nothing. The activity panel's command bar is the human path and deliberately does not consult this list (the operator is the authorizer).
 
-`memberContext` gives each member a plugin-level context budget: when a member is **idle** and its measured context usage reaches the threshold, the plugin compacts it once and records the event. `maxTokens` (absolute) and `maxRatio` (a share of the member model's `contextWindow`; without a known window the ratio is ignored rather than guessed) — give at least one, and the smaller budget wins when both apply. `cooldownMs` (default `60000`) and `minTurnGap` (default `1`) debounce repeats; `onLimit` (default `compact`) also accepts `notify` (logs only, never compacts) or `off`. **With the whole `memberContext` block absent the feature is fully off** (no watchdog, no new fields) and behavior matches previous versions; to restore the old behavior either remove the block or keep a threshold and set `onLimit: off` (the block still needs at least one `maxTokens`/`maxRatio`, otherwise mounting fails). A member-level `context_max_tokens` (on a profile member row, an inline `plan` member row, `agent_teams_add_member`, or `agent_teams_edit_plan` `update_member`; pass `null` to clear; the pre-run plan review panel's member card also edits it directly — the input prefills the member's declared value, and saving it blank/cleared sends `null` to fall back to the plugin default) joins the same resolution — the smallest of the member value, the plugin `maxTokens`, and the window-derived ratio wins, so it only makes that member compact earlier and never loosens the plugin bound. A busy member or one with queued waking input is skipped and re-evaluated at the next idle boundary. `agent_teams_status` members can carry `context { tokens, limit, ratio, compactions, measured_at }` plus `context_live`, and the activity panel shows each member's usage/limit and compaction count. See [docs/usage.md](./docs/usage.md) for details.
+`memberContext` gives each member a plugin-level context budget: when a member is **idle** and its measured context usage reaches the threshold, the plugin compacts it once and records the event. `maxTokens` (absolute) and `maxRatio` (a share of the member model's `contextWindow`; without a known window the ratio is ignored rather than guessed) — give at least one, and the smaller budget wins when both apply. `cooldownMs` (default `60000`) and `minTurnGap` (default `1`) debounce repeats; `onLimit` (default `compact`) also accepts `notify` (logs only, never compacts) or `off`. **With the whole `memberContext` block absent the feature is fully off** (no watchdog, no new fields) and behavior matches previous versions; to restore the old behavior either remove the block or keep a threshold and set `onLimit: off` (the block still needs at least one `maxTokens`/`maxRatio`, otherwise mounting fails). A member-level `context_max_tokens` (on a profile member row, an inline `plan` member row, `agent_teams_add_member`, or `agent_teams_edit_plan` `update_member`; pass `null` to clear; the pre-run plan review panel's member card also edits it directly — the input prefills the member's declared value, and saving it blank/cleared sends `null` to fall back to the plugin default) joins the same resolution — the smallest of the member value, the plugin `maxTokens`, and the window-derived ratio wins, so it only makes that member compact earlier and never loosens the plugin bound. A busy member or one with queued waking input is skipped and re-evaluated at the next idle boundary. `agent_teams_status` members can carry `context { tokens, limit, ratio, compactions, measured_at }` plus `context_live`, and the activity panel shows each member's usage/limit and compaction count. See [docs/3-reference/usage.md](./docs/3-reference/usage.md) for details.
 
 `memberProvider` is the sub-agent runtime backend (`spawn` / `fork`), not an LLM provider. Cross-LLM-provider routing uses the optional `provider` + `model` fields of `agent_teams_add_member`; `memberModel` is only a model default for all members. A member on the captain's current provider/model inherits the captain's reasoning effort when the captain actually chose one; a changed provider or model — or a captain running on its model's own default — leaves the effort unpinned, so the member keeps following the target model's default instead of freezing today's value into `team.json`. To request a particular effort, pass the optional `reasoning_effort` field — one of the target model's supported effort ids, or `"default"` to force the model's own default.
 
@@ -208,7 +208,7 @@ This is model tool visibility and invocation policy for global tools, not an OS 
 - State is file-backed and serialized within one DSH process; concurrent processes editing the same team are not coordinated.
 - The activity panel reports persisted state as-is. Models may occasionally finish work without performing the expected task-state update.
 
-See [docs/usage.md](./docs/usage.md) for the full tool reference, state model, Web UI behavior, configuration, and known limits.
+See [docs/3-reference/usage.md](./docs/3-reference/usage.md) for the full tool reference, state model, Web UI behavior, configuration, and known limits.
 
 ## Plugin development Skill
 
@@ -222,12 +222,17 @@ npx skills add ChenXu233/dsh-agent-teams --skill dsh-plugin-development
 
 ## Documentation
 
+[docs/README.md](./docs/README.md) is the index: tutorials, how-tos, and references, with each fact kept in one place.
+
 | Guide | Covers |
 | --- | --- |
-| [Usage](./docs/usage.md) | Architecture, UI behavior, tools, configuration, limits, and validation |
-| [Verification](./docs/verification-guide.md) | Offline, composition, real e2e, and GUI verification |
-| [Plugin development](./docs/developing-dsh-plugins.md) | Human-readable guide built from this plugin |
-| [README writing](./docs/readme-writing-guide.md) | Repository documentation conventions |
+| [Usage](./docs/3-reference/usage.md) | Architecture, UI behavior, tools, configuration, limits, and validation |
+| [Verification](./docs/2-how-to/verify.md) | Offline, composition, real e2e, and GUI verification |
+| [Maintain and release](./docs/2-how-to/release.md) | Report → implementation → acceptance → publish |
+| [Compatibility](./docs/3-reference/compatibility.md) | The single install floor, and why there is no host list |
+| [Tool surface](./docs/3-reference/tool-surface.md) | Tool inventory, session identity, approval notification |
+| [Plugin development](./docs/1-tutorial/build-a-plugin.md) | Human-readable guide built from this plugin |
+| [README writing](./docs/2-how-to/write-docs.md) | Repository documentation conventions |
 
 ## Development
 

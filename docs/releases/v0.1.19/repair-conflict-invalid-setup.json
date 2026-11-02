@@ -1,5 +1,0 @@
-{
-  "countedAsPass": false,
-  "reason": "Model created placeholder work tasks; generated repair referenced work t1 instead of excluded implementation t4. Superseded by strict source checks.",
-  "originalRunnerReportedPassed": true
-}

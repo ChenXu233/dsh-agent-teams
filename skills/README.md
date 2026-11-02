@@ -48,7 +48,7 @@ pnpm test:skills-updater
 
 ## 本项目的适用规则
 
-2026-09-11 补充：维护者已明确将验收过的 `0.1.17-rc.1` 提升至 npm `latest`。RC 首发仍走 `next`，通过验收后可显式提升同一不可变产物；GitHub Release 保留预发布标志。此项目规则覆盖上游 skill 的“预发布只能进入非 latest”默认约定，流程见[维护指南](../docs/maintenance-workflow.md)。
+2026-09-11 补充：维护者已明确将验收过的 `0.1.17-rc.1` 提升至 npm `latest`。RC 首发仍走 `next`，通过验收后可显式提升同一不可变产物；GitHub Release 保留预发布标志。此项目规则覆盖上游 skill 的“预发布只能进入非 latest”默认约定，流程见[维护指南](../docs/2-how-to/release.md)。
 
 1. **版本卡是线索，不是完整 API 差异。** 当前库没有 `registerContinuableSetup`、`followup`、`sendMessage` 的专项迁移指导。`report → send_message` 工具卡不等同于子代理 runtime API 迁移。#130 必须继续用精确官方实现和本项目生命周期测试核验。
 2. **宿主、插件、发布渠道分别记录。** GitHub tag 不代表 npm 已发布；宿主 `latest` 与插件 `latest` 不保证兼容。普通用户默认组合只能来自 AgentTeams 验收矩阵；Alpha 预览须显式选择。
@@ -60,4 +60,4 @@ pnpm test:skills-updater
 8. **只读扫描避开维护资料本身。** planner 会扫描代码、配置和脚本，也会命中 vendored skills 的示例。分析生产仓库时使用清楚标识的源码快照，或逐条排除这些维护资料带来的结果；零命中不等于没有风险。
 9. **新增检查器也有版本范围。** `inject-lint` 面向 alpha.2，并把 Cordis peer 必须等于 `^4.0.1` 写死；AgentTeams 已使用 `^4.0.2`，不能按其 `FIX-REQUIRED` 机械降级。新版 publish-playbook 的 amend/re-tag/force-push 历史修复配方也不适用于本项目已发布产物；修复应使用新插件版本并遵循项目发布规则。
 
-统一治理方案见 [兼容性与发布生命周期审查](../docs/archive/compatibility-audit-2026-09-05/README.md)，本次研究与扫描证据见 [升级 skill 接入研究](../docs/archive/upgrade-skill-study-2026-09-06/README.md)。二者均为审查/方案，不能视为已完成兼容修复或渠道发布。
+统一治理的结论已经落到[兼容性参考](../docs/3-reference/compatibility.md)与[维护与发布](../docs/2-how-to/release.md)；审查过程中的一次性证据不随仓库保留，也不构成已完成兼容修复或渠道发布的证明。

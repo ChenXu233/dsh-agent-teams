@@ -30,7 +30,7 @@
 
 ## 版本更新
 
-[v0.2.1](./release-notes/v0.2.1.md) 是 npm `latest` 上的正式版本。这一版彻底去掉宿主钉版：`compatibility.json` 只声明一个安装下限（`minimumHost: 0.2.1-rc.2`，发布为 `engines.dsh: >=0.2.1-rc.2`），不再维护已测列表，也不再有需要同步的「推荐宿主」，Harness 发新版本不必再发插件。成员页控件仍是纯槽位贡献：宿主 composer 继续负责对话，插件不修改任何宿主服务。上一版正式版为 [v0.2.0](./release-notes/v0.2.0.md)。下限声明见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/maintenance-workflow.md)。
+[v0.2.1](./release-notes/v0.2.1.md) 是 npm `latest` 上的正式版本。这一版彻底去掉宿主钉版：`compatibility.json` 只声明一个安装下限（`minimumHost: 0.2.1-rc.2`，发布为 `engines.dsh: >=0.2.1-rc.2`），不再维护已测列表，也不再有需要同步的「推荐宿主」，Harness 发新版本不必再发插件。成员页控件仍是纯槽位贡献：宿主 composer 继续负责对话，插件不修改任何宿主服务。上一版正式版为 [v0.2.0](./release-notes/v0.2.0.md)。下限声明见 [compatibility.json](./compatibility.json)，验收边界见[维护指南](./docs/2-how-to/release.md)。
 
 ## 为什么需要 AgentTeams？
 
@@ -42,7 +42,7 @@
 | **自动续领与安全接管** | 成员空闲后自动领取下一项就绪任务；转派会撤销旧 attempt，冷恢复会重试遗留任务，迟到结果无法覆盖。 |
 | **成员直达消息** | 成员通过持久化邮箱直接联系队友或队长，不需要队长中转。 |
 | **实时活动面板** | Web UI 用分段进度、可折叠成员树和可交互 DAG 展示实时工作；运行中的子任务会标出使用的模型，团队结束后仍保留完整成员与任务历史。 |
-| **质量门禁** | 人只提供目标和约束。默认任务顺序是需求 → 实现 → 验证 → 审查 → 集成，失败后自动修复/复审，恢复团队必须显式 resume。第一版范围控制是完成时审计，不是 host 写入拦截。详见 [docs/quality-gates.md](./docs/quality-gates.md)。 |
+| **质量门禁** | 人只提供目标和约束。默认任务顺序是需求 → 实现 → 验证 → 审查 → 集成，失败后自动修复/复审，恢复团队必须显式 resume。第一版范围控制是完成时审计，不是 host 写入拦截。详见 [docs/3-reference/quality-gates.md](./docs/3-reference/quality-gates.md)。 |
 
 对话卡片与活动面板接入 Harness 官方多语言服务，会随宿主在简体中文和英文之间实时切换；任务/成员状态、动态摘要、操作按钮、历史归档标识和无障碍文案都会同步更新，无需刷新页面，也不增加插件自己的语言设置。
 
@@ -67,7 +67,7 @@
 
 不带版本号的包名会安装 npm `latest`；需要锁定插件版本时可追加 `@0.2.1`。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
 
-桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。判断标准只有一个：内嵌内核是否不低于下限 `0.2.1-rc.2`；等于或更高即可安装，不存在需要维护的分版本豁免。详见[迁移验收记录](./docs/harness-0.2.1-rc.2/README.md)。
+桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。判断标准只有一个：内嵌内核是否不低于下限 `0.2.1-rc.2`；等于或更高即可安装，不存在需要维护的分版本豁免。详见[兼容性下限](./docs/3-reference/compatibility.md)。
 
 ### CLI / Web：1. 安装 DeepSeek Harness
 
@@ -76,7 +76,7 @@ npm install --global @deepseek-ai/dsh
 dsh --version
 ```
 
-此命令安装宿主的 npm `latest`；升级后只要 `dsh --version` 不低于下限 `0.2.1-rc.2` 即可。Alpha 仅供主动测试：手动指定表中的 Alpha 版本，并按[维护指南](./docs/maintenance-workflow.md)锁定整组宿主依赖。
+此命令安装宿主的 npm `latest`；升级后只要 `dsh --version` 不低于下限 `0.2.1-rc.2` 即可。Alpha 仅供主动测试：手动指定表中的 Alpha 版本，并按[维护指南](./docs/2-how-to/release.md)锁定整组宿主依赖。
 
 ### CLI / Web：2. 安装 AgentTeams 插件
 
@@ -96,17 +96,17 @@ dsh plugin --profile web add github:NanmiCoder/dsh-agent-teams
 
 更新时把命令里的版本号换成新版本再运行，然后重启对应 profile；已有安装只重复裸包名时，包管理器可能保留旧的精确版本。不带版本号或使用 `@latest` 时，新版发布后的 24 小时内会装到上一个版本。镜像源尚未同步新发布时，可在 npm 命令后追加 `--registry=https://registry.npmjs.org`。GitHub 默认分支的代码可能先于 npm `latest` 发布；默认分支包含已验证的 `lib/` 构建产物。仓库随代码分发服务端、客户端和类型产物，安装时不需要执行 `prepare` 或批准构建脚本。源码维护者每次修改源码后，都需运行 `pnpm build` 并更新已提交的产物。已经发布的 npm 产物保持不变。
 
-手动克隆源码的用户，拉取代码后需重新运行 `pnpm install --frozen-lockfile` 和 `pnpm build`，再重启对应的 Harness；只更新 Git 不会更新本地构建产物。详见[维护指南](./docs/maintenance-workflow.md)。
+手动克隆源码的用户，拉取代码后需重新运行 `pnpm install --frozen-lockfile` 和 `pnpm build`，再重启对应的 Harness；只更新 Git 不会更新本地构建产物。详见[维护指南](./docs/2-how-to/release.md)。
 
-> 低于 `0.1.2-alpha.2` 的旧 `0.1.0-*` / `0.1.1-*` 宿主，请先保留已工作的组合，参考[旧版本与诊断指引](./docs/maintenance-workflow.md)。
+> 低于下限的宿主装不上这个插件。保留在那台宿主上真正工作过的精确插件版本，或者两端一起抬高；规则见[兼容性下限](./docs/3-reference/compatibility.md)。
 
-完整[兼容清单](./compatibility.json)、[源码安装与 Alpha 验证](./docs/maintenance-workflow.md)、[已验证范围与平台限制](./docs/archive/maintenance-2026-09-06/release/README.md)。
+完整[兼容清单](./compatibility.json)、[源码安装与 Alpha 验证](./docs/2-how-to/release.md)、[验证范围与平台限制](./docs/2-how-to/verify.md)。
 
 接着直接用自然语言拉团队：
 
 > 使用 AgentTeams 审查 v0.5.3 之后的提交，分别从性能、安全和产品角度分工，最后输出一份汇总报告。
 
-队长会话从第一轮起保留精简的固定核心协议和 15 个业务工具（原 14 个 + `agent_teams_run_command`），直接调用，无需额外的加载工具或激活调用。已配置模板的精简目录固定保留。创建、批准、继续或结束团队都不会改写系统提示词和工具 schema，会话压缩或代码模式丢弃工具结果也不会丢失核心规则。成员保留四个团队工具、固定成员说明及普通编程/研究工具。Web 批准后会通知并唤醒队长，后续成员报告会再次唤醒它，无需忙轮询。详见[固定协议与 benchmark 标准](./docs/progressive-loading.md)。
+队长会话从第一轮起保留精简的固定核心协议和 15 个业务工具（原 14 个 + `agent_teams_run_command`），直接调用，无需额外的加载工具或激活调用。已配置模板的精简目录固定保留。创建、批准、继续或结束团队都不会改写系统提示词和工具 schema，会话压缩或代码模式丢弃工具结果也不会丢失核心规则。成员保留四个团队工具、固定成员说明及普通编程/研究工具。Web 批准后会通知并唤醒队长，后续成员报告会再次唤醒它，无需忙轮询。详见[固定协议与 benchmark 标准](./docs/3-reference/tool-surface.md)。
 
 ## 在工作区查看团队
 
@@ -180,7 +180,7 @@ dsh plugin --profile web add github:NanmiCoder/dsh-agent-teams
 
 `memberCommandDeny` 是队长专属工具 `agent_teams_run_command` 的 deny 列表（默认 `["agent-teams"]`，即插件自己的激活面）。命令名**不带前导斜杠**：条目会先归一化（忽略首尾空白、任意个数的前导斜杠与大小写），所以 `compact`、`/Compact`、` /COMPACT ` 是同一个开关；每条条目还会拦下它整个 `<entry>-*` 族（`review` 会连 `/review-tools` 一起拒）。显式写 `[]` 等于**什么都不拒**——连同内置的 `agent-teams` 保护一起关掉——因为这个数组是字面替换而不是追加。条目里没有可用的命令名时插件**加载失败**，错误首句点明配置非法，而不是静默放行。活动面板的命令栏是人手路径，有意不查这份列表（操作者本人即授权方）。
 
-`memberContext` 为每个成员设置插件级的上下文预算：成员**空闲**且测得的上下文用量达到阈值时，插件自动对它压缩一次并记账。`maxTokens`（绝对值）与 `maxRatio`（成员模型 `contextWindow` 的比例，取不到窗口则不参与计算）至少给一个，同时给出时取更小；`cooldownMs`（默认 `60000`）与 `minTurnGap`（默认 `1`）防抖；`onLimit`（默认 `compact`）可选 `notify`（只记 info 日志，不压缩）或 `off`。**不配置整个 `memberContext` 时功能完全关闭**（不注册看门狗、不写任何新字段）；回到旧行为可删掉整个块，或保留阈值并把 `onLimit` 设为 `off`（块内仍需至少一个 `maxTokens`/`maxRatio`，否则挂载时报错）。成员级 `context_max_tokens`（profile 成员行、内联 `plan` 成员行、`agent_teams_add_member`、`agent_teams_edit_plan` 的 `update_member`，传 `null` 可清除；执行前计划审查面板的成员卡片也能直接编辑——输入框预填该成员的声明值，留空/清空保存即发送 `null` 清除回插件默认）与插件默认进入同一次解析，最终取更小者——它只会让该成员更早触发，不会放宽插件上限。成员正忙或有排队消息时不压缩，下一轮空闲再评；`agent_teams_status` 的成员可携带 `context { tokens, limit, ratio, compactions, measured_at }` 与 `context_live`，活动面板成员行显示当前用量/上限与已压缩次数。详见 [docs/usage.md](./docs/usage.md)。
+`memberContext` 为每个成员设置插件级的上下文预算：成员**空闲**且测得的上下文用量达到阈值时，插件自动对它压缩一次并记账。`maxTokens`（绝对值）与 `maxRatio`（成员模型 `contextWindow` 的比例，取不到窗口则不参与计算）至少给一个，同时给出时取更小；`cooldownMs`（默认 `60000`）与 `minTurnGap`（默认 `1`）防抖；`onLimit`（默认 `compact`）可选 `notify`（只记 info 日志，不压缩）或 `off`。**不配置整个 `memberContext` 时功能完全关闭**（不注册看门狗、不写任何新字段）；回到旧行为可删掉整个块，或保留阈值并把 `onLimit` 设为 `off`（块内仍需至少一个 `maxTokens`/`maxRatio`，否则挂载时报错）。成员级 `context_max_tokens`（profile 成员行、内联 `plan` 成员行、`agent_teams_add_member`、`agent_teams_edit_plan` 的 `update_member`，传 `null` 可清除；执行前计划审查面板的成员卡片也能直接编辑——输入框预填该成员的声明值，留空/清空保存即发送 `null` 清除回插件默认）与插件默认进入同一次解析，最终取更小者——它只会让该成员更早触发，不会放宽插件上限。成员正忙或有排队消息时不压缩，下一轮空闲再评；`agent_teams_status` 的成员可携带 `context { tokens, limit, ratio, compactions, measured_at }` 与 `context_live`，活动面板成员行显示当前用量/上限与已压缩次数。详见 [docs/3-reference/usage.md](./docs/3-reference/usage.md)。
 
 普通调研、仓库审计可用 `agent_teams_create({name, description, approval:"required", plan:{members:[{name:"researcher"}], tasks:[{id:"audit", subject:"审计现有实现", assignee:"researcher"}]}})` 一次创建完整草案。任务的 `dependencies` 引用同一批中的 `id`，支持前向引用并校验环；结果返回实际任务 ID。`kind=review` 专用于对既有 implementation/repair 任务的质量复审，普通仓库审计使用默认的 `kind=work`。
 
@@ -196,7 +196,7 @@ dsh plugin --profile web add github:NanmiCoder/dsh-agent-teams
 - 历史面板依赖保存的团队状态或归档；早期版本删除团队时未保留归档的会话，暂不支持从日志重建完整面板。
 - 活动面板如实展示持久化状态；模型偶尔可能完成工作却没有按协议更新任务状态。
 
-完整工具列表、状态模型、Web UI 行为、配置与已知限制见 [docs/usage.md](./docs/usage.md)。
+完整工具列表、状态模型、Web UI 行为、配置与已知限制见 [docs/3-reference/usage.md](./docs/3-reference/usage.md)。
 
 ## 插件开发 Skill
 
@@ -210,12 +210,17 @@ npx skills add ChenXu233/dsh-agent-teams --skill dsh-plugin-development
 
 ## 文档
 
+[docs/README.md](./docs/README.md) 是文档索引：教程、操作与参考，每个事实只有一处。
+
 | 指南 | 内容 |
 | --- | --- |
-| [使用指南](./docs/usage.md) | 架构、UI 行为、工具、配置、限制与验证 |
-| [验证指南](./docs/verification-guide.md) | 离线、组合、真实 e2e 与 GUI 验证 |
-| [插件开发](./docs/developing-dsh-plugins.md) | 基于本插件整理的人类可读开发指南 |
-| [README 写作](./docs/readme-writing-guide.md) | 仓库文档约定 |
+| [使用指南](./docs/3-reference/usage.md) | 架构、UI 行为、工具、配置、限制与验证 |
+| [验证指南](./docs/2-how-to/verify.md) | 离线、组合、真实 e2e 与 GUI 验证 |
+| [维护与发布](./docs/2-how-to/release.md) | 从报告到实现、验收到发布 |
+| [兼容性](./docs/3-reference/compatibility.md) | 唯一的安装下限，以及为什么没有宿主清单 |
+| [工具面](./docs/3-reference/tool-surface.md) | 工具清单、会话身份、批准通知 |
+| [插件开发](./docs/1-tutorial/build-a-plugin.md) | 基于本插件整理的人类可读开发指南 |
+| [README 写作](./docs/2-how-to/write-docs.md) | 仓库文档约定 |
 
 ## 开发
 

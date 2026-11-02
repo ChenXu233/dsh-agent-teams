@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Reproducible upstream-sync flow (docs/upstream-sync.md).
+ * Reproducible upstream-sync flow (docs/2-how-to/sync-upstream.md).
  *
  * Layers, in order:
  *   1. lib/**            -> merge=built-artifacts   (take upstream, rebuild later)
@@ -145,7 +145,7 @@ function dryRun() {
         console.log(`  - ${file} (${hunks.length} hunk(s))`)
         for (const hunk of hunks) console.log(`      lines ${hunk.startLine}-${hunk.endLine}`)
       }
-      console.log('[dry-run] resolve these hunks by hand in the real tree (boundary table: docs/upstream-sync.md).')
+      console.log('[dry-run] resolve these hunks by hand in the real tree (boundary table: docs/2-how-to/sync-upstream.md).')
     }
   } finally {
     git(['worktree', 'remove', '--force', worktree])
@@ -155,7 +155,7 @@ function dryRun() {
 
 async function main() {
   const dryRunOnly = process.argv.includes('--dry-run')
-  console.log('=== upstream sync (docs/upstream-sync.md) ===')
+  console.log('=== upstream sync (docs/2-how-to/sync-upstream.md) ===')
   console.log('Safety: this script never pushes, never runs `git reset --hard`, never deletes branches,')
   console.log('and never commits an unresolved merge.')
   installMechanicalLayers()

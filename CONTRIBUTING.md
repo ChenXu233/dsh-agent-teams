@@ -8,7 +8,7 @@ Read [the project skill guide](skills/README.md) before using a DSH lifecycle sk
 
 Report the plugin version, actual Harness package version, OS, Node version, and profile. For Desktop, include both the application version and its embedded Harness version; upgrading a global CLI does not upgrade the embedded host. Include the error and minimal reproduction without credentials or unrelated private configuration.
 
-[compatibility.json](compatibility.json) is the single source for supported targets and the recommended host. The current candidate targets are `0.1.2-rc.1` (recommended), `0.1.2-alpha.5` (preview), and `0.1.2-alpha.2` (legacy). A target being listed creates a test obligation; only a passing run for the actual package proves that obligation was met.
+[compatibility.json](compatibility.json) declares one install floor (`minimumHost`), published as `engines.dsh`. There is no enumerated target list and no recommended host: anything at or above the floor installs, and CI exercises the floor itself on Ubuntu and Windows. The rules, and how to raise the floor, are in [the compatibility reference](docs/3-reference/compatibility.md).
 
 ## Develop and verify a focused change
 
@@ -49,4 +49,4 @@ Do not overwrite vendored skill files while adapting project policy. Keep upstre
 
 An issue can be **fixed in main**, **published**, and **verified in a specific environment** at different times. Link the commit or PR when merged, the exact package/channel when published, and the test or reporter confirmation when verified. Close a duplicate with its canonical tracking link; do not call it fixed merely because the duplicate was closed.
 
-Please leave independent enhancements and reports missing key evidence open with a concrete next step. Release preparation follows [the maintenance workflow](docs/maintenance-workflow.md); preview packages use `next`, and `latest` requires the recommended host and the complete compatibility gate.
+Please leave independent enhancements and reports missing key evidence open with a concrete next step. Release preparation follows [the maintenance workflow](./docs/2-how-to/release.md); preview packages use `next`, and `latest` requires the recommended host and the complete compatibility gate.

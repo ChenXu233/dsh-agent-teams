@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Forced TDD checklist for AgentTeams quality gates (docs/quality-gates.md §9.3).
+ * Forced TDD checklist for AgentTeams quality gates (docs/3-reference/quality-gates.md §9.3).
  *
  * Imports compiled `lib/` exports. Missing functions or old tool behavior
  * must fail the matching label — do not delete or rename these prefixes.
