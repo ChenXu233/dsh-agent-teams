@@ -63,7 +63,9 @@ const config: UserConfig = {
   format: 'cjs',
   platform: 'browser',
   dts: false,
-  sourcemap: true,
+  // The published artifact ships without a sourcemap: it doubled the client
+  // download for a file no runtime path reads. Sources live in the repository.
+  sourcemap: false,
   clean: false,
   deps: {
     neverBundle: (id: string) => CLIENT_EXTERNALS.includes(id),
