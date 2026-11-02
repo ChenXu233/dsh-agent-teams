@@ -54,6 +54,7 @@ const phases = [
   { name: 'unit: runtime', tests: [
     'scripts/issue-159.test.mjs', 'scripts/issue-203-card.test.mjs', 'scripts/corrupt-teamjson.test.mjs',
     'scripts/http-body.test.mjs', 'scripts/capabilities.test.mjs', 'scripts/tool-policies.test.mjs',
+    'scripts/archive-delete.test.mjs',
     'scripts/lineage-identity.test.mjs', 'scripts/legacy-session-source-repair.test.mjs',
     'scripts/harness-source-verify.test.mjs', 'scripts/git-artifacts.test.mjs',
   ] },

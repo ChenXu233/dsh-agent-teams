@@ -22,7 +22,10 @@ import {
   type CSSProperties, type PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
-  IconBranchOutline16, IconChevronDownOutline14, IconPanelLeftOutline16,
+  IconBranchOutline16,
+  IconChevronDownOutline14,
+  IconPanelLeftOutline16,
+  IconTrashOutline16,
   IconStopFill16, IconWarningOutline16,
 } from './icons.tsx'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -48,12 +51,14 @@ import {
   usesParallelTaskGrid,
 } from './activity-model.ts'
 import {
+  ACTIVITY_ARCHIVE_DELETE_URL,
   ACTIVITY_HALT_URL,
   getActivityMonitorTargetsSnapshot,
   getActivitySnapshotsSnapshot,
   startActivityPolling,
   subscribeActivityMonitorTargets,
   subscribeActivitySnapshots,
+  updateActivitySnapshots,
   type ActivityMember,
   type ActivityMemberContext,
   type ActivityTask,
@@ -615,7 +620,7 @@ function DependencyMap({ tasks, members, t, discarded = false, workspace = false
   )
 }
 
-export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, onNavigate, t, historic = false, workspace = false }: {
+export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, onNavigate, onDeleteArchive, t, historic = false, workspace = false }: {
   readonly team: ActivityTeam
   readonly modelDirectory?: ModelDirectory
   readonly onContinuePlanning?: () => void
@@ -625,6 +630,8 @@ export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscar
   readonly t: AgentTeamsTranslate
   readonly historic?: boolean
   readonly workspace?: boolean
+  /** Present only for archived rows: deletes this archive (irreversible). */
+  readonly onDeleteArchive?: () => Promise<void>
 }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const selectedAssignee = team.tasks.find(task => task.id === selectedTaskId)?.assignee
@@ -632,6 +639,9 @@ export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscar
   const [stopOpen, setStopOpen] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [stopError, setStopError] = useState('')
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const discarded = historic && team.phase === 'staged'
   const stopped = !historic && team.halted === true
   const busyCount = team.members.filter((member) => member.activity === 'working').length
@@ -675,6 +685,20 @@ export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscar
       setStopping(false)
     }
   }
+  const canDelete = historic && onDeleteArchive !== undefined
+  const deleteArchive = async (): Promise<void> => {
+    if (deleting || onDeleteArchive === undefined) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await onDeleteArchive()
+      setDeleteOpen(false)
+    } catch (error: unknown) {
+      setDeleteError(t('team.deleteFailed', { message: error instanceof Error ? error.message : String(error) }))
+    } finally {
+      setDeleting(false)
+    }
+  }
   return (
     <>
       <section className={css.team} data-team-id={team.teamId} data-workspace-team={workspace || undefined}>
@@ -696,6 +720,17 @@ export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscar
               onClick={() => { setStopError(''); setStopOpen(true) }}
             >
               <IconStopFill16 />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              className={css.teamStopButton}
+              aria-label={t('team.delete')}
+              title={t('team.delete')}
+              onClick={() => { setDeleteError(''); setDeleteOpen(true) }}
+            >
+              <IconTrashOutline16 />
             </button>
           )}
         </header>
@@ -895,6 +930,24 @@ export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscar
         )}
       >
         {stopError !== '' && <p className={css.stopModalError} role="alert"><IconWarningOutline16 />{stopError}</p>}
+      </Modal>
+      <Modal
+        open={deleteOpen}
+        onClose={() => { if (!deleting) setDeleteOpen(false) }}
+        title={t('team.deleteTitle', { team: team.name })}
+        closeLabel={t('plan.cancel')}
+        description={t('team.deleteDescription')}
+        footer={(
+          <span className={css.stopModalActions}>
+            <button type="button" disabled={deleting} onClick={() => { setDeleteOpen(false) }}>{t('team.deleteCancel')}</button>
+            <button type="button" data-danger disabled={deleting} onClick={() => { void deleteArchive() }}>
+              <IconTrashOutline16 />
+              {deleting ? t('team.deleting') : t('team.deleteConfirm')}
+            </button>
+          </span>
+        )}
+      >
+        {deleteError !== '' && <p className={css.stopModalError} role="alert"><IconWarningOutline16 />{deleteError}</p>}
       </Modal>
     </>
   )
@@ -1156,6 +1209,33 @@ export function ActivityPanel({ sessionsList, modelDirectories, openMember, t, c
     )),
     [archivedTeams, current, teams],
   )
+  // Deleting an archive is addressed by workspace path + team id: the owning
+  // captain session is usually gone, so it cannot authorize the write.
+  const deleteArchivedTeam = useCallback(async (team: ActivityTeam): Promise<void> => {
+    const workspacePath = team.workspacePath
+    if (workspacePath === undefined || workspacePath === '') {
+      throw new Error(t('team.deleteRequestFailed'))
+    }
+    const response = await fetch(ACTIVITY_ARCHIVE_DELETE_URL, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspacePath, teamId: team.teamId }),
+    })
+    if (!response.ok) {
+      let message = t('team.deleteRequestFailed')
+      try {
+        const body = await response.json() as { error?: unknown }
+        if (typeof body.error === 'string' && body.error.trim() !== '') message = body.error
+      } catch {}
+      throw new Error(message)
+    }
+    updateActivitySnapshots({
+      archivedTeams: getActivitySnapshotsSnapshot().archivedTeams.filter((candidate) =>
+        !(candidate.teamId === team.teamId && candidate.captainSessionId === team.captainSessionId),
+      ),
+    })
+  }, [t])
   const visibleCount = visibleTeams.length + visibleArchived.length + visibleHistoric.length
   const visibleLiveTeamIds = useMemo(
     () => visibleTeams.map((team) => team.teamId).sort(),
@@ -1421,7 +1501,13 @@ export function ActivityPanel({ sessionsList, modelDirectories, openMember, t, c
                   {visibleArchived.map((team) => (
                     <div key={`${team.captainSessionId}:${team.teamId}`} data-team-id={team.teamId} data-historic className={css.archivedWrap}>
                       <span className={css.archiveLabel}>{t(team.phase === 'staged' ? 'archive.discardedLabel' : 'archive.label')}</span>
-                      <TeamSection team={team} onNavigate={navigateToSession} t={t} historic />
+                      <TeamSection
+                        team={team}
+                        onNavigate={navigateToSession}
+                        t={t}
+                        historic
+                        onDeleteArchive={() => deleteArchivedTeam(team)}
+                      />
                     </div>
                   ))}
                   {visibleHistoric.map(({ data: team, owner }) => {

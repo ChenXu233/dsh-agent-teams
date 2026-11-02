@@ -94,6 +94,12 @@ export interface TeamActivitySnapshot {
     readonly captainInbox: readonly TeamActivityMessage[];
     /** Present when the snapshot could audit the workspace bytes. */
     readonly loopState?: string;
+    /**
+     * Absolute path of the owning workspace. Only archived snapshots carry it:
+     * the panel needs it to address a deletion at a workspace it cannot derive
+     * from a session that no longer exists.
+     */
+    readonly workspacePath?: string;
     readonly deliverable?: boolean;
     readonly delivery?: {
         readonly ok: boolean;
@@ -144,10 +150,11 @@ export declare function collectTeamsActivity(ctx: Context, roots: readonly {
  * `archive/` subdirectory of each state root). Used by the historic panel
  * path to restore full team detail after deletion.
  * @param ctx - the plugin context.
- * @param roots - `{ workspace, stateRoot }` pairs.
+ * @param roots - `{ workspace, workspacePath?, stateRoot }` pairs.
  * @returns the archived snapshots in stable order.
  */
 export declare function collectArchivedTeamsActivity(ctx: Context, roots: readonly {
     workspace: string;
+    workspacePath?: string;
     stateRoot: string;
 }[]): Promise<TeamActivitySnapshot[]>;

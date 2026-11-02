@@ -92,6 +92,8 @@ export interface ActivityTeam {
   readonly tasks: readonly ActivityTask[]
   readonly messageCount: number
   readonly captainInbox: readonly ActivityMessage[]
+  /** Absolute workspace path; archived snapshots carry it for the delete route. */
+  readonly workspacePath?: string
 }
 
 /** A successfully-created conversation card that currently needs updates. */
@@ -222,6 +224,8 @@ export const ACTIVITY_PROBE_MS = 5000
 /** Host route serving live and archived team snapshots. */
 export const ACTIVITY_STATE_URL = '/plugins/dsh-agent-teams/state'
 export const ACTIVITY_HALT_URL = '/plugins/dsh-agent-teams/halt'
+/** Host route deleting one archived team; body `{ workspacePath, teamId }`. */
+export const ACTIVITY_ARCHIVE_DELETE_URL = '/plugins/dsh-agent-teams/team/archive/delete'
 
 interface ActivityFetchResponse {
   readonly ok: boolean

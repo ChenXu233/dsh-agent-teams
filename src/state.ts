@@ -1253,6 +1253,57 @@ export async function listArchivedTeamIds(stateRoot: string): Promise<string[]> 
   }
 }
 
+/** Why {@link removeArchivedTeamDir} refused; nothing was deleted. */
+export type ArchivedDeleteRefusal = 'invalid-team-id' | 'not-archived' | 'still-active'
+
+/** A guarded archived-team deletion refused before touching the disk. */
+export class ArchivedDeleteRefused extends Error {
+  readonly code: ArchivedDeleteRefusal
+
+  /**
+   * @param code - which guard fired.
+   * @param message - human-readable reason, safe to show in the panel.
+   */
+  constructor(code: ArchivedDeleteRefusal, message: string) {
+    super(message)
+    this.name = 'ArchivedDeleteRefused'
+    this.code = code
+  }
+}
+
+/**
+ * Delete one archived team directory (`<stateRoot>/archive/<teamId>/`).
+ *
+ * The active directory is never touched. A value that is not a plain
+ * directory name, a missing archive, and a live team that still owns the id
+ * are all refused before the first unlink; the deletion itself runs under the
+ * per-team lock so an archive/dispose that races it stays serial.
+ * @param stateRoot - resolved absolute state root directory.
+ * @param teamId - the archived team id.
+ */
+export async function removeArchivedTeamDir(stateRoot: string, teamId: string): Promise<void> {
+  if (teamId === '' || teamId.startsWith('.') || /[\\/]/.test(teamId)) {
+    throw new ArchivedDeleteRefused('invalid-team-id', 'not a team id')
+  }
+  const archived = await readArchivedTeam(stateRoot, teamId)
+  if (archived === undefined || archived.id !== teamId) {
+    throw new ArchivedDeleteRefused('not-archived', 'archived team does not exist')
+  }
+  let live: TeamState | undefined
+  try {
+    live = await readTeam(stateRoot, teamId)
+  } catch {
+    // An unreadable active directory still owns the id: refuse instead of
+    // deleting an archive that a live team may be writing into.
+    throw new ArchivedDeleteRefused('still-active', 'team is still active')
+  }
+  if (live !== undefined) {
+    throw new ArchivedDeleteRefused('still-active', 'team is still active')
+  }
+  await withTeamLock(`team:${stateRoot}:${teamId}`, async () => {
+    await rm(join(stateRoot, 'archive', teamId), { recursive: true, force: true })
+  })
+}
 // ── activity snapshot (server-side, like the Claude Code desktop watcher) ──
 
 /** Visual task state for the activity panel. */

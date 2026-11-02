@@ -109,6 +109,12 @@ export interface TeamActivitySnapshot {
   readonly captainInbox: readonly TeamActivityMessage[]
   /** Present when the snapshot could audit the workspace bytes. */
   readonly loopState?: string
+  /**
+   * Absolute path of the owning workspace. Only archived snapshots carry it:
+   * the panel needs it to address a deletion at a workspace it cannot derive
+   * from a session that no longer exists.
+   */
+  readonly workspacePath?: string
   readonly deliverable?: boolean
   readonly delivery?: { readonly ok: boolean; readonly blockers: readonly string[]; readonly warnings: readonly string[] }
 }
@@ -323,12 +329,12 @@ export async function collectTeamsActivity(
  * `archive/` subdirectory of each state root). Used by the historic panel
  * path to restore full team detail after deletion.
  * @param ctx - the plugin context.
- * @param roots - `{ workspace, stateRoot }` pairs.
+ * @param roots - `{ workspace, workspacePath?, stateRoot }` pairs.
  * @returns the archived snapshots in stable order.
  */
 export async function collectArchivedTeamsActivity(
   ctx: Context,
-  roots: readonly { workspace: string; stateRoot: string }[],
+  roots: readonly { workspace: string; workspacePath?: string; stateRoot: string }[],
 ): Promise<TeamActivitySnapshot[]> {
   const snapshots: TeamActivitySnapshot[] = []
   for (const root of roots) {
@@ -336,13 +342,16 @@ export async function collectArchivedTeamsActivity(
       try {
         const state = await readArchivedTeam(root.stateRoot, teamId)
         if (state === undefined) continue
-        snapshots.push(await assembleTeamSnapshot(
+        const snapshot = await assembleTeamSnapshot(
           ctx,
           join(root.stateRoot, 'archive'),
           root.workspace,
           state,
           { includeRemoved: true, historic: true },
-        ))
+        )
+        snapshots.push(root.workspacePath === undefined
+          ? snapshot
+          : { ...snapshot, workspacePath: root.workspacePath })
       } catch {
         ctx.logger.warn(`agent-teams: skipped unreadable archived team "${teamId}" in workspace "${root.workspace}"`)
       }

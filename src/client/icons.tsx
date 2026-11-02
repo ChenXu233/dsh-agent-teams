@@ -12,6 +12,9 @@ export function IconPanelLeftOutline16() {
 export function IconStopFill16() {
   return <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" /></svg>
 }
+export function IconTrashOutline16() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" {...stroke}><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8a1 1 0 0 0 1 1h3.8a1 1 0 0 0 1-1l.6-8" /><path d="M6.8 7v4M9.2 7v4" /></svg>
+}
 export function IconWarningOutline16() {
   return <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" {...stroke}><path d="m7 2-5.5 10a1 1 0 0 0 1 1.5h11a1 1 0 0 0 1-1.5L9 2a1.1 1.1 0 0 0-2 0Z" /><path d="M8 6v3m0 2v.1" /></svg>
 }

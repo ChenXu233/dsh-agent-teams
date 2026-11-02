@@ -240,6 +240,28 @@ export declare function readArchivedTeam(stateRoot: string, teamId: string): Pro
  * @returns the archived team ids, empty when the archive does not exist.
  */
 export declare function listArchivedTeamIds(stateRoot: string): Promise<string[]>;
+/** Why {@link removeArchivedTeamDir} refused; nothing was deleted. */
+export type ArchivedDeleteRefusal = 'invalid-team-id' | 'not-archived' | 'still-active';
+/** A guarded archived-team deletion refused before touching the disk. */
+export declare class ArchivedDeleteRefused extends Error {
+    readonly code: ArchivedDeleteRefusal;
+    /**
+     * @param code - which guard fired.
+     * @param message - human-readable reason, safe to show in the panel.
+     */
+    constructor(code: ArchivedDeleteRefusal, message: string);
+}
+/**
+ * Delete one archived team directory (`<stateRoot>/archive/<teamId>/`).
+ *
+ * The active directory is never touched. A value that is not a plain
+ * directory name, a missing archive, and a live team that still owns the id
+ * are all refused before the first unlink; the deletion itself runs under the
+ * per-team lock so an archive/dispose that races it stays serial.
+ * @param stateRoot - resolved absolute state root directory.
+ * @param teamId - the archived team id.
+ */
+export declare function removeArchivedTeamDir(stateRoot: string, teamId: string): Promise<void>;
 /** Visual task state for the activity panel. */
 export type VisualTaskState = 'blocked' | 'open' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';
 /**
