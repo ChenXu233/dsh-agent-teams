@@ -81,7 +81,7 @@ The command selects the host's npm `latest`; after upgrading, `dsh --version` on
 
 ### CLI / Web: 2. Install the AgentTeams plugin
 
-Install or upgrade from npm using the package name (resolves npm `latest`; the preview channel `next` carries the newest prerelease):
+Install or upgrade from npm using the package name (resolves npm `latest`; the preview channel `next` carries the newest prerelease, which can be older than `latest` once a stable release of the same line exists):
 
 ```sh
 dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams

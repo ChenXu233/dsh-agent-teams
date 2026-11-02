@@ -80,7 +80,7 @@ dsh --version
 
 ### CLI / Web：2. 安装 AgentTeams 插件
 
-从 npm 安装或升级插件（不带版本号时使用 npm `latest`；预览渠道 `next` 承载最新的预发布版本）：
+从 npm 安装或升级插件（不带版本号时使用 npm `latest`；预览渠道 `next` 承载最新的预发布版本——同一条版本线出了正式版之后，`next` 可能比 `latest` 旧）：
 
 ```sh
 dsh plugin --profile web add --save-exact @chenxu233/dsh-agent-teams
