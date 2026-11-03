@@ -7,6 +7,7 @@ import {
   archiveTeamDir,
   ArchivedDeleteRefused,
   createTeamDir,
+  isSafeTeamId,
   listArchivedTeamIds,
   readArchivedTeam,
   readTeam,
@@ -99,5 +100,14 @@ test('a live team holding the same id blocks the delete and nothing is touched',
     assert.equal((await readTeam(stateRoot, 'busy'))?.id, 'busy')
   } finally {
     await rm(stateRoot, { recursive: true, force: true })
+  }
+})
+
+test('isSafeTeamId accepts plain names and rejects path syntax', () => {
+  for (const id of ['keep-me', 'a.b', 'team_1', '0', 'x'.repeat(120)]) {
+    assert.equal(isSafeTeamId(id), true, `${id} should be a usable directory name`)
+  }
+  for (const id of ['', '.', '..', '.hidden', '../escape', 'a/b', 'a\\b']) {
+    assert.equal(isSafeTeamId(id), false, `${id} must be rejected`)
   }
 })

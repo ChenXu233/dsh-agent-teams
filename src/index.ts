@@ -39,7 +39,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
-import { ArchivedDeleteRefused, findTeamByCaptain, readArchivedTeam, removeArchivedTeamDir } from './state.ts'
+import { ArchivedDeleteRefused, findTeamByCaptain, isSafeTeamId, readArchivedTeam, removeArchivedTeamDir } from './state.ts'
 import { findTeamByMemberSession, listMemberSessions, sessionStoreOf } from './member-address.ts'
 import { MemberCommandError, executeMemberCommand } from './member-command.ts'
 import { MemberRemoteService, memberArchived, memberViewOf } from './member-remote.ts'
@@ -504,6 +504,10 @@ export function apply(ctx: Context, config: Config): void {
         const workspace = workspaceRegistry.list().find((entry) => entry.path === workspacePath)
         if (workspace === undefined) {
           send(404, { error: 'workspace not found' })
+          return
+        }
+        if (!isSafeTeamId(teamId)) {
+          send(400, { error: 'not a team id', code: 'invalid-team-id' })
           return
         }
         const stateRoot = join(workspace.path, resolved.stateDir)

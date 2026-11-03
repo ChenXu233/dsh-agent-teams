@@ -261,6 +261,14 @@ export declare class ArchivedDeleteRefused extends Error {
  * @param stateRoot - resolved absolute state root directory.
  * @param teamId - the archived team id.
  */
+/**
+ * Whether a value can be used as a single team directory name: non-empty,
+ * not dot-prefixed, and free of path separators. Shared by the state guard
+ * and the delete route so both reject the same inputs.
+ * @param teamId - the candidate id.
+ * @returns true when the value is a plain directory name.
+ */
+export declare function isSafeTeamId(teamId: string): boolean;
 export declare function removeArchivedTeamDir(stateRoot: string, teamId: string): Promise<void>;
 /** Visual task state for the activity panel. */
 export type VisualTaskState = 'blocked' | 'open' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';

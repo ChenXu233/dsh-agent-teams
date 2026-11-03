@@ -1281,8 +1281,19 @@ export class ArchivedDeleteRefused extends Error {
  * @param stateRoot - resolved absolute state root directory.
  * @param teamId - the archived team id.
  */
+/**
+ * Whether a value can be used as a single team directory name: non-empty,
+ * not dot-prefixed, and free of path separators. Shared by the state guard
+ * and the delete route so both reject the same inputs.
+ * @param teamId - the candidate id.
+ * @returns true when the value is a plain directory name.
+ */
+export function isSafeTeamId(teamId: string): boolean {
+  return teamId !== '' && !teamId.startsWith('.') && !/[\\/]/.test(teamId)
+}
+
 export async function removeArchivedTeamDir(stateRoot: string, teamId: string): Promise<void> {
-  if (teamId === '' || teamId.startsWith('.') || /[\\/]/.test(teamId)) {
+  if (!isSafeTeamId(teamId)) {
     throw new ArchivedDeleteRefused('invalid-team-id', 'not a team id')
   }
   const archived = await readArchivedTeam(stateRoot, teamId)
