@@ -295,6 +295,10 @@ export function startActivityPolling(
   // discovery session starts probing low-frequency and upgrades on detection.
   let hot = monitorTargets.length > 0
   let discoveryComplete = false
+  // The archive list is fetched once per controller: a team archived before
+  // this page loaded has no live->archived transition to observe, so waiting
+  // for one would leave the archived row (and its controls) unrendered.
+  let archiveLoaded = false
   let discoveredLiveKeys = new Set<string>()
   let controller: AbortController | undefined
   let timer: unknown
@@ -339,7 +343,7 @@ export function startActivityPolling(
       const needsDiscoveryArchive = discoverySessionId !== undefined
         && discoverySessionId !== ''
         && !discoveryComplete
-      if (missing.length === 0 && !needsDiscoveryArchive && !discoveredTeamArchived) return
+      if (archiveLoaded && missing.length === 0 && !needsDiscoveryArchive && !discoveredTeamArchived) return
 
       // Archives are immutable per team generation. A successful fallback
       // retires every missing explicit target, including legacy cards whose
@@ -355,6 +359,7 @@ export function startActivityPolling(
       if (cancelled) return
       if (!Array.isArray(archivedBody.teams)) throw new Error('Invalid archive response')
       publishSnapshots({ archivedTeams: archivedBody.teams as readonly ActivityTeam[] })
+      archiveLoaded = true
       discoveryComplete = true
       settleTargets(new Set(missing.map((target) => target.key)))
     } catch (error: unknown) {

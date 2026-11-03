@@ -7,6 +7,7 @@ import { OPEN_PANEL_EVENT } from './AgentTeamsCard.tsx'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import { currentSessionId } from './session-navigation.ts'
 import { getActivityMonitorTargetsSnapshot, getActivitySnapshotsSnapshot, startActivityPolling, subscribeActivityMonitorTargets, subscribeActivitySnapshots, updateActivitySnapshots } from './activity-monitor.ts'
+import { deleteArchivedTeam } from './archive-delete.ts'
 import { createTeamDiscovery, type WorkspaceActivityState } from './workspace-state.ts'
 import { LEAD_ART } from './artwork.ts'
 import css from './WorkspaceActivity.module.css'
@@ -128,7 +129,8 @@ export function WorkspaceActivity({ sessionId, useTabInfo, t, state, modelDirect
         </section> : <>
           <TeamSection key={`${sessionId}:${selected.teamId}`} team={selected} workspace historic={history}
             modelDirectory={selected.phase === 'staged' ? modelDirectories.directoryFor(sessionId) : undefined}
-            onContinuePlanning={backToChat} onDiscarded={backToChat} onNavigate={openMember} t={t} />
+            onContinuePlanning={backToChat} onDiscarded={backToChat} onNavigate={openMember} t={t}
+            {...selected.workspacePath === undefined ? {} : { onDeleteArchive: () => deleteArchivedTeam(selected, t) }} />
         </>}
       </div>
     </div>

@@ -29,6 +29,7 @@ import {
   IconStopFill16, IconWarningOutline16,
 } from './icons.tsx'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { deleteArchivedTeam } from './archive-delete.ts'
 import { currentSessionId } from './session-navigation.ts'
 import type { ModelDirectory, ModelDirectoryResolver } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -1209,33 +1210,6 @@ export function ActivityPanel({ sessionsList, modelDirectories, openMember, t, c
     )),
     [archivedTeams, current, teams],
   )
-  // Deleting an archive is addressed by workspace path + team id: the owning
-  // captain session is usually gone, so it cannot authorize the write.
-  const deleteArchivedTeam = useCallback(async (team: ActivityTeam): Promise<void> => {
-    const workspacePath = team.workspacePath
-    if (workspacePath === undefined || workspacePath === '') {
-      throw new Error(t('team.deleteRequestFailed'))
-    }
-    const response = await fetch(ACTIVITY_ARCHIVE_DELETE_URL, {
-      method: 'POST',
-      cache: 'no-store',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workspacePath, teamId: team.teamId }),
-    })
-    if (!response.ok) {
-      let message = t('team.deleteRequestFailed')
-      try {
-        const body = await response.json() as { error?: unknown }
-        if (typeof body.error === 'string' && body.error.trim() !== '') message = body.error
-      } catch {}
-      throw new Error(message)
-    }
-    updateActivitySnapshots({
-      archivedTeams: getActivitySnapshotsSnapshot().archivedTeams.filter((candidate) =>
-        !(candidate.teamId === team.teamId && candidate.captainSessionId === team.captainSessionId),
-      ),
-    })
-  }, [t])
   const visibleCount = visibleTeams.length + visibleArchived.length + visibleHistoric.length
   const visibleLiveTeamIds = useMemo(
     () => visibleTeams.map((team) => team.teamId).sort(),
@@ -1506,7 +1480,7 @@ export function ActivityPanel({ sessionsList, modelDirectories, openMember, t, c
                         onNavigate={navigateToSession}
                         t={t}
                         historic
-                        onDeleteArchive={() => deleteArchivedTeam(team)}
+                        onDeleteArchive={() => deleteArchivedTeam(team, t)}
                       />
                     </div>
                   ))}
