@@ -28,6 +28,18 @@ Ask in natural language. The plugin provides the team protocol, 15 coordination 
   <img src="./assets/readme/workspace.png" width="100%" alt="AgentTeams native workspace with members, task dependencies, and progress">
 </p>
 
+## About this fork
+
+This repository is an independent design of that idea, maintained by [ChenXu233](https://github.com/ChenXu233) and started from [NanmiCoder/dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams). The upstream author still publishes [`@nanmicoder/dsh-agent-teams`](https://www.npmjs.com/package/@nanmicoder/dsh-agent-teams), and credit for the originals stays with them — see [Acknowledgements](#acknowledgements).
+
+The fork is built out of the DSH features that already exist instead of patching around them:
+
+- **Everything is a plugin.** Member-page controls are additive slot contributions (`conversation.input.right`); no host service is patched, and the single-owner `conversation.input.model` seat is left to the host.
+- **One compatibility floor.** [`compatibility.json`](./compatibility.json) declares only `minimumHost`; every DSH peer stays `*`, CI exercises the floor, and a newer Harness release installs without a plugin release.
+- **One verification entry.** `pnpm verify` runs 24 named phases in order and stops at the first failure.
+- **One home per fact.** Guides live under [`docs/`](./docs/README.md) in three reader-oriented folders; a fact kept in two places is a bug, not redundancy.
+- **Teams end, archives can be deleted.** An ended team keeps its full history — and can be removed from the team view once you no longer need it.
+
 ## Releases
 
 [v0.2.2](./release-notes/v0.2.2.md) is the stable release on npm `latest`. An ended team can now be deleted from the team view: a confirm dialog states that the removal is permanent, and the host deletes the archived directory after refusing an unsafe id, a missing archive, or an id a live team still owns. The same release fixes where that control appeared — the workspace tab, not only the floating panel — and keeps the archive list loaded across reloads. The install floor is unchanged (`minimumHost: 0.2.1-rc.2`), so any newer Harness release still installs without a plugin release. The previous stable was [v0.2.1](./release-notes/v0.2.1.md). See the [floor declaration](./compatibility.json) and [verification scope](./docs/2-how-to/verify.md).

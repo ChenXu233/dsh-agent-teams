@@ -28,6 +28,18 @@
   <img src="./assets/readme/workspace.png" width="100%" alt="DeepSeek Harness 对话与 AgentTeams 实时活动面板，展示成员、任务依赖和回报">
 </p>
 
+## 关于这个分支
+
+本仓库是同一个想法的独立设计，由 [ChenXu233](https://github.com/ChenXu233) 维护，起点是 [NanmiCoder/dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams)。上游作者仍在发布 [`@nanmicoder/dsh-agent-teams`](https://www.npmjs.com/package/@nanmicoder/dsh-agent-teams)，原始设计与实现的功劳归上游作者及贡献者——见[致谢](#致谢)。
+
+这个分支尽量用 DSH 已经有的能力实现，而不是绕过去打补丁：
+
+- **一切皆插件。** 成员页控件是加法式槽位贡献（`conversation.input.right`）；不修改任何宿主服务，单所有者的 `conversation.input.model` 座位留给宿主。
+- **一个兼容下限。** [`compatibility.json`](./compatibility.json) 只声明 `minimumHost`；所有 DSH peer 保持 `*`，CI 只跑下限，Harness 发新版本不需要再发插件。
+- **一个验证入口。** `pnpm verify` 按顺序跑 24 个命名阶段，第一个失败就停。
+- **每个事实只有一个家。** 指南按读者分在 [`docs/`](./docs/README.md) 的三个目录里；同一个事实写两遍就是 bug，不是冗余。
+- **团队会结束，归档可以删除。** 结束的团队保留完整历史，不需要时也能从团队视图里删掉。
+
 ## 版本更新
 
 [v0.2.2](./release-notes/v0.2.2.md) 是 npm `latest` 上的正式版本。结束的团队现在可以在团队视图里删除：二次确认写明不可恢复，宿主在拒绝非法 id、未归档、以及同 id 的活动团队仍然存在之后，才删除归档目录。这一版还修了「按钮够不着」的问题——控件出现在工作区标签页，而不只是浮层——并让归档列表在刷新后仍然可见。安装下限没变（`minimumHost: 0.2.1-rc.2`），Harness 发新版本仍不必再发插件。上一版正式版为 [v0.2.1](./release-notes/v0.2.1.md)。下限声明见 [compatibility.json](./compatibility.json)，验收边界见[验证指南](./docs/2-how-to/verify.md)。
