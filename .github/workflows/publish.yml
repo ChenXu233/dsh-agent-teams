@@ -97,6 +97,7 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             test "${GITHUB_REF_NAME}" = "v${PACKAGE_VERSION}"
             test -f "release-notes/v${PACKAGE_VERSION}.md"
+            node scripts/release-metadata.mjs --verify-tag-target
           else
             test "${RELEASE_VERSION}" = "${PACKAGE_VERSION}"
           fi
@@ -186,6 +187,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Confirm the release tag targets this commit
+        run: node scripts/release-metadata.mjs --verify-tag-target
 
       - name: Include the observed desktop npm readiness in release notes
         env:

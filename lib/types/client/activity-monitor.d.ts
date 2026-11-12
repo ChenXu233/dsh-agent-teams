@@ -118,8 +118,10 @@ export declare function settleActivityMonitorTargets(keys: ReadonlySet<string>):
 export declare function subscribeActivitySnapshots(listener: () => void): () => void;
 /** Read the stable shared live/archive snapshot. */
 export declare function getActivitySnapshotsSnapshot(): ActivitySnapshots;
-/** Publish one or both successful state-route responses. */
-export declare function updateActivitySnapshots(update: Partial<ActivitySnapshots>): void;
+/** Read the rows owned by one route and optional scope for ETag comparison. */
+export declare function getPublishedActivityRows(field: keyof ActivitySnapshots, scope?: string): readonly ActivityTeam[] | undefined;
+/** Publish full state-route responses or replace the rows for just one captain. */
+export declare function updateActivitySnapshots(update: Partial<ActivitySnapshots>, scope?: string): void;
 /** Poll cadence for the live host snapshot route. */
 export declare const ACTIVITY_POLL_MS = 1000;
 /**
@@ -136,6 +138,10 @@ export declare const ACTIVITY_HALT_URL = "/plugins/dsh-agent-teams/halt";
 export declare const ACTIVITY_ARCHIVE_DELETE_URL = "/plugins/dsh-agent-teams/team/archive/delete";
 interface ActivityFetchResponse {
     readonly ok: boolean;
+    readonly status?: number;
+    readonly headers?: {
+        get(name: string): string | null;
+    };
     json(): Promise<unknown>;
 }
 /** Injectable browser primitives used by the poll controller and its tests. */
@@ -151,10 +157,13 @@ export interface ActivityPollingRuntime {
     readonly fetchState?: (url: string, init: {
         readonly cache: 'no-store';
         readonly signal: AbortSignal;
+        readonly headers?: Readonly<Record<string, string>>;
     }) => Promise<ActivityFetchResponse>;
     readonly schedule?: (callback: () => void, intervalMs: number) => unknown;
     readonly cancel?: (timer: unknown) => void;
-    readonly publishSnapshots?: (update: Partial<ActivitySnapshots>) => void;
+    readonly publishSnapshots?: (update: Partial<ActivitySnapshots>, scope?: string) => void;
+    /** Read back the shared store when supplying a custom publisher for it. */
+    readonly getPublishedRows?: typeof getPublishedActivityRows;
     readonly settleTargets?: (keys: ReadonlySet<string>) => void;
 }
 /** Handle returned by one current-session polling loop. */

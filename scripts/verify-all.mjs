@@ -58,6 +58,7 @@ const phases = [
     'scripts/lineage-identity.test.mjs', 'scripts/legacy-session-source-repair.test.mjs',
     'scripts/harness-source-verify.test.mjs', 'scripts/git-artifacts.test.mjs',
   ] },
+  { name: 'unit: workspace audit', tests: ['scripts/issue-336.test.mjs'] },
   { name: 'unit: release metadata', tests: [
     'scripts/release-metadata.test.mjs', 'scripts/readme-version.test.mjs',
     'scripts/compatibility.test.mjs', 'scripts/harness-validation.test.mjs', 'scripts/upgrade-status.test.mjs',
