@@ -264,13 +264,26 @@ export function apply(ctx) {
       memberResponses.set(limitedId, { finish: true });
       gates.get(limitedId)();
       await original.whenIdle();
-      await until(() => ctx.agents.get(limitedId) === undefined && limitState().members[0].status === 'idle', 'normal continuation parks the attempt');
+      // AgentTeams keeps a finished member resident: a parked attempt means
+      // the host retired the agent or it stays idle in place, and the durable
+      // task must be in_progress either way.
+      await until(() => {
+        const agent = ctx.agents.get(limitedId);
+        return (agent === undefined || agent.status === 'idle') && limitState().members[0].status === 'idle';
+      }, 'normal continuation parks the attempt');
       assert.equal(limitState().tasks[0].status, 'in_progress');
-      // Cold delivery resumes the same durable member with a different
-      // activation. Its output ceiling must close the original open attempt.
       await run(cmd('send_message', { to: 'worker', content: 'Resume the parked attempt.' }));
-      await until(() => gates.has(limitedId), 'same member receives a cold continuation');
-      assert.notEqual(ctx.agents.get(limitedId), original);
+      if (ctx.agents.get(limitedId) === undefined) {
+        // Cold delivery resumes the same durable member with a different
+        // activation. Its output ceiling must close the original open attempt.
+        await until(() => gates.has(limitedId), 'same member receives a cold continuation');
+        assert.notEqual(ctx.agents.get(limitedId), original);
+      } else {
+        // Resident delivery continues the same activation. Its output ceiling
+        // must close the same open attempt.
+        await until(() => gates.has(limitedId), 'resident member receives the continuation');
+        assert.equal(ctx.agents.get(limitedId), original);
+      }
     }
     memberResponses.set(limitedId, { outputLimit: true });
     gates.get(limitedId)();
