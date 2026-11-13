@@ -148,7 +148,12 @@ export function apply(ctx) {
     await assertMemberDenied('cold');
     record({ event: 'stability-reassign-passed', sameMember: true, staleInputExcluded: true });
     const liveWorker = ctx.agents.get(workerId);
-    const start = (parent, label) => (ctx.subagents.startActivation ?? ctx.subagents.startContinuable).call(ctx.subagents, { delivery: 'caller', provider: 'spawn', label, request: { parent, prompt: [{ type: 'text', text: label }], maxDepth: 3, agentOptions: { provider: 'runtime-lab', model: 'fixture-model' } }, signal: new AbortController().signal });
+    const start = (parent, label) => {
+      const request = { parent, prompt: [{ type: 'text', text: label }], maxDepth: 3, agentOptions: { provider: 'runtime-lab', model: 'fixture-model' } };
+      const signal = new AbortController().signal;
+      if (typeof ctx.subagents.startActivation === 'function') return ctx.subagents.startActivation.call(ctx.subagents, { delivery: 'caller', provider: 'spawn', label, ...request, signal });
+      return ctx.subagents.startContinuable.call(ctx.subagents, { delivery: 'caller', provider: 'spawn', label, request, signal });
+    };
     const grandchild = await start(liveWorker, 'historical-nested-branch');
     const sibling = await start(captain.agent, 'unrelated-sibling');
     await until(() => gates.has(grandchild.childId) && gates.has(sibling.childId), 'concurrent independent branches');
@@ -162,14 +167,19 @@ export function apply(ctx) {
     assert.equal(ctx.agents.get(grandchild.childId), undefined);
     assert.equal(liveWorker.inbox.nextTurn.length + liveWorker.inbox.nextStep.length, 0);
     assert.equal(grandAgent.inbox.nextTurn.length + grandAgent.inbox.nextStep.length, 0);
-    assert.equal(siblingAgent.status, 'running', 'unrelated sibling must survive selected teardown');
+    assert.ok(siblingAgent.status === 'running', `unrelated sibling must survive selected teardown (status=${siblingAgent.status})`);
     const content = [{ type: 'text', text: 'MUST_NOT_RESUME_ARCHIVED_MEMBER' }], signal = new AbortController().signal;
     const runtime = ctx.subagents;
-    await assert.rejects(() => typeof runtime.followup === 'function' ? runtime.followup(captain.agent, workerId, content, { source: { kind: 'user' }, signal })
-      : typeof runtime[Symbol.for('dsh.subagent.deliverPrompt')] === 'function' ? runtime[Symbol.for('dsh.subagent.deliverPrompt')](captain.agent, workerId, content, { kind: 'user' }, signal, 'queue')
-      : runtime[Symbol.for('dsh.subagent.queuePrompt')](captain.agent, workerId, content, { kind: 'user' }, signal), /retired/);
+    const retiredDelivery = typeof runtime.manager?.deliverPrompt === 'function'
+      ? () => runtime.manager.deliverPrompt(workerId, content, { source: { kind: 'user' }, signal, delivery: 'queue' })
+      : typeof runtime.followup === 'function' ? () => runtime.followup(captain.agent, workerId, content, { source: { kind: 'user' }, signal })
+      : typeof runtime[Symbol.for('dsh.subagent.deliverPrompt')] === 'function' ? () => runtime[Symbol.for('dsh.subagent.deliverPrompt')](captain.agent, workerId, content, { kind: 'user' }, signal, 'queue')
+      : () => runtime[Symbol.for('dsh.subagent.queuePrompt')](captain.agent, workerId, content, { kind: 'user' }, signal);
+    await assert.rejects(retiredDelivery, /retired/);
     assert.equal(requests.filter(r => r.sessionId !== captainId && r.sessionId !== sibling.childId).length, callsBefore);
-    await (ctx.subagents.drainChildren ?? ctx.subagents.drainContinuableChildren).call(ctx.subagents, captain.agent, [sibling.childId]);
+    const targetedDrain = ctx.subagents.drainChildren ?? ctx.subagents.drainContinuableChildren;
+    if (typeof targetedDrain === 'function') await targetedDrain.call(ctx.subagents, captain.agent, [sibling.childId]);
+    else for (const id of [sibling.childId]) ctx.subagents.interrupt?.(id, { kind: 'ancestor', agent: captain.agent });
     await captain.agent.whenIdle();
     record({ event: 'stability-archive-passed', pendingMessagesCleared: 32, descendantsStopped: true, siblingPreserved: true, retiredResumeRejected: true });
     const beforeBatchRequests = requests.filter(r => r.sessionId !== captainId).length;

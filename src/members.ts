@@ -26,7 +26,7 @@ import { mailboxPrompt } from './mailbox.ts'
 import { installMemberResidency, parkMember, parkedMessageId, unparkMember } from './member-residency.ts'
 import { dropMemberRoute, registerMemberRoute } from './member-route-registry.ts'
 import { nearestLiveLead } from './lineage.ts'
-import { sessionStoreOf, workspaceRootsOf } from './member-address.ts'
+import { sessionQueryOf, sessionStoreOf, workspaceRootsOf } from './member-address.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
@@ -1338,6 +1338,14 @@ export function installRetiredMemberGuard(ctx: Context, stateDir: string): void 
     const attachedRoot = sessionStoreOf(ctx)?.get(childId)?.header.cwd
     if (attachedRoot !== undefined) {
       return (await readRetiredMemberIds(join(attachedRoot, stateDir))).has(childId)
+    }
+    // A detached member is not in the live store; its durable header still
+    // carries the workspace that owns the retired index.
+    const storedRoot = await sessionQueryOf(ctx)?.observeSession(childId)
+      .then(observed => observed.header.cwd)
+      .catch(() => undefined)
+    if (storedRoot !== undefined) {
+      return (await readRetiredMemberIds(join(storedRoot, stateDir))).has(childId)
     }
     for (const root of workspaceRootsOf(ctx)) {
       if ((await readRetiredMemberIds(join(root, stateDir))).has(childId)) return true

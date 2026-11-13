@@ -384,6 +384,20 @@ await test('a host without a targeted drain interrupts the exact removed members
   const captain = { id: 'captain' }
   await drainMemberChildren(runtime, captain, ['one', 'two'])
   assert.deepEqual(interrupted, [['one', 'ancestor', 'captain'], ['two', 'ancestor', 'captain']])
+  // 0.2.2 managers expose the activation registry: dispose exact targets and descendants.
+  const disposed = []
+  const managedRuntime = {
+    manager: {
+      resident: new Map([
+        ['one', { childId: 'one' }],
+        ['nested', { childId: 'nested', ancestors: ['one'] }],
+        ['other', { childId: 'other' }],
+      ]),
+      async dispose(activation) { disposed.push(activation.childId) },
+    },
+  }
+  await drainMemberChildren(managedRuntime, captain, ['one'])
+  assert.deepEqual(disposed.sort(), ['nested', 'one'])
 })
 
 await test('serial agent/created installs before first request, skips old early notification and cleans up', async () => {

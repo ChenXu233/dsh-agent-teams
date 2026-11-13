@@ -588,11 +588,28 @@ export async function drainMemberChildren(runtime: Context['subagents'], parent:
     await drain.call(runtime, parent, ids)
     return
   }
-  // 0.2.2 dropped the targeted drain for a whole-tree drainDescendants(). Do
-  // not take that trade: it would also stop the captain's unrelated subagents.
-  // Interrupting the exact ids stops their current turn, and the retired-member
-  // deny-list above already blocks the next delivery, so a removed member stays
-  // parked instead of being resumed.
+  // 0.2.2 dropped the targeted drain and offers only the whole-subtree
+  // drainDescendants(); taking that trade would also stop the captain's
+  // unrelated subagents. Dispose the exact activations and their descendants
+  // through the manager registry instead, which is the same lifecycle step the
+  // retired drain performed.
+  const manager = (runtime as unknown as {
+    manager?: {
+      resident?: Map<SessionId, { childId?: SessionId; ancestors?: readonly SessionId[] }>
+      dispose?: (activation: unknown) => Promise<void>
+    }
+  }).manager
+  if (manager?.resident instanceof Map && typeof manager.dispose === 'function') {
+    const selected = [...manager.resident.values()].filter(activation => {
+      const childId = activation.childId
+      if (childId !== undefined && ids.includes(childId)) return true
+      return (activation.ancestors ?? []).some(ancestor => ids.includes(ancestor))
+    })
+    for (const activation of selected) await manager.dispose(activation)
+    return
+  }
+  // Last resort: stop the exact turns. The retired-member deny-list above still
+  // blocks any later delivery, so a removed member must not be resumed.
   if (typeof host.interrupt !== 'function') return unsupported('missing targeted child drain')
   for (const id of ids) host.interrupt.call(runtime, id, { kind: 'ancestor', agent: parent })
 }

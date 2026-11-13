@@ -51,6 +51,18 @@ interface SessionStoreView {
         readonly id: string;
     }[];
 }
+/** Structural view of the host session query service (durable, works for detached sessions). */
+export interface SessionQueryView {
+    observeSession(id: SessionId, options?: {
+        signal?: AbortSignal;
+    }): Promise<{
+        header: {
+            cwd?: string;
+        };
+    }>;
+}
+/** Read the host session query service without requiring it in `inject`. */
+export declare function sessionQueryOf(ctx: Context): SessionQueryView | undefined;
 /** Read the host session store without requiring it in `inject`. */
 export declare function sessionStoreOf(ctx: Context): SessionStoreView | undefined;
 /**
