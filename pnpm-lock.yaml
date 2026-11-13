@@ -15,6 +15,7 @@ overrides:
   '@deepseek-ai/dsh-persona': 0.2.2-rc.3
   '@deepseek-ai/dsh-sdk-app': 0.2.2-rc.3
   '@deepseek-ai/dsh-tool-fs': 0.2.2-rc.3
+  '@deepseek-ai/dsh-tool-executor-native': 0.2.2-rc.3
   '@deepseek-ai/dsh-web-app': 0.2.2-rc.3
   '@deepseek-ai/dsh-webhook': 0.2.2-rc.3
   '@deepseek-ai/dsh-app-boot': 0.2.2-rc.3
