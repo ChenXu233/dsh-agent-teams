@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { phases } from './verify-all.mjs'
 
 // npm writes a package's README into the tarball at publish time and offers no way
 // to update it afterwards, so a README that still names an older plugin version is
@@ -67,6 +68,22 @@ export function checkReadmeVersions({ version, known, files, hosts = [] }) {
   return problems
 }
 
+// README prose names how many verification phases `pnpm verify` runs. The
+// count lives in scripts/verify-all.mjs; a stale number tells readers to expect
+// the wrong thing every time a phase is added or removed.
+export function checkReadmePhaseCount(files, phaseCount) {
+  const problems = []
+  for (const [name, markdown] of Object.entries(files)) {
+    for (const match of markdown.matchAll(/(\d+)\s*(?:named phases|个命名阶段)/gu)) {
+      const claimed = Number(match[1])
+      if (claimed !== phaseCount) {
+        problems.push(`${name} claims ${claimed} verify phases but scripts/verify-all.mjs declares ${phaseCount}`)
+      }
+    }
+  }
+  return problems
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   const notesDirectory = fileURLToPath(new URL('../release-notes', import.meta.url))
@@ -74,14 +91,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     README_FILES.map(name => [name, readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')])
   )
   const support = JSON.parse(readFileSync(new URL('../compatibility.json', import.meta.url), 'utf8'))
-  const problems = checkReadmeVersions({
-    version: pkg.version,
-    known: publishedVersions(notesDirectory),
-    files,
-    hosts: [support.minimumHost]
-  })
+  const problems = [
+    ...checkReadmeVersions({
+      version: pkg.version,
+      known: publishedVersions(notesDirectory),
+      files,
+      hosts: [support.minimumHost]
+    }),
+    ...checkReadmePhaseCount(files, phases.length),
+  ]
   if (problems.length > 0) {
-    console.error(`README version check failed for ${pkg.version}:`)
+    console.error(`README check failed for ${pkg.version}:`)
     for (const problem of problems) console.error(`  - ${problem}`)
     console.error('Sync the README version references with package.json, or move old versions into release-notes links.')
     process.exit(1)

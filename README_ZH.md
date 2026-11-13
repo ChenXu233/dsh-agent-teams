@@ -36,7 +36,7 @@
 
 - **一切皆插件。** 成员页控件是加法式槽位贡献（`conversation.input.right`）；不修改任何宿主服务，单所有者的 `conversation.input.model` 座位留给宿主。
 - **一个兼容下限。** [`compatibility.json`](./compatibility.json) 只声明 `minimumHost`；所有 DSH peer 保持 `*`，CI 只跑下限，Harness 发新版本不需要再发插件。
-- **一个验证入口。** `pnpm verify` 按顺序跑 24 个命名阶段，第一个失败就停。
+- **一个验证入口。** `pnpm verify` 按顺序跑 25 个命名阶段，第一个失败就停。
 - **每个事实只有一个家。** 指南按读者分在 [`docs/`](./docs/README.md) 的三个目录里；同一个事实写两遍就是 bug，不是冗余。
 - **团队会结束，归档可以删除。** 结束的团队保留完整历史，不需要时也能从团队视图里删掉。
 

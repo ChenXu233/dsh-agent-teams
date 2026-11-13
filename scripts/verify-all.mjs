@@ -10,11 +10,12 @@
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 
 const node = process.execPath
 
 /** `script` phases run one Node script; `tests` phases run `node --test` over an explicit file list. */
-const phases = [
+export const phases = [
   { name: 'source smoke', script: 'scripts/verify.mjs' },
   { name: 'fallback tdd', script: 'scripts/fallback-tdd.mjs' },
   { name: 'member failure tdd', script: 'scripts/member-failure-tdd.mjs' },
@@ -42,7 +43,7 @@ const phases = [
     'scripts/quality-gates-repair-scope.test.mjs', 'scripts/quality-gates-amend.test.mjs',
     'scripts/quality-gates-content-bound.test.mjs', 'scripts/quality-gates-work-order.test.mjs',
     'scripts/quality-gates-repair-wiring.test.mjs', 'scripts/quality-gates-excluded-scope.test.mjs',
-    'scripts/quality-gates-cross-binding.test.mjs',
+    'scripts/quality-gates-cross-binding.test.mjs', 'scripts/task-contract-visibility.test.mjs',
   ] },
   { name: 'unit: members', tests: [
     'scripts/member-spawn-recovery.test.mjs', 'scripts/verify-run-command.test.mjs',
@@ -101,4 +102,5 @@ verify: ${executed}/${phases.length} phases passed in ${seconds}s`)
   return 0
 }
 
-process.exitCode = main()
+const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
+if (isMain) process.exitCode = main()

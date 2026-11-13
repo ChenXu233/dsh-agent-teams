@@ -517,15 +517,108 @@ function memberOpenTask(team: TeamState, memberName: string, exceptTaskId?: stri
     && (task.status === 'claimed' || task.status === 'in_progress'))
 }
 
-function taskDetails(team: TeamState, task: TeamTask): string {
-  return [task.subject, task.description ?? '',
+/** The contract half of a task, shared by assignment details and the status view. */
+function contractLines(task: TeamTask): string[] {
+  return [
     `Kind: ${task.kind ?? 'work'}`,
     `Objective: ${task.objective ?? ''}`,
     `In scope: ${(task.inScope ?? []).join(', ')}; Out of scope: ${(task.outOfScope ?? []).join(', ')}`,
     `Acceptance: ${(task.acceptance ?? []).join('; ')}`,
     `Verify: ${(task.verify ?? []).join('; ')}`,
+  ]
+}
+
+function taskDetails(team: TeamState, task: TeamTask): string {
+  return [task.subject, task.description ?? '', ...contractLines(task),
     `Dependency results:\n${formatDependencyOutputs(collectCompletedDependencyOutputs(team.tasks, task.id))}`,
   ].join('\n')
+}
+
+/**
+ * One task in full for the read-only status detail view: the current contract,
+ * every finding (open and resolved), the amendment ledger, and the evidence a
+ * completion gate will read. The compact team snapshot stays the default; this
+ * exists so a captain can audit a contract without opening team.json.
+ */
+function taskDetailView(task: TeamTask) {
+  const findings = (task.findings ?? []).map(finding => ({
+    id: finding.id,
+    severity: finding.severity,
+    ...finding.file === undefined ? {} : { file: finding.file },
+    ...finding.line === undefined ? {} : { line: finding.line },
+    problem: finding.problem,
+    required_fix: finding.requiredFix,
+    resolved: finding.resolved === true,
+  }))
+  const revisions = (task.revisions ?? []).map(revision => ({
+    at: revision.at,
+    by: revision.by,
+    reason: revision.reason,
+    fields: revision.fields,
+    previous: JSON.stringify(revision.previous),
+  }))
+  const summarizedEvidence = (task.supplementalEvidence ?? []).map(evidence => ({
+    at: evidence.at,
+    by: evidence.by,
+    attempt: evidence.attempt,
+    ...evidence.note === undefined ? {} : { note: evidence.note.slice(0, 500) },
+    ...evidence.acceptanceResults === undefined ? {} : {
+      acceptance_results: evidence.acceptanceResults.map(result => ({
+        criterion: result.criterion,
+        status: result.status,
+        ...result.evidence === undefined ? {} : { evidence: result.evidence },
+      })),
+    },
+    ...evidence.commandsRun === undefined ? {} : {
+      commands_run: evidence.commandsRun.map(result => ({
+        command: result.command,
+        status: result.status,
+        ...result.exitCode === undefined ? {} : { exit_code: result.exitCode },
+        ...result.evidence === undefined ? {} : { evidence: result.evidence },
+      })),
+    },
+  }))
+  return {
+    id: task.id,
+    subject: task.subject,
+    ...task.description === undefined ? {} : { description: task.description },
+    status: task.status,
+    kind: taskKindOf(task),
+    ...task.round === undefined ? {} : { round: task.round },
+    ...task.verdict === undefined ? {} : { verdict: task.verdict },
+    assignee: task.assignee ?? '',
+    attempt: task.attempt ?? 0,
+    attempt_id: task.attemptId ?? '',
+    dependencies: task.dependencies,
+    ...task.reviewedTaskId === undefined ? {} : { reviewed_task_id: task.reviewedTaskId },
+    ...task.sourceTaskId === undefined ? {} : { source_task_id: task.sourceTaskId },
+    ...task.findingSourceTaskIds === undefined ? {} : { fixes: task.findingSourceTaskIds },
+    objective: task.objective ?? '',
+    in_scope: task.inScope ?? [],
+    out_of_scope: task.outOfScope ?? [],
+    acceptance: task.acceptance ?? [],
+    verify: task.verify ?? [],
+    findings,
+    findings_open: findings.filter(finding => !finding.resolved).length,
+    revisions,
+    acceptance_results: (task.acceptanceResults ?? []).map(result => ({
+      criterion: result.criterion,
+      status: result.status,
+      ...result.evidence === undefined ? {} : { evidence: result.evidence },
+    })),
+    commands_run: (task.commandsRun ?? []).map(result => ({
+      command: result.command,
+      status: result.status,
+      ...result.exitCode === undefined ? {} : { exit_code: result.exitCode },
+      ...result.evidence === undefined ? {} : { evidence: result.evidence },
+    })),
+    changed_paths: task.changedPaths ?? [],
+    supplemental_evidence: summarizedEvidence,
+    ...task.output === undefined ? {} : {
+      output: task.output.slice(0, 4000),
+      output_truncated: task.output.length > 4000,
+    },
+  }
 }
 
 /** Captain work is immediate, not a durable scheduler lane: allow one unfinished takeover at a time. */
@@ -806,6 +899,77 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
   installMailboxAdmission(ctx, config.stateDir)
   const scheduler = installTeamScheduler(ctx, { stateDir: config.stateDir, executionPrompt: config.executionPrompt, dispatch: dispatchMember })
 
+  /**
+   * Queue the captain's contract-change notice for a task's current owner.
+   * Runs inside the team lock, after the amendment is durable, and only for a
+   * task someone is already executing: a pending task sees the amended contract
+   * at dispatch, and a terminal contract cannot be amended at all.
+   * @returns the durable message, or undefined when no notice is due.
+   */
+  async function prepareContractNotice(
+    stateRoot: string,
+    team: TeamState,
+    task: TeamTask,
+    fields: readonly string[],
+    reason: string,
+  ): Promise<TeamMessage | undefined> {
+    const assignee = task.assignee
+    if (assignee === undefined || assignee === CAPTAIN_KEY) return undefined
+    if (task.status !== 'claimed' && task.status !== 'in_progress') return undefined
+    if (team.halted === true) return undefined
+    const member = team.members.find(candidate => candidate.name === assignee && candidate.status !== 'removed')
+    if (member === undefined) return undefined
+    const content = [
+      `AgentTeams contract amendment for task ${task.id} ("${task.subject}") — the contract you were dispatched with has changed.`,
+      `Revised fields: ${fields.length === 0 ? 'contract' : fields.join(', ')}.`,
+      `Reason: ${reason}`,
+      `The new contract is authoritative. Read it with agent_teams_status({ task_id: "${task.id}" }) before you complete this task, and do not report against the previous acceptance/verify list.`,
+    ].join('\n')
+    const message: TeamMessage = {
+      ...createMessage(CAPTAIN_KEY, member.name, content),
+      taskId: task.id,
+      ...task.attemptId === undefined ? {} : { attemptId: task.attemptId },
+      deliveryClaimedAt: Date.now(),
+    }
+    try {
+      await appendMailbox(stateRoot, team.id, member.name, message)
+    } catch (error: unknown) {
+      // The amendment itself is already durable; a queue failure must not turn
+      // a committed contract into a reported tool error.
+      ctx.logger.warn(`agent-teams: contract-change notice for task ${task.id} could not be queued: ${String(error)}`)
+      return undefined
+    }
+    return message
+  }
+
+  /**
+   * Best-effort live delivery of a queued notice. The mailbox already holds it,
+   * so a failed or unavailable wake leaves it for the member's next step; the
+   * amendment itself never depends on this path succeeding.
+   */
+  async function deliverContractNotice(
+    stateRoot: string,
+    team: TeamState,
+    message: TeamMessage,
+    signal: AbortSignal,
+  ): Promise<'wake' | 'mailbox'> {
+    const captain = nearestLiveLead(ctx, team)
+    if (captain !== undefined) {
+      const accepted = await dispatchMember(
+        captain, team.id, message.to, mailboxPrompt(team.id, message.to, [message]), signal, 'steer', message.attemptId,
+      ).catch(() => false)
+      if (accepted) {
+        await withTeamLock(teamLockKey(stateRoot, team.id), () => (
+          markMailboxDelivered(stateRoot, team.id, message.to, [message.id])
+        ))
+        return 'wake'
+      }
+    }
+    await withTeamLock(teamLockKey(stateRoot, team.id), () => (
+      releaseMailboxDelivery(stateRoot, team.id, message.to, [message.id])
+    ))
+    return 'mailbox'
+  }
 
   async function dispatchMember(captain: Agent, teamId: string, memberName: string, text: string, signal: AbortSignal, mode: 'queue' | 'steer', attemptId?: string): Promise<boolean> {
     const root = stateRootOf(workspaceOf(captain), config)
@@ -2256,7 +2420,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_amend_task',
-    description: 'Captain-only controlled contract amendment for one non-terminal quality task: replace a wrong objective/acceptance/verify/inScope/outOfScope when the original contract makes honest completion impossible (for example a verify command that cannot pass, or an inScope that forbids the file the objective names). The amendment is appended to the task\'s revisions ledger with previous values and the reason, and is rejected once a review/requirements task has passed judgment on this task. Members cannot amend contracts; the implementer re-reads the amended contract before its next quality gate. Lists are full replacements, not deltas.',
+    description: 'Captain-only controlled contract amendment for one non-terminal quality task: replace a wrong objective/acceptance/verify/inScope/outOfScope when the original contract makes honest completion impossible (for example a verify command that cannot pass, or an inScope that forbids the file the objective names). The amendment is appended to the task\'s revisions ledger with previous values and the reason, and is rejected once a review/requirements task has passed judgment on this task. Members cannot amend contracts. When the task is already claimed or in progress, its current owner receives a durable contract-change notice bound to that attempt, so it re-reads the contract instead of finishing against the old one. Lists are full replacements, not deltas.',
     parameters: {
       task_id: { type: 'string', required: true, description: 'Task whose contract is being amended.' },
       reason: { type: 'string', required: true, description: 'Why the current contract is wrong; recorded in the revisions ledger.' },
@@ -2276,11 +2440,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
           revised_fields: { type: 'string', required: true },
           revision_count: { type: 'number', required: true },
           contract: { type: 'string', required: true },
+          relay: { type: 'string', description: 'How the contract-change notice reached the current owner: wake (live delivery attempted), mailbox (durable, awaits the next step), or skipped (nothing was executing).' },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Task ${value.task_id} contract amended (${value.revised_fields}); ${value.revision_count} revision(s) on record, status ${value.status}. New contract: ${value.contract}`,
+        text: `Task ${value.task_id} contract amended (${value.revised_fields}); ${value.revision_count} revision(s) on record, status ${value.status}.${value.relay === undefined || value.relay === 'skipped' ? '' : ` Contract-change notice: ${value.relay}.`} New contract: ${value.contract}`,
       }],
     },
     async execute(args, exec) {
@@ -2305,6 +2470,9 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         Object.assign(task, result.task)
         task.updatedAt = Date.now()
         await writeTeam(stateRoot, fresh)
+        // Queue the owner notice inside the lock: a concurrent reassignment
+        // must not leave a notice pointing at an attempt it already revoked.
+        const notice = await prepareContractNotice(stateRoot, fresh, task, result.revision?.fields ?? [], args.reason)
         return {
           taskId: task.id,
           status: task.status,
@@ -2317,6 +2485,8 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
             ...task.inScope === undefined ? {} : { inScope: task.inScope },
             ...task.outOfScope === undefined ? {} : { outOfScope: task.outOfScope },
           },
+          notice,
+          team: fresh,
         }
       })
       appendTeamEvent(ctx, captainSessionOf(ctx, team.captainSessionId, captain.session), 'agent-teams/task-amended', {
@@ -2325,12 +2495,31 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
         fields: amended.fields,
         reason: args.reason,
       })
+      let relay = 'skipped'
+      if (amended.notice !== undefined) {
+        appendTeamEvent(ctx, captainSessionOf(ctx, team.captainSessionId, captain.session), 'agent-teams/message-sent', {
+          teamId: team.id,
+          messageId: amended.notice.id,
+          from: CAPTAIN_KEY,
+          to: amended.notice.to,
+          content: amended.notice.content,
+          ts: amended.notice.ts,
+        })
+        try {
+          relay = await deliverContractNotice(stateRoot, amended.team, amended.notice, exec.signal)
+        } catch (error: unknown) {
+          // Live delivery is best effort; the mailbox copy is the durable path.
+          ctx.logger.warn(`agent-teams: contract-change notice for task ${amended.taskId} stays in the mailbox: ${String(error)}`)
+          relay = 'mailbox'
+        }
+      }
       return {
         task_id: amended.taskId,
         status: amended.status,
         revised_fields: amended.fields.join(', '),
         revision_count: amended.revisionCount,
         contract: JSON.stringify(amended.contract),
+        relay,
       }
     },
   }))
@@ -2588,17 +2777,39 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): Agen
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_status',
-    description: 'Team snapshot: members with live activity and tasks with status/assignee/dependencies/output. Captains also see every team mailbox; members see only their own inbox. Use after mailbox progress deliveries or for an explicit status request. After dispatch, end your turn while members work; do not repeatedly poll.',
-    parameters: {},
+    description: 'Team snapshot: members with live activity and tasks with status/assignee/dependencies/output. Captains also see every team mailbox; members see only their own inbox. Pass task_id for one task in full: the current objective/scope/acceptance/verify contract, every finding, the captain amendment ledger, and the evidence a completion gate reads — that mode is read-only and does not consume the inbox. Use after mailbox progress deliveries or for an explicit status request. After dispatch, end your turn while members work; do not repeatedly poll.',
+    parameters: {
+      task_id: { type: 'string', description: 'Optional: return this one task in full (contract, findings, amendments, evidence) instead of the team snapshot. Read-only; the inbox is not consumed.' },
+    },
     output: {
       schema: { type: 'object', additionalProperties: true, properties: {} },
-      render: (_args, value) => [{ type: 'text', text: renderStatus(value) }],
+      render: (_args, value) => [{ type: 'text', text: renderStatusOrTask(value) }],
     },
-    async execute(_args, exec) {
+    async execute(args, exec) {
       const caller = requireCaptain(exec)
       const workspace = workspaceOf(caller)
       const stateRoot = stateRootOf(workspace, config)
       const located = await requireParticipantTeam(ctx, workspace, config, caller)
+      const requestedTaskId = args.task_id?.trim()
+      if (requestedTaskId !== undefined && requestedTaskId !== '') {
+        // Detail mode is a read: it returns before the scheduler kick and the
+        // mailbox acknowledgement below, so auditing a contract cannot wake
+        // members or eat the reports the caller has not read yet.
+        const detail = await withTeamLock(teamLockKey(stateRoot, located.id), async () => {
+          const { team, identity } = await requireFreshParticipant(ctx, stateRoot, located.id, caller.id)
+          const task = team.tasks.find(item => item.id === requestedTaskId)
+          if (task === undefined) {
+            throw new Error(`no task "${requestedTaskId}" in team "${team.name}" — omit task_id to list tasks`)
+          }
+          return { team, identity, task }
+        })
+        return {
+          team_id: detail.team.id,
+          team_name: detail.team.name,
+          viewer: detail.identity.name,
+          task: taskDetailView(detail.task),
+        }
+      }
       if (await sessionLeadsTeamAsync(ctx, located, caller.id)) {
         await scheduler.kickTeam(workspace, located.id, await memberOperationParent(ctx, located, caller))
       }
@@ -3147,6 +3358,121 @@ function memberRuntime(config: ToolsConfig): MemberRuntimeConfig {
     fallback: config.fallback,
     memberContext: config.memberContext,
   }
+}
+
+/** Dispatch between the compact team snapshot and the one-task contract view. */
+function renderStatusOrTask(value: JsonValue): string {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && value['task'] !== undefined) {
+    return renderTaskDetail(value)
+  }
+  return renderStatus(value)
+}
+
+/**
+ * Read-only contract view for `agent_teams_status({ task_id })`: the current
+ * contract, every finding, the amendment ledger, and the evidence a completion
+ * gate reads. It never acknowledges the inbox — the caller is reading state,
+ * not consuming reports.
+ */
+function renderTaskDetail(value: JsonValue): string {
+  const payload = value as {
+    team_name: string
+    viewer: string
+    task: {
+      id: string
+      subject: string
+      description?: string
+      status: string
+      kind: string
+      round?: number
+      verdict?: string
+      assignee: string
+      attempt: number
+      attempt_id: string
+      dependencies: string[]
+      reviewed_task_id?: string
+      source_task_id?: string
+      fixes?: string[]
+      objective: string
+      in_scope: string[]
+      out_of_scope: string[]
+      acceptance: string[]
+      verify: string[]
+      findings: { id: string; severity: string; file?: string; line?: number; problem: string; required_fix: string; resolved: boolean }[]
+      findings_open: number
+      revisions: { at: number; by: string; reason: string; fields: string[]; previous: string }[]
+      acceptance_results: { criterion: string; status: string; evidence?: string }[]
+      commands_run: { command: string; status: string; exit_code?: number; evidence?: string }[]
+      changed_paths: string[]
+      supplemental_evidence: { at: number; by: string; attempt: number; note?: string }[]
+      output?: string
+      output_truncated?: boolean
+    }
+  }
+  const { task } = payload
+  const round = task.round === undefined ? '' : ` r${task.round}`
+  const verdict = task.verdict === undefined ? '' : ` verdict ${task.verdict}`
+  const attempt = task.attempt_id === '' ? `attempt ${task.attempt}` : `attempt ${task.attempt} (${task.attempt_id})`
+  const deps = task.dependencies.length === 0 ? '' : ` · deps ${task.dependencies.join(',')}`
+  const links = [
+    ...task.reviewed_task_id === undefined ? [] : [`Reviews: ${task.reviewed_task_id}`],
+    ...task.source_task_id === undefined ? [] : [`Source task: ${task.source_task_id}`],
+    ...task.fixes === undefined || task.fixes.length === 0 ? [] : [`Fixes findings of: ${task.fixes.join(', ')}`],
+  ]
+  const findings = task.findings.length === 0
+    ? ['Findings (0): none']
+    : [
+      `Findings (${task.findings_open} open / ${task.findings.length}):`,
+      ...task.findings.map(finding => {
+        const where = finding.file === undefined ? '' : ` ${finding.file}${finding.line === undefined ? '' : `:${finding.line}`}`
+        return `  - [${finding.severity}] ${finding.id}${where} — ${finding.problem}\n      fix: ${finding.required_fix}${finding.resolved ? ' (resolved)' : ''}`
+      }),
+    ]
+  const revisions = task.revisions.length === 0
+    ? ['Amendments (0): none']
+    : [
+      `Amendments (${task.revisions.length}):`,
+      ...task.revisions.map(revision => `  - ${new Date(revision.at).toISOString()} by ${revision.by}: ${revision.reason} [${revision.fields.join(', ')}]\n      previous: ${revision.previous.length > 600 ? `${revision.previous.slice(0, 600)}…` : revision.previous}`),
+    ]
+  const acceptance = task.acceptance_results.length === 0
+    ? [`Acceptance evidence (0/${task.acceptance.length}): none`]
+    : [
+      `Acceptance evidence (${task.acceptance_results.filter(result => result.status === 'passed').length}/${task.acceptance.length}):`,
+      ...task.acceptance_results.map(result => `  - ${result.criterion}: ${result.status}${result.evidence === undefined ? '' : ` (${result.evidence})`}`),
+    ]
+  const commands = task.commands_run.length === 0
+    ? [`Verification evidence (0/${task.verify.length}): none`]
+    : [
+      `Verification evidence (${task.commands_run.filter(result => result.status === 'passed').length}/${task.verify.length}):`,
+      ...task.commands_run.map(result => `  - ${result.command}: ${result.status}${result.exit_code === undefined ? '' : ` (exit ${result.exit_code})`}${result.evidence === undefined ? '' : ` — ${result.evidence}`}`),
+    ]
+  const supplemental = task.supplemental_evidence.length === 0
+    ? []
+    : [
+      `Supplemental observations (${task.supplemental_evidence.length}; original verdict unchanged):`,
+      ...task.supplemental_evidence.map(evidence => `  - ${new Date(evidence.at).toISOString()} by ${evidence.by} attempt ${evidence.attempt}${evidence.note === undefined ? '' : `: ${evidence.note}`}`),
+    ]
+  return [
+    `Team "${payload.team_name}" — task ${task.id} [${task.status}]${round} ${task.kind}${verdict}`,
+    `Subject: ${task.subject}`,
+    `Assignee: ${task.assignee || 'unassigned'} · ${attempt}${deps}`,
+    ...task.description === undefined ? [] : [`Description: ${task.description}`],
+    ...links,
+    `Objective: ${task.objective || '(none)'}`,
+    `In scope: ${task.in_scope.length === 0 ? '(none)' : task.in_scope.join(', ')}`,
+    `Out of scope: ${task.out_of_scope.length === 0 ? '(none)' : task.out_of_scope.join(', ')}`,
+    `Acceptance (${task.acceptance.length}):`,
+    ...task.acceptance.length === 0 ? ['  (none)'] : task.acceptance.map(criterion => `  - ${criterion}`),
+    `Verify (${task.verify.length}):`,
+    ...task.verify.length === 0 ? ['  (none)'] : task.verify.map(command => `  - ${command}`),
+    ...findings,
+    ...revisions,
+    ...acceptance,
+    ...commands,
+    ...(task.changed_paths.length === 0 ? [] : [`Changed paths (${task.changed_paths.length}): ${task.changed_paths.join(', ')}`]),
+    ...supplemental,
+    ...task.output === undefined ? [] : [`Output${task.output_truncated === true ? ' (truncated)' : ''}:\n${task.output}`],
+  ].join('\n')
 }
 
 /** Render the status snapshot as compact text for the model. */

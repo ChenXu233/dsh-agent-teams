@@ -36,7 +36,7 @@ The fork is built out of the DSH features that already exist instead of patching
 
 - **Everything is a plugin.** Member-page controls are additive slot contributions (`conversation.input.right`); no host service is patched, and the single-owner `conversation.input.model` seat is left to the host.
 - **One compatibility floor.** [`compatibility.json`](./compatibility.json) declares only `minimumHost`; every DSH peer stays `*`, CI exercises the floor, and a newer Harness release installs without a plugin release.
-- **One verification entry.** `pnpm verify` runs 24 named phases in order and stops at the first failure.
+- **One verification entry.** `pnpm verify` runs 25 named phases in order and stops at the first failure.
 - **One home per fact.** Guides live under [`docs/`](./docs/README.md) in three reader-oriented folders; a fact kept in two places is a bug, not redundancy.
 - **Teams end, archives can be deleted.** An ended team keeps its full history — and can be removed from the team view once you no longer need it.
 

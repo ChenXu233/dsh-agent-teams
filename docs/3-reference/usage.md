@@ -47,7 +47,7 @@
 
 任务状态机：`pending → claimed → in_progress → completed | failed | cancelled`。每次执行携带单调 `attempt` + 唯一 `attemptId`；转派先使旧 attempt 失效，再中断并等待旧成员安静，因此迟到更新无法覆盖新结果。领取前校验依赖，并禁止成员同时拥有两个未完成任务。
 
-旧 `kind=work` 任务仍可用自由文本完成。质量 kind（`requirements` / `implementation` / `verification` / `review` / `repair` / `integration`）走结构化合同：创建时要有 objective 和 acceptance；实现/修复还要有 `inScope` 与 `verify`。`review` / `requirements` 只有 `verdict=pass` 才能 `completed`；`needs_revision` / `reject` 必须 `failed`，并带至少一条 finding。审查失败后系统自动创建不依赖 failed review 的 repair + 下一轮 review。第一版范围控制是完成时审计（对照调用方提交的 `changedPaths`），不是 host 写入拦截。halted 团队不能被普通 `create_task` 静默恢复，必须 `agent_teams_resume` 或 `create_task({ resume, resumeReason })`。质量模式下人只提供目标和约束；默认任务顺序是 requirements → implementation → verification → review → integration，审查合同审的是实现是否过关，不要把“请提交 needs_revision”写进任务。`halted` 表示人停止了团队，`escalated` 只表示自动循环到上限，两者不是一回事。详情见 `docs/quality-gates.md`。
+旧 `kind=work` 任务仍可用自由文本完成。质量 kind（`requirements` / `implementation` / `verification` / `review` / `repair` / `integration`）走结构化合同：创建时要有 objective 和 acceptance；实现/修复还要有 `inScope` 与 `verify`。`review` / `requirements` 只有 `verdict=pass` 才能 `completed`；`needs_revision` / `reject` 必须 `failed`，并带至少一条 finding。审查失败后系统自动创建不依赖 failed review 的 repair + 下一轮 review。第一版范围控制是完成时审计（对照调用方提交的 `changedPaths`），不是 host 写入拦截。halted 团队不能被普通 `create_task` 静默恢复，必须 `agent_teams_resume` 或 `create_task({ resume, resumeReason })`。质量模式下人只提供目标和约束；默认任务顺序是 requirements → implementation → verification → review → integration，审查合同审的是实现是否过关，不要把“请提交 needs_revision”写进任务。`halted` 表示人停止了团队，`escalated` 只表示自动循环到上限，两者不是一回事。详情见 [quality-gates.md](./quality-gates.md)。
 
 ## 工具一览
 
@@ -62,9 +62,9 @@
 | `agent_teams_reassign_task` | 原子重试/转派任务；`assignee=captain` 表示队长安全接管 |
 | `agent_teams_claim_task` | 领取任务（校验依赖；队长可代领，成员只能领自己的/未指派的） |
 | `agent_teams_update_task` | 携带当前 `attempt_id` 推进任务；质量 kind 按 verdict / acceptanceResults / commandsRun / changedPaths 拒绝非法 completed |
-| `agent_teams_amend_task` | 队长专属：改写非终态质量任务的 objective/acceptance/verify/inScope/outOfScope（合同本身写错导致无法诚实完成时）；写入 revisions ledger，审查通过后冻结。成员不可用 |
+| `agent_teams_amend_task` | 队长专属：改写非终态质量任务的 objective/acceptance/verify/inScope/outOfScope（合同本身写错导致无法诚实完成时）；写入 revisions ledger，审查通过后冻结。任务已在 claimed/in_progress 时，向当前执行成员投递一条绑定该 attempt 的变更通知，成员可读新合同后再完成。成员不可用 |
 | `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱并唤醒对方（无队长转发；拒绝冒名 `from`） |
-| `agent_teams_status` | 团队全景：kind/round/verdict、coverage matrix、escalated、halt/resume 状态 |
+| `agent_teams_status` | 团队全景：kind/round/verdict、coverage matrix、escalated、halt/resume 状态。传 `task_id` 返回单个任务的合同（objective/scope/acceptance/verify）、findings、修订账本与完成证据；该模式只读，不消费收件箱 |
 | `agent_teams_run_command` | 队长专属：在某个成员自己的会话里列举/执行已注册命令（`action: list\|run`）；命令行必须单行、`/` 开头、≤512 字符，默认 deny 掉 agent-teams 命名空间（见「成员命令面」） |
 | `agent_teams_resume` | 显式恢复 halted 团队，必须带非空 reason；不重建已取消任务 |
 | `agent_teams_delete` | 结束团队：打断成员，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |

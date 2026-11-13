@@ -19,9 +19,9 @@
 + 修改范围合法
 ```
 
-## 1. 当前基线：已经有什么，还缺什么
+## 1. 能力基线
 
-### 1.1 已经有、必须复用
+### 1.1 已实现能力与不变量
 
 | 能力 | 位置 | 必须保持 |
 |---|---|---|
@@ -33,54 +33,18 @@
 | 停止整队 | `haltTeamWork()`、`POST /plugins/dsh-agent-teams/halt` | 停止仍不删除团队 |
 | 现有验证入口 | `pnpm typecheck`、`pnpm build`、`pnpm verify` | 新检查必须挂进 `pnpm verify` |
 
-### 1.2 当前缺口（必须修）
+## 2. 设计边界
 
-1. `TeamTask` 只有 `subject` + 可选 `description`，没有合同、范围、验收、验证。
-2. 审查只是 `role` 字符串；调度器不知道这是 review。
-3. `completed` 无条件放行。Reviewer 可以写“仍有重大分歧”却标 `completed`。
-4. 审查失败后不会自动生成 `repair-N` / `review-N+1`。
-5. 没有 `round`、`maxReviewRounds`、finding 生命周期。
-6. 没有 `changed_paths`，无法审计越界修改。
-7. `create_task` 会静默解除 `halted`，存在误恢复风险。
-8. 现有测试覆盖调度，不覆盖质量门禁。本需求必须先写失败测试。
+这些约束不可协商；改门禁前先对照：
 
-## 2. 可以做 / 不可以做
-
-### 2.1 可以做
-
-- 给任务增加结构化合同、`kind`、`round`、`verdict`、`findings`、`changedPaths`、`verify`。
-- 让 `create_task` / `update_task` 按合同和 verdict 拒绝非法完成。
-- 审查失败后自动创建 repair 任务和下一轮独立 review 任务。
-- 给 profile 增加审查策略配置：最少轮数、最大轮数、必需 reviewer。
-- 完成时记录 `changed_paths`、`acceptance_results`、`commands_run`。
-- 用 git/工作区 diff 做完成时范围审计。
-- 把 `create_task` 自动 unhalt 改成显式 `resume`。
-- 增加 Captain coverage matrix / 阶段汇总。
-- 增加强制 TDD 脚本，并让 `pnpm verify` 运行它。
-- 更新 `usage.md`、`README.md`、`README_ZH.md` 中与本功能直接相关的说明。
-- 复用现有 DAG、attempt、mailbox、halt、scheduler。
-
-### 2.2 不可以做
-
-- 不要新建另一套 workflow 引擎。
-- 不要做 Issue #72 的 Staging / Approve & Run / 规划期 GUI 审批。
-- 不要把“几个 Agent 互相说 OK”做成终止条件。
-- 不要让实现者批准自己的实现或修复。
-- 不要让 review / test 任务默认拥有写代码权限语义。第一版至少要在合同和完成审计上禁止；不要假装已经拦截了全部 bash/fs。
-- 不要让 repair 任务依赖 `failed` 的 review 任务。
-- 不要用 `reassign_task` 重跑旧 review 来代替新建 `review-N+1`。`beginTaskAttempt()` 会清掉旧 output。
-- 不要把 `send_message` 当成正式下一轮审查。邮件没有门禁。
-- 不要复活 `failed` / `cancelled` 任务。终态只读；下一轮必须新建任务。
-- 不要修改 `~/.dsh/profiles/web/cordis.patch.yml`，除非用户本窗口明确要求。
-- 不要提交或推送 `docs/multi-role-profiles.md`、`docs/personal-kb-delivery/`。
-- 不要 commit / push / 开 PR，除非用户明确要求。
-- 不要启动替换 Web GUI 的新服务器。
-- 不要做真实部署，也不要自动执行生产发布。
-- 不要把 Prompt 里的“禁止改其他文件”宣传成硬安全边界。第一版只保证完成时审计和拒绝 `completed`。
-- 不要在没有 host 统一写入拦截接口时，伪造“成员写工具越界立刻失败”。
-- 不要一次做独立 git worktree 隔离。那是后续 PR，不在本需求范围。
-- 不要为了本功能改官方 DSH checkout。
-- 不要扩大到重构无关 UI、面板动画、图片资源。
+- 不新建第二套 workflow 引擎：复用现有 DAG、attempt、halt 和 scheduler。
+- 终止条件不是“几个 Agent 互相说 OK”，而是门禁全部通过 + acceptance 证据 + 无 blocker/high finding + 独立审查 + verify 通过 + 范围合法。
+- 实现者不能批准自己的实现或修复；review / requirements 只有 `verdict=pass` 才算通过。
+- review / verification 任务不默认拥有写代码权限语义。范围控制是**完成时审计**（对照 `changedPaths` 与实际字节），不是 host 写入拦截——不要把它宣传成硬安全边界。
+- repair 任务不能依赖 failed 的 review 任务；failed / cancelled 是终态，不复活，下一轮新建任务。
+- 不用 `reassign_task` 重跑旧 review 来代替新建 `review-N+1`（`beginTaskAttempt()` 会清掉旧 output）。
+- `send_message` 不是正式审查：邮件没有门禁。
+- 一个 Captain 同时只带一个团队。
 
 ## 3. 边界和职责
 
@@ -178,7 +142,7 @@ integration / 最终验证
 
 ## 5. 数据模型
 
-在现有 `TeamTask` / `TeamState` / `TeamProfileSnapshot` 上扩展。不要另起状态文件，除非现有 `team.json` 放不下 ledger；第一版 ledger 可以先作为任务 output + status 投影。
+数据都存在 `TeamTask` / `TeamState` / `TeamProfileSnapshot` 上；修订账本在任务的 `revisions`，不另起状态文件。
 
 ### 5.1 枚举
 
@@ -204,7 +168,7 @@ type FindingSeverity =
   | 'blocker'
 ```
 
-### 5.2 任务新增字段
+### 5.2 任务字段
 
 ```ts
 interface ReviewFinding {
@@ -260,7 +224,7 @@ interface TeamTask {
 - `'work'` 保持旧行为，避免破坏已有团队和测试。
 - 新创建的 `requirements` / `implementation` / `verification` / `review` / `repair` / `integration` 必须走新门禁。
 
-### 5.3 团队 / profile 新增字段
+### 5.3 团队 / profile 字段
 
 ```ts
 interface ReviewPolicy {
@@ -342,7 +306,7 @@ interface TeamProfileConfig {
 4. `review` 必须有 `reviewedTaskId`，且目标任务存在。
 5. `repair` 必须有 `sourceTaskId` 和至少 1 个 `sourceFindingIds`。
 6. `repair` / 下一轮 `review` 的 `dependencies` 不得包含 `failed` / `cancelled` 任务。
-7. 同一团队内，两个同时 `pending|claimed|in_progress` 的 `implementation|repair` 任务，若 `inScope` 路径集合相交，拒绝创建或要求加依赖。第一版：相交则拒绝并行创建，错误信息必须指出冲突路径和另一个 task id。
+7. 同一团队内，两个同时 `pending|claimed|in_progress` 的 `implementation|repair` 任务，若 `inScope` 路径集合相交，拒绝创建或要求加依赖。相交则拒绝并行创建，错误信息必须指出冲突路径和另一个 task id。
 8. 团队 `halted=true` 时：
    - 默认拒绝 `create_task`。
    - 只有 `resume=true` 且 `resumeReason` 非空时才清除 `halted/haltedAt` 并创建任务。
@@ -383,7 +347,7 @@ interface TeamProfileConfig {
 5. 成员仍必须提交当前 `attempt_id`。
 6. 实现者不能把自己的实现任务标成 review pass。review 任务必须由 review 角色 / 被指派的 reviewer 完成。
 
-路径匹配规则（第一版，必须写成纯函数并单测）：
+路径匹配规则（纯函数，已单测）：
 
 ```text
 inScope / outOfScope 使用工作区相对 POSIX 路径。
@@ -407,7 +371,7 @@ outOfScope 优先于 inScope。
 其他 git 仓库根
 ```
 
-第一版完成审计以调用方提交的 `changedPaths` 为输入；生命周期测试可再加一个纯函数 `collectChangedPaths(gitStatusText)` 解析 `git status --short` / `git diff --name-only`。不要在单元测试里依赖真实 git 仓库，除非放在临时目录。
+完成审计以调用方提交的 `changedPaths` 为输入；生命周期测试可再加一个纯函数 `collectChangedPaths(gitStatusText)` 解析 `git status --short` / `git diff --name-only`。不要在单元测试里依赖真实 git 仓库，除非放在临时目录。
 
 ### 6.3 自动修复 / 复审
 
@@ -475,7 +439,7 @@ assignment prompt / persona 必须补上：
 
 ### 6.5 恢复语义
 
-新增工具：
+恢复工具：
 
 ```text
 agent_teams_resume
@@ -516,7 +480,7 @@ Captain 或系统在 status 中投影：
 
 - 质量模式下，用户目标拆出的每条约束都应出现。
 - 存在 `missing` 时，status / finalize 不得声称项目完成。
-- 第一版允许 Captain 通过任务 `coverageOf` 声明覆盖关系；系统检查“是否有任务声明覆盖”，不解析自然语言目标。
+- 允许 Captain 通过任务 `coverageOf` 声明覆盖关系；系统检查“是否有任务声明覆盖”，不解析自然语言目标。
 - 必须提供一个纯函数：输入目标条目 + 任务列表，输出 matrix。
 
 ### 6.7 最终交付
@@ -533,22 +497,22 @@ Captain 或系统在 status 中投影：
 
 ## 7. 工具与事件
 
-### 7.1 现有工具改动
+### 7.1 工具面
 
-| 工具 | 改动 |
+| 工具 | 行为 |
 |---|---|
-| `agent_teams_create_task` | 增加合同字段；halt 默认拒绝；质量 kind 强制合同；范围冲突拒绝 |
-| `agent_teams_update_task` | 增加 verdict / findings / changedPaths / acceptanceResults / commandsRun；按 kind 拒绝非法 completed |
-| `agent_teams_status` | 增加 kind、round、verdict、findings 摘要、coverage matrix、escalated、halt/resume 状态 |
+| `agent_teams_create_task` | 支持合同字段；halt 默认拒绝；质量 kind 强制合同；范围冲突拒绝 |
+| `agent_teams_update_task` | 支持 verdict / findings / changedPaths / acceptanceResults / commandsRun；按 kind 拒绝非法 completed |
+| `agent_teams_status` | 显示 kind、round、verdict、findings 摘要、coverage matrix、escalated、halt/resume；传 `task_id` 返回单个任务的合同、findings、修订账本与证据（只读，不消费收件箱） |
 | `agent_teams_create` | profile 可带 `reviewPolicy`；快照到 `team.profile` / `team.reviewPolicy` |
 
-### 7.2 新工具
+### 7.2 补充工具
 
 | 工具 | 作用 |
 |---|---|
 | `agent_teams_resume` | 显式恢复 halted 团队，必须带 reason |
 
-不要新增 `submit_review` 作为第一版必做项。优先把审查结论收进 `update_task`，减少工具膨胀。如果实现时发现参数过载，可以把结构化提交抽成内部函数，不必先暴露新工具。
+不新增 `submit_review`：审查结论收进 `update_task`，避免工具膨胀。
 
 ### 7.3 事件
 
@@ -563,7 +527,7 @@ Captain 或系统在 status 中投影：
 
 ## 8. Prompt / 文档同步
 
-必须更新：
+改动门禁时必须同步：
 
 - `src/index.ts` 的 usage protocol：补上合同、verdict、禁止依赖 failed、显式 resume、禁止自我批准。
 - `src/members.ts` persona。
@@ -573,273 +537,23 @@ Captain 或系统在 status 中投影：
 
 不要把本文全文贴进 usage prompt。prompt 只保留机器规则摘要。
 
-## 9. 强制 TDD
+## 9. 测试映射
 
-这是硬门禁，不是建议。
+每条机器规则至少有一条当前测试；全部通过 `pnpm verify` 运行：
 
-### 9.1 顺序
-
-每个机器规则都必须：
-
-```text
-1. 先写失败测试
-2. 跑测试，确认失败原因是功能不存在或旧行为不符合本文
-3. 再写最小实现
-4. 再跑测试，确认变绿
-5. 最后补文档和 prompt
-```
-
-禁止：
-
-- 先实现再补测试。
-- 用“以后再测”跳过门禁。
-- 只测 prompt 字符串，不测工具拒绝。
-- 删除或放宽已有 verify / lifecycle / stress 断言来让新功能通过。
-
-### 9.2 测试文件
-
-新增：
-
-```text
-scripts/quality-gates-tdd.mjs
-```
-
-风格照抄 `scripts/fallback-tdd.mjs`：
-
-- Node ESM。
-- 从 `../lib/...` 导入编译产物。
-- `check(label, value)` / `throws(label, fn)`。
-- 失败 `process.exitCode = 1`。
-
-`package.json` 的 `verify` 必须改成：
-
-```text
-node scripts/verify.mjs
-&& node scripts/fallback-tdd.mjs
-&& node scripts/quality-gates-tdd.mjs
-&& node scripts/lifecycle-verify.mjs
-&& node scripts/stress-verify.mjs
-&& node scripts/sync-skill.mjs --check
-```
-
-`scripts/verify.mjs` 可补充少量纯函数断言，但质量门禁主清单必须集中在 `quality-gates-tdd.mjs`，方便对照本文。
-
-`scripts/lifecycle-verify.mjs` 必须补工具级闭环，至少覆盖：
-
-- 非法 completed 被拒绝。
-- review `needs_revision` 自动生成 repair + next review。
-- repair 不依赖 failed review。
-- halted 后普通 `create_task` 不恢复。
-- `resume` 后才能继续派工。
-- 超 `maxReviewRounds` 不再自动建任务。
-
-### 9.3 必须先写、必须失败的测试清单
-
-下列 label 应当作为测试名的稳定前缀，实现时不要改意：
-
-#### A. 合同与创建
-
-1. `tdd.create.work-kind-remains-compatible`：旧 `create_task({subject})` 仍可创建 `kind=work`。
-2. `tdd.create.implementation-requires-objective`：缺 objective 抛错。
-3. `tdd.create.implementation-requires-acceptance`：缺 acceptance 抛错。
-4. `tdd.create.implementation-requires-inscope-and-verify`：缺 inScope 或 verify 抛错。
-5. `tdd.create.review-requires-reviewed-task`：缺 reviewedTaskId 抛错。
-6. `tdd.create.repair-requires-source-and-findings`：缺 sourceTaskId / sourceFindingIds 抛错。
-7. `tdd.create.repair-must-not-depend-on-failed-review`：dependencies 含 failed review 抛错。
-8. `tdd.create.overlapping-inscope-rejects-parallel-ready-tasks`：两个无依赖实现任务 inScope 相交则拒绝。
-9. `tdd.create.overlapping-inscope-allowed-when-serialized`：后者依赖前者时允许相交。
-10. `tdd.create.implementation-blocked-until-requirements-pass`：存在未 pass 的 requirements 时拒绝创建 implementation。
-
-#### B. 完成门禁
-
-11. `tdd.complete.review-without-verdict-rejected`。
-12. `tdd.complete.review-needs-revision-cannot-complete`。
-13. `tdd.complete.review-pass-requires-no-open-high-findings`。
-14. `tdd.complete.implementation-requires-acceptance-results`。
-15. `tdd.complete.implementation-requires-all-verify-commands`。
-16. `tdd.complete.out-of-scope-path-cannot-complete`。
-17. `tdd.complete.undeclared-path-cannot-complete`。
-18. `tdd.complete.verify-failure-must-fail-task`。
-19. `tdd.complete.claimed-still-cannot-jump-to-completed`。
-20. `tdd.complete.work-kind-keeps-legacy-output-only-complete`：旧 work 任务仍可用自由文本完成。
-
-#### C. 路径规则
-
-21. `tdd.scope.file-match`。
-22. `tdd.scope.directory-prefix-match`。
-23. `tdd.scope.out-of-scope-wins`。
-24. `tdd.scope.rejects-parent-escape`。
-25. `tdd.scope.rejects-absolute-path`。
-26. `tdd.scope.default-excludes-env-and-git`。
-
-#### D. 自动循环
-
-27. `tdd.loop.needs-revision-creates-repair-and-next-review`。
-28. `tdd.loop.repair-depends-on-source-not-failed-review`。
-29. `tdd.loop.next-review-assigned-to-original-reviewer`。
-30. `tdd.loop.next-review-cannot-be-implementer`。
-31. `tdd.loop.round-increments`。
-32. `tdd.loop.stops-at-max-review-rounds`。
-33. `tdd.loop.reject-does-not-autoresume`。
-34. `tdd.loop.requirements-needs-revision-opens-next-requirements-round`。
-
-#### E. halt / resume
-
-35. `tdd.resume.create-task-does-not-unhalt`。
-36. `tdd.resume.explicit-resume-clears-halt`。
-37. `tdd.resume.create-with-resume-reason-unhalts`。
-38. `tdd.resume.cancelled-tasks-stay-cancelled`。
-39. `tdd.resume.missing-reason-rejected`。
-
-#### F. coverage / delivery
-
-40. `tdd.coverage.missing-item-blocks-delivery`。
-41. `tdd.coverage.passed-item-requires-completed-task`。
-42. `tdd.delivery.ok-only-when-all-gates-pass`。
-43. `tdd.delivery.failed-review-without-repair-blocks`。
-
-#### G. 兼容与持久化
-
-44. `tdd.state.old-team-json-without-new-fields-still-loads`。
-45. `tdd.state.invalid-verdict-rejected-at-durable-boundary`。
-46. `tdd.prompt.assignment-includes-kind-scope-acceptance`。
-47. `tdd.usage.mentions-explicit-resume-and-verdict`。
-
-以上 47 条是最低集。可以多写，不能少写。少写视为需求遗漏。
-
-### 9.4 测试替身
-
-lifecycle 继续使用现有 fake ctx / fake agents，不要依赖真实 LLM。
-
-TDD 脚本优先测纯函数：
-
-- 路径匹配
-- 完成校验
-- 自动展开下一轮任务的纯规划函数
-- coverage / delivery 判定
-- resume 状态变化
-
-工具层测试通过 `registerAgentTeamsTools` 调真实 compiled tools。
-
-## 10. 建议的代码落点
-
-不要为了本功能大搬目录。优先这些文件：
-
-| 文件 | 职责 |
+| 规则 | 测试 |
 |---|---|
-| `src/types.ts` | 新字段和枚举 |
-| `src/state.ts` | 持久化校验、范围纯函数、完成校验、delivery/coverage 纯函数 |
-| `src/tools.ts` | create/update/resume 门禁，自动展开下一轮 |
-| `src/profiles.ts` | `reviewPolicy` 解析与 allowlist |
-| `src/members.ts` | persona 增补 |
-| `src/scheduler.ts` | assignment 增补合同摘要 |
-| `src/event-types.ts` | 事件字段 |
-| `src/index.ts` | usage protocol、Config schema、resume 工具名 |
-| `src/snapshot.ts` / client status 投影 | 如 status/UI 需要显示 verdict/round |
-| `scripts/quality-gates-tdd.mjs` | 强制 TDD |
-| `scripts/verify.mjs` | 少量纯函数补充 |
-| `scripts/lifecycle-verify.mjs` | 工具闭环 |
-| `usage.md`、`README.md`、`README_ZH.md` | 用户可见说明 |
+| 合同创建、完成门禁、自动 repair / 复审 | `scripts/quality-gates-*.test.mjs`、`scripts/quality-gates-tdd.mjs` |
+| 合同修订（amend）与修订后中继 | `scripts/quality-gates-amend.test.mjs`、`scripts/task-contract-visibility.test.mjs` |
+| 状态投影的合同详情 | `scripts/task-contract-visibility.test.mjs` |
+| 端到端生命周期 | `scripts/lifecycle-verify.mjs` |
+| 稳定性与边界 | `scripts/stability-tdd.mjs`、`scripts/stress-verify.mjs` |
 
-客户端最小要求：
+## 10. 明确不在本范围内
 
-- status / 活动面板能看到 `kind`、`round`、`verdict`。
-- 不要为此重做面板布局。
-- 没有这些字段的旧快照必须继续可渲染。
-
-## 11. 实现阶段（同一需求，允许同一 PR，但必须按序）
-
-允许一个实现窗口做完全部，但必须按这个顺序，每步先红后绿：
-
-### Phase 0：TDD 骨架
-
-- 新建 `scripts/quality-gates-tdd.mjs`。
-- 把第 9.3 节全部断言写成失败测试。
-- 把它挂进 `pnpm verify`。
-- 此时 `pnpm verify` 必须失败。
-
-### Phase 1：类型、持久化、纯函数
-
-- 扩展类型和 `isTeamTask`.
-- 实现路径匹配、完成校验、coverage、delivery 纯函数。
-- 对应 TDD 变绿。
-
-### Phase 2：create / update 门禁
-
-- 改两个工具。
-- 旧 `work` 行为保持兼容。
-- 对应 TDD / lifecycle 变绿。
-
-### Phase 3：自动循环 + resume
-
-- 审查失败自动建下一轮。
-- `agent_teams_resume`。
-- 去掉 `create_task` 隐式 unhalt。
-- 对应 TDD / lifecycle 变绿。
-
-### Phase 4：prompt、status、文档
-
-- persona / assignment / usage。
-- status 投影。
-- 用户文档。
-- 全量 `pnpm typecheck && pnpm build && pnpm verify` 变绿。
-
-## 12. 验收标准
-
-完成当且仅当：
-
-1. 第 9.3 节 47 条测试全部存在且通过。
-2. `pnpm typecheck` 通过。
-3. `pnpm build` 通过。
-4. `pnpm verify` 通过，且包含 `quality-gates-tdd.mjs`。
-5. `git diff --check` 无空白错误。
-6. 旧 `work` 任务、旧 `team.json`、旧 profile seed/captain planning 仍可用。
-7. Reviewer 不能再靠自由文本 `completed` 放行下游。
-8. `create_task` 不再静默恢复 halted 团队。
-9. 文档写明：第一版范围控制是完成时审计，不是 host 写入拦截。
-10. 未改用户排除的文件，未做未授权 commit/push/PR。
-
-## 13. 明确不在本需求内
-
-- Staging UI / 执行前人工改 DAG / Approve & Run。
-- 独立 worktree。
-- Host 级 bash/fs 写入拦截。
-- 人类会签投票组件。
+- Host 级 bash/fs 写入拦截：范围控制是完成时审计，不在写入时拦截。
+- 独立 git worktree 隔离。
+- 人类会签 / 投票组件。
 - 自动部署。
-- 多团队并行（一个 Captain 仍只能带一个团队）。
-- 修改官方 DeepSeek Harness。
-
-## 14. 新窗口执行指令
-
-把下面整段复制到新窗口。不要删减。
-
-```text
-按本文完整实现 AgentTeams 质量门禁与多轮审查。
-
-硬性约束：
-1. 本文是唯一需求来源。不要发明额外功能，也不要缩成只改 prompt。
-2. 强制 TDD：先写 scripts/quality-gates-tdd.mjs 的失败测试，再实现。第 9.3 节 47 条一条不能少。
-3. 把该脚本挂进 package.json 的 verify。
-4. 复用现有 DAG / attempt / halt / scheduler，不要新建 workflow 引擎。
-5. 不要做 Staging UI、worktree、host 写入拦截、部署、commit、push、PR。
-6. 不要修改 ~/.dsh/profiles/web/cordis.patch.yml。
-7. 不要提交 docs/multi-role-profiles.md 和 docs/personal-kb-delivery/。
-8. 旧 kind=work 必须兼容；质量 kind 才走新门禁。
-9. review 只有 verdict=pass 才能 completed；needs_revision 只能 failed，并自动创建不依赖 failed review 的 repair + next review。
-10. create_task 不得再静默 unhalt；必须显式 resume 或 create_task({resume, resumeReason})。
-11. 完成后运行 pnpm typecheck、pnpm build、pnpm verify，并报告改了哪些文件。
-
-执行顺序严格按文档第 11 节：Phase 0 红灯 → Phase 1–3 绿灯 → Phase 4 文档。
-```
-
-## 15. 实现时的定义优先级
-
-如果实现中发现冲突，按这个顺序解释：
-
-1. 本文第 2 节“不可以做”。
-2. 本文第 6 节机器规则。
-3. 本文第 9 节测试清单。
-4. 现有状态机、attempt、failed 不解锁下游。
-5. 现有 UI / 文档文案。
-
-冲突时写进实现备注，不要静默改语义。
+- 一个 Captain 并行带多个团队。
+- 修改官方 DeepSeek Harness 源码。
