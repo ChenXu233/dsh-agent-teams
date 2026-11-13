@@ -452,12 +452,14 @@ await test('managed start strips retired options and guards native activation cr
   const spec = { provider: 'spawn', label: 'worker', signal, request: { parent: { id: 'captain' }, prompt: content, persona: 'role', toolFilter: { deny: [] } } }
   assert.equal((await startMember(runtime, spec)).childId, 'child')
   assert.equal(received.delivery, 'parent')
-  assert.ok(!('persona' in received.request)); assert.ok(!('toolFilter' in received.request))
-  await assert.rejects(runtime.startActivation({ ...spec, request: { ...spec.request, parent: { id: 'member' } } }), /depth exceeded/)
+  assert.equal(received.parent.id, 'captain')
+  assert.deepEqual(received.prompt, content)
+  assert.ok(!('request' in received)); assert.ok(!('persona' in received)); assert.ok(!('toolFilter' in received))
+  await assert.rejects(runtime.startActivation({ ...spec.request, parent: { id: 'member' }, provider: spec.provider, label: spec.label, signal, delivery: 'parent' }), /depth exceeded/)
   await drainMemberChildren(runtime, spec.request.parent, ['child'])
   assert.deepEqual(drained, ['child'])
   ctx.dispose()
-  await runtime.startActivation({ ...spec, request: { ...spec.request, parent: { id: 'member' } } })
+  await runtime.startActivation({ ...spec.request, parent: { id: 'member' }, provider: spec.provider, label: spec.label, signal, delivery: 'parent' })
 })
 
 await test('managed cold resume rejects missing setup and fresh failed persona rolls back tool scope', async t => {

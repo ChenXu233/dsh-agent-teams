@@ -70,10 +70,17 @@ export interface MemberStartSpec {
   }
   signal: AbortSignal
 }
+/** 0.2.2 managed activation takes a flat request; persona and tools come from the preset. */
+interface ActivationRequest extends Omit<MemberStartSpec['request'], 'persona' | 'toolFilter'> {
+  provider: string
+  label: string
+  signal: AbortSignal
+  delivery: 'parent'
+}
 interface CreationBoundary {
   start?: (name: string, request: MemberStartSpec['request']) => Promise<unknown>
   startContinuable?: (spec: MemberStartSpec) => Promise<{ childId: SessionId }>
-  startActivation?: (spec: MemberStartSpec & { delivery: 'parent' }) => Promise<{
+  startActivation?: (spec: ActivationRequest) => Promise<{
     childId: SessionId
     result: Promise<unknown>
   }>
@@ -85,8 +92,16 @@ export function usesManagedActivations(runtime: Context['subagents']): boolean {
 export async function startMember(runtime: Context['subagents'], spec: MemberStartSpec): Promise<{ childId: SessionId }> {
   const host = runtime as unknown as CreationBoundary
   if (typeof host.startActivation === 'function') {
+    // The managed activation spec is flat: parent, prompt, and agentOptions are
+    // top-level fields, while persona and tools come from the agent preset.
     const { persona: _persona, toolFilter: _filter, ...request } = spec.request
-    const activation = await host.startActivation.call(runtime, { ...spec, request, delivery: 'parent' })
+    const activation = await host.startActivation.call(runtime, {
+      provider: spec.provider,
+      label: spec.label,
+      ...request,
+      signal: spec.signal,
+      delivery: 'parent',
+    })
     // Preserve native settlement as the missing-report/error fallback on both
     // fresh and resumed activations. mailbox.ts deduplicates successful reports.
     void activation.result.catch(() => undefined)
@@ -106,7 +121,7 @@ export function guardSubagentCreation(ctx: Context, check: (parent: Agent) => vo
       if (typeof original !== 'function') continue
       const descriptor = Object.getOwnPropertyDescriptor(runtime, key)
       const guarded = async (...args: unknown[]): Promise<unknown> => {
-        const request = key === 'start' ? args[1] : (args[0] as MemberStartSpec).request
+        const request = key === 'start' ? args[1] : key === 'startActivation' ? args[0] : (args[0] as MemberStartSpec).request
         check((request as MemberStartSpec['request']).parent)
         return Reflect.apply(original, ctx.subagents, args)
       }
