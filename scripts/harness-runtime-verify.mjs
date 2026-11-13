@@ -115,6 +115,13 @@ function verifyCohort() {
     for (const [path, entry] of Object.entries(lock.packages)) {
         if (!/node_modules\/@deepseek-ai\/dsh(?:-[^/]+)?$/.test(path))
             continue;
+        // npm records platform-specific optional packages in the lock even when it
+        // skips them on this host (for example the macOS-only CUA package on Windows).
+        if (!existsSync(join(runtime, path))) {
+            if (entry.optional === true)
+                continue;
+            throw Error('Missing host package ' + path);
+        }
         const installed = JSON.parse(readFileSync(join(runtime, path, 'package.json'), 'utf8'));
         if (entry.version !== version || installed.version !== version)
             throw Error(`Mixed host cohort ${path}: lock ${entry.version}, disk ${installed.version}, expected ${version}`);
