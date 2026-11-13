@@ -876,7 +876,7 @@ test('07c. merge fidelity: upstream 0.2.1 support landed and plan-02 wiring coex
   const compat = JSON.parse(await readFile(new URL('compatibility.json', root), 'utf8'))
   const agentPeer = pkg.peerDependencies?.['@deepseek-ai/dsh-agent'] ?? ''
   assert.equal(agentPeer, '*', 'DSH peers stay * so every host cohort resolves')
-  assert.equal(compat.minimumHost, '0.2.1-rc.2', 'compatibility.json declares the single install floor')
+  assert.equal(compat.minimumHost, '0.2.2-rc.3', 'compatibility.json declares the single install floor')
   assert.equal(compat.supportedHosts, undefined, 'compatibility.json no longer pins an enumerated host list')
   const membersSource = await readFile(new URL('lib/members.js', root), 'utf8')
   assert.match(membersSource, /usesManagedActivations/, 'upstream managed activations present')

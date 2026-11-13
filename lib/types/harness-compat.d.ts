@@ -1,11 +1,15 @@
 /**
- * The audited Harness 0.1.2 / 0.1.5 / 0.1.7 subagent boundary. Keep version-specific shapes
- * here: API presence alone is not a promise of support for future versions.
+ * The audited Harness 0.1.2 / 0.1.5 / 0.1.7 / 0.2.2 subagent boundary. Keep
+ * version-specific shapes here: API presence alone is not a promise of support
+ * for future versions.
  *
  * Alpha.2 owns followup/registerContinuableSetup; Alpha.5 and rc.1 own a
  * host-only FIFO queue; 0.1.5 uses a queue/steer deliverer. Both emit
  * synchronous agent/session-start with the explicit Agent. Their public
  * sendMessage instead steers a running Agent and must never carry team jobs.
+ * 0.2.2 retired the queue/deliver symbols: the same host-authored queue turn
+ * lives on the runtime's manager as deliverPrompt(childId, content, options),
+ * while the public facade keeps sendMessage for steering.
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent';
@@ -119,8 +123,14 @@ export declare function installContinuableMemberSetup(ctx: Context, setup: Setup
 export declare function queueMemberPrompt(runtime: Context['subagents'], parent: Agent, childId: SessionId, content: ContentBlock[], signal: AbortSignal): Promise<MessageId>;
 /** Coordination joins the nearest step, including waking an idle/cold child. */
 export declare function steerMemberPrompt(runtime: Context['subagents'], parent: Agent, childId: SessionId, content: ContentBlock[], signal: AbortSignal, live?: Agent): Promise<MessageId>;
-/** Guard all resumable delivery paths, preserving the native service receiver. */
-export declare function guardSubagentDelivery(ctx: Context, isRetired: (sender: Agent, targetId: SessionId) => Promise<boolean>): void;
+/**
+ * Guard all resumable delivery paths, preserving the native service receiver.
+ *
+ * The sender is absent on the 0.2.2 manager path (deliverPrompt addresses a
+ * child id, not a parent Agent), so the retirement check receives the target
+ * first and the sender only when the boundary has one.
+ */
+export declare function guardSubagentDelivery(ctx: Context, isRetired: (targetId: SessionId, sender?: Agent) => Promise<boolean>): void;
 /**
  * Names the host's `tools.restrict()` would admit for this agent's layer
  * chain, or undefined when the host does not expose its registry view.

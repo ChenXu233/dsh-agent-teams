@@ -42,7 +42,7 @@ The fork is built out of the DSH features that already exist instead of patching
 
 ## Releases
 
-[v0.2.3](./release-notes/v0.2.3.md) is the stable release on npm `latest`. It syncs upstream 0.1.29: member model fallback works on Harness 0.2.2-rc.1, a model output limit settles the open task with `MAX_TOKENS`, activity polling is scoped to the open session and keeps per-session snapshots, delivery audits run off the host event loop and compare content digests, and publishing refuses a release tag that points at a different commit. The install floor is unchanged (`minimumHost: 0.2.1-rc.2`), so any newer Harness release still installs without a plugin release. The previous stable was [v0.2.2](./release-notes/v0.2.2.md). See the [floor declaration](./compatibility.json) and [verification scope](./docs/2-how-to/verify.md).
+[v0.2.4](./release-notes/v0.2.4.md) is the stable release on npm `latest`. It adapts the plugin to the Harness 0.2.2-rc.3 subagent contract: host-authored member turns go through the runtime's `deliverPrompt`, the retired-member guard covers every delivery path including cold resume, and removing a member falls back to targeted interrupts instead of the retired whole-tree drain. The install floor is now `minimumHost: 0.2.2-rc.3`; older Harness cores are rejected by the installer instead of loading a plugin that cannot deliver. The previous stable was [v0.2.3](./release-notes/v0.2.3.md). See the [floor declaration](./compatibility.json) and [verification scope](./docs/2-how-to/verify.md).
 
 ## Why AgentTeams?
 
@@ -61,12 +61,12 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Supported pair: DeepSeek Harness `>=0.2.1-rc.2` + AgentTeams [v0.2.3](./release-notes/v0.2.3.md). The plugin declares one floor and nothing else.**
+**Supported pair: DeepSeek Harness `>=0.2.2-rc.3` + AgentTeams [v0.2.4](./release-notes/v0.2.4.md). The plugin declares one floor and nothing else.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| The floor (oldest supported host) | `0.2.1-rc.2` | [v0.2.3](./release-notes/v0.2.3.md) |
-| Any later RC, prerelease or stable release | `>=0.2.1-rc.2` | [v0.2.3](./release-notes/v0.2.3.md) |
+| The floor (oldest supported host) | `0.2.2-rc.3` | [v0.2.4](./release-notes/v0.2.4.md) |
+| Any later RC, prerelease or stable release | `>=0.2.2-rc.3` | [v0.2.4](./release-notes/v0.2.4.md) |
 
 There is no enumerated tested list to keep in sync. `engines.dsh` carries the floor and the host reads it before peers, so newer hosts install directly; CI exercises the floor, and everything above it is assumed compatible. A host below the floor is rejected by the installer.
 
@@ -78,9 +78,9 @@ In the app sidebar, open **Plugins → Add plugin**. You can install directly fr
 @chenxu233/dsh-agent-teams
 ```
 
-The package name resolves npm `latest`. To pin a plugin version, append `@0.2.3`, or the tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
+The package name resolves npm `latest`. To pin a plugin version, append `@0.2.4`, or the tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
-The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.1-rc.2` on. Compare the embedded core with the floor `0.2.1-rc.2`: anything equal or newer installs, and no per-version exemption exists to maintain. See the [compatibility floor](./docs/3-reference/compatibility.md).
+The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.2-rc.3` on. Compare the embedded core with the floor `0.2.2-rc.3`: anything equal or newer installs, and no per-version exemption exists to maintain. See the [compatibility floor](./docs/3-reference/compatibility.md).
 
 ### CLI / Web: 1. Install DeepSeek Harness
 
@@ -89,7 +89,7 @@ npm install --global @deepseek-ai/dsh
 dsh --version
 ```
 
-The command selects the host's npm `latest`; after upgrading, `dsh --version` only has to be at or above the floor `0.2.1-rc.2`. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/2-how-to/release.md).
+The command selects the host's npm `latest`; after upgrading, `dsh --version` only has to be at or above the floor `0.2.2-rc.3`. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/2-how-to/release.md).
 
 ### CLI / Web: 2. Install the AgentTeams plugin
 

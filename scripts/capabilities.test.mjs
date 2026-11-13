@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import { apply as applyNativeExecutor, inject as nativeExecutorInject, name as nativeExecutorName } from '@deepseek-ai/dsh-tool-executor-native'
 import { SystemPrompt, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { installTeamCapabilities, TEAM_MEMBER_PROMPT } from '../lib/capabilities.js'
 import { TEAM_TOOL_NAMES, MEMBER_TOOL_NAMES } from '../lib/tool-names.js'
@@ -14,6 +15,19 @@ import { usageSectionText } from '../lib/index.js'
 import { formatProfilesForPrompt } from '../lib/profiles.js'
 import { registerAgentTeamsTools } from '../lib/tools.js'
 import { createTeamDir, archiveTeamDir, recordRetiredMemberIds } from '../lib/state.js'
+
+/** 0.2.2 dispatches batches; tests still assert one call's outcome. */
+async function executeOneTool(host, { name, arguments: args = {}, callId, agent, signal = new AbortController().signal }) {
+  const batch = await host.tools.execute({
+    calls: [{ id: callId, name, arguments: JSON.stringify(args) }],
+    signal,
+    agent,
+  })
+  const entry = batch.results[0]
+  if (entry === undefined) throw new Error(`tool batch omitted ${name}`)
+  return entry.result
+}
+
 
 const requireTools = createRequire(import.meta.resolve('@deepseek-ai/dsh-tools'))
 const requireDsh = createRequire(import.meta.resolve('@deepseek-ai/dsh/package.json'))
@@ -56,8 +70,11 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
   const host = new Context()
   const prompt = host.plugin(SystemPrompt, { includeHarnessIdentity: false })
   await prompt.await()
-  const tools = host.plugin(ToolRuntime, { mode: 'native' })
+  const tools = host.plugin(ToolRuntime)
   await tools.await()
+  // 0.2.2 moved execution out of the registry: a composition needs an executor.
+  const executor = host.plugin({ name: nativeExecutorName, inject: nativeExecutorInject, apply: applyNativeExecutor })
+  await executor.await()
   const worker = await mountCodeRuntime(host, workspace)
   const agents = []
   const scopes = []
@@ -98,7 +115,7 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
   await fiber.await()
   const assemble = agent => host.systemPrompt.assemble({ agent, scope: agent })
   const names = async agent => (await assemble(agent)).tools.map(tool => tool.name)
-  const execute = (agent, name, args = {}, signal = new AbortController().signal) => host.tools.execute({ name, arguments: args, callId: name + '-test', agent, signal })
+  const execute = (agent, name, args = {}, signal = new AbortController().signal) => executeOneTool(host, { name, arguments: args, callId: name + '-test', agent, signal })
   const captainNames = [...TEAM_TOOL_NAMES].sort()
   const header = async agent => { const assembled = await assemble(agent); return JSON.stringify({ system: renderPrompt(assembled), tools: assembled.tools }) }
   const initialHeader = await header(a)
@@ -142,7 +159,7 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
         assert.equal(host.tools.get('agent_teams_open', legacy), undefined)
         assertCaptainProtocol(renderPrompt(await assemble(legacy)))
         for (const name of ['agent_teams_create', 'agent_teams_delete']) {
-          const result = await host.tools.execute({ name, arguments: name === 'agent_teams_create' ? { name: 'Legacy', approval: 'required' } : {}, callId: name + '-legacy', agent: legacy, signal: new AbortController().signal })
+          const result = await executeOneTool(host, { name, arguments: name === 'agent_teams_create' ? { name: 'Legacy', approval: 'required' } : {}, callId: name + '-legacy', agent: legacy, signal: new AbortController().signal })
           assert.equal(result.isError, false, JSON.stringify(result))
         }
         assertCaptainProtocol(renderPrompt(await assemble(legacy)))
@@ -199,6 +216,8 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
       assert.deepEqual((await names(child)).sort(), [...MEMBER_TOOL_NAMES].sort())
     })
     await t.test('supported PTC presentation modes keep the operation SDK stable after status', async () => {
+      // 0.2.2 removed scoped presentAs(); a composition picks an executor plugin instead.
+      if (typeof a.ctx.tools.presentAs !== 'function') return
       for (const mode of ['ptc', ...(!requireDsh('@deepseek-ai/dsh/package.json').version.startsWith('0.2.1') ? ['both'] : [])]) {
         const restore = a.ctx.tools.presentAs(mode)
         const assembly = await assemble(a)
@@ -206,17 +225,19 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
         assert.doesNotMatch(sdk, /agent_teams_open/)
         for (const name of TEAM_TOOL_NAMES) assert.ok(sdk.includes(name), name)
         const before = await header(a)
-        const result = await host.tools.execute({ name: 'run_code', arguments: { code: 'return await tools.agent_teams_status({});', description: 'Read current team state' }, callId: 'sdk-status-' + mode, agent: a, signal: new AbortController().signal })
+        const result = await executeOneTool(host, { name: 'run_code', arguments: { code: 'return await tools.agent_teams_status({});', description: 'Read current team state' }, callId: 'sdk-status-' + mode, agent: a, signal: new AbortController().signal })
         assert.equal(result.isError, false, JSON.stringify(result))
         assert.equal(await header(a), before)
         restore()
       }
     })
     await t.test('real run_code may discard status output without losing operating rules', async () => {
+      // 0.2.2 removed scoped presentAs(); a composition picks an executor plugin instead.
+      if (typeof a.ctx.tools.presentAs !== 'function') return
       const restore = a.ctx.tools.presentAs('ptc')
       try {
         const before = await header(a)
-        const result = await host.tools.execute({ name: 'run_code', arguments: { code: 'await tools.agent_teams_status({}); return "STATUS_OUTPUT_DISCARDED";', description: 'Inspect current team without returning the result' }, callId: 'discard-status-output', agent: a, signal: new AbortController().signal })
+        const result = await executeOneTool(host, { name: 'run_code', arguments: { code: 'await tools.agent_teams_status({}); return "STATUS_OUTPUT_DISCARDED";', description: 'Inspect current team without returning the result' }, callId: 'discard-status-output', agent: a, signal: new AbortController().signal })
         assert.equal(result.isError, false, JSON.stringify(result))
         assert.match(JSON.stringify(result.content), /STATUS_OUTPUT_DISCARDED/)
         assert.doesNotMatch(JSON.stringify(result.content), /attempt_id|captain protocol/)
@@ -248,7 +269,7 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
       // This new Agent has no historical tool calls. Persisted work is
       // still directly addressable through the original business tools.
       assert.equal(cold.session.events.length, 0)
-      const result = await host.tools.execute({ name: 'agent_teams_status', arguments: {}, callId: 'cold-direct-status', agent: cold, signal: new AbortController().signal })
+      const result = await executeOneTool(host, { name: 'agent_teams_status', arguments: {}, callId: 'cold-direct-status', agent: cold, signal: new AbortController().signal })
       assert.equal(result.isError, false, JSON.stringify(result))
       assert.match(JSON.stringify(result.content), /Saved/)
       assertCaptainProtocol(renderPrompt(await assemble(cold)))
@@ -262,7 +283,7 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
     await t.test('create, status and archive preserve the prefix in native and nested dispatch', async () => {
       for (const nested of [false, true]) {
         assert.equal(await header(a), initialHeader)
-        const exec = name => host.tools.execute({ name, arguments: name === 'agent_teams_create' ? { name: 'Saved', description: 'Preserve the requested goal', approval: 'required' } : {}, callId: name + '-test', agent: a, signal: new AbortController().signal, ...(nested ? { parent: {} } : {}) })
+        const exec = name => executeOneTool(host, { name, arguments: name === 'agent_teams_create' ? { name: 'Saved', description: 'Preserve the requested goal', approval: 'required' } : {}, callId: name + '-test', agent: a, signal: new AbortController().signal, ...(nested ? { parent: {} } : {}) })
         for (const name of ['agent_teams_create', 'agent_teams_status', 'agent_teams_delete']) {
           const result = await exec(name)
           assert.equal(result.isError, false, JSON.stringify(result))

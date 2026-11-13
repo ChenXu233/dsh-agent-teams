@@ -17,20 +17,20 @@ test('stable latest accepts any host at or above the floor but never an alpha/be
   const atFloor = fixture('0.1.16', 'latest')
   const workspace = structuredClone(workspacePolicy)
   for (const name of Object.keys(atFloor.devDependencies)) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) atFloor.devDependencies[name] = '0.2.1-rc.2'
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) atFloor.devDependencies[name] = '0.2.2-rc.3'
   }
   for (const name of Object.keys(workspace.overrides)) {
-    if (name.startsWith('@deepseek-ai/dsh')) workspace.overrides[name] = '0.2.1-rc.2'
+    if (name.startsWith('@deepseek-ai/dsh')) workspace.overrides[name] = '0.2.2-rc.3'
   }
   assert.equal(releaseMetadata(atFloor, policy, workspace).dist_tag, 'latest')
   // An alpha/beta host above the floor installs, but it must not back a stable release.
   const prereleaseBaseline = fixture('0.1.16', 'latest')
   for (const name of Object.keys(prereleaseBaseline.devDependencies)) {
-    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) prereleaseBaseline.devDependencies[name] = '0.2.2-alpha.2'
+    if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) prereleaseBaseline.devDependencies[name] = '0.2.3-alpha.1'
   }
   const alphaWorkspace = structuredClone(workspacePolicy)
   for (const name of Object.keys(alphaWorkspace.overrides)) {
-    if (name.startsWith('@deepseek-ai/dsh')) alphaWorkspace.overrides[name] = '0.2.2-alpha.2'
+    if (name.startsWith('@deepseek-ai/dsh')) alphaWorkspace.overrides[name] = '0.2.3-alpha.1'
   }
   assert.throws(() => releaseMetadata(prereleaseBaseline, policy, alphaWorkspace), /alpha\/beta/)
 })

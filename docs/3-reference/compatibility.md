@@ -7,15 +7,15 @@
 `compatibility.json` 只声明一件事：`minimumHost`。
 
 ```json
-{ "schemaVersion": 2, "previewTag": "next", "minimumHost": "0.2.1-rc.2" }
+{ "schemaVersion": 2, "previewTag": "next", "minimumHost": "0.2.2-rc.3" }
 ```
 
-发布包里它被写成 `engines.dsh: ">=0.2.1-rc.2"`，所有 DSH peer 写 `*`（只用于列出由宿主提供的包名）。
+发布包里它被写成 `engines.dsh: ">=0.2.2-rc.3"`，所有 DSH peer 写 `*`（只用于列出由宿主提供的包名）。
 
 ## 为什么只声明下限
 
 - **不枚举宿主，也不设上限。** 官方安装器从 0.2.1-alpha.4 起优先读 `engines.dsh`，0.1.7-rc.1 到 0.2.1-alpha.3 读 peer；两者都用 `semver.satisfies(..., { includePrerelease: true })`，因此下限之后发布的 RC、Alpha 和正式版都能安装，不需要插件跟着发版。
-- **peer 必须写 `*`。** npm 校验 peer 时不带 `includePrerelease`：peer 写成 `>=0.2.1-rc.2` 会让 npm 在同一依赖树里拒绝 0.2.1-rc.3 这类已测宿主（`ERESOLVE`），而 `*` 直接放行；pnpm 与官方安装器不受影响。
+- **peer 必须写 `*`。** npm 校验 peer 时不带 `includePrerelease`：peer 写成 `>=0.2.2-rc.3` 会让 npm 在同一依赖树里拒绝 0.2.2-rc.4 这类已测宿主（`ERESOLVE`），而 `*` 直接放行；pnpm 与官方安装器不受影响。
 - **枚举清单会坏。** 0.1.27 及以前把矩阵逐个写进 peer，宿主每发一个新 RC（rc.4、rc.5 成为 npm `latest` 时）插件就整体拒装，只能再发插件补救。
 
 所以不要恢复这些写法：peer 范围、`engines.dsh` 列表、上限、`supportedHosts`、`recommendedHost`。它们只要出现在文件里，`pnpm verify` 的 compatibility 阶段就直接报错，而不是躺在文件里当"看起来还在维护清单"。

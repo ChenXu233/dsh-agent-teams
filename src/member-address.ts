@@ -123,7 +123,8 @@ async function readTeamSafe(stateRoot: string, teamId: string): Promise<TeamStat
  * registry is the host's own answer to "which directories exist", and the team
  * state under each root names its members by child session id.
  */
-function workspaceRootsOf(ctx: Context): readonly string[] {
+/** Workspace roots the host knows about; exported for callers that must resolve a cold target. */
+export function workspaceRootsOf(ctx: Context): readonly string[] {
   const get = (ctx as unknown as { get?: (name: string) => unknown }).get
   if (typeof get !== 'function') return []
   try {

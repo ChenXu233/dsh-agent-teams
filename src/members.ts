@@ -26,6 +26,7 @@ import { mailboxPrompt } from './mailbox.ts'
 import { installMemberResidency, parkMember, parkedMessageId, unparkMember } from './member-residency.ts'
 import { dropMemberRoute, registerMemberRoute } from './member-route-registry.ts'
 import { nearestLiveLead } from './lineage.ts'
+import { sessionStoreOf, workspaceRootsOf } from './member-address.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import type { MemberToolFilter } from './tool-policies.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
@@ -905,7 +906,9 @@ export function installMemberSelectionRuntime(
     const model = (child as Agent & { model?: { select(selection: Readonly<ModelSelection>): void } }).model
     const nativeModel = typeof model?.select === 'function' ? model : undefined
     nativeModel?.select(selectionRef.current)
-    const disposeSelection = installModelSelection(childCtx, selectionRef)
+    // 0.2.2 installs notices only; the route itself is written through the
+    // Agent's durable model API above.
+    const disposeSelection = installModelSelection(childCtx)
     // A deployment-level policy plugin can rewrite every subagent request from a
     // global `agent/request` listener registered at boot — for example a
     // "thinking effort" plugin that forces all subagents to one level. A
@@ -1139,8 +1142,11 @@ export async function spawnMember(
   // mirror what startContinuable would reject, with an actionable error.
   const provider = ctx.subagents.getProvider(config.provider)
   if (provider === undefined) {
+    // 0.2.2 dropped the provider list from the public facade; name what is
+    // available only when the host still offers it.
+    const available = (ctx.subagents as unknown as { list?: () => readonly string[] }).list?.() ?? []
     throw new Error(
-      `agent-teams: no subagent provider "${config.provider}" is registered (available: ${ctx.subagents.list().join(', ') || 'none'}) — `
+      `agent-teams: no subagent provider "${config.provider}" is registered (available: ${available.join(', ') || 'none'}) — `
       + 'check that the subagent provider row (e.g. subagent-spawn) is mounted in the composition',
     )
   }
@@ -1321,9 +1327,22 @@ export function interruptMember(ctx: Context, captain: Agent, childId: string): 
  * untouched while the delivery boundary still prevents further model turns.
  */
 export function installRetiredMemberGuard(ctx: Context, stateDir: string): void {
-  guardSubagentDelivery(ctx, async (parent, childId) => {
-    const retired = await readRetiredMemberIds(join(parent.session.header.cwd ?? process.cwd(), stateDir))
-    return retired.has(childId)
+  guardSubagentDelivery(ctx, async (childId, sender) => {
+    // A captain-originated delivery names its workspace directly. The manager
+    // path (0.2.2 deliverPrompt) has no sender and a cold member is not
+    // attached to the session store, so fall back to the host's workspaces.
+    const senderRoot = sender?.session.header.cwd
+    if (senderRoot !== undefined) {
+      return (await readRetiredMemberIds(join(senderRoot, stateDir))).has(childId)
+    }
+    const attachedRoot = sessionStoreOf(ctx)?.get(childId)?.header.cwd
+    if (attachedRoot !== undefined) {
+      return (await readRetiredMemberIds(join(attachedRoot, stateDir))).has(childId)
+    }
+    for (const root of workspaceRootsOf(ctx)) {
+      if ((await readRetiredMemberIds(join(root, stateDir))).has(childId)) return true
+    }
+    return false
   })
 }
 

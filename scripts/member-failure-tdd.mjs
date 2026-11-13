@@ -132,7 +132,15 @@ async function fixture(t, { captainStatus = 'idle', fallback, captainOffline = f
   const retryDisposers = []
   installRetry({
     logger: ctx.logger,
-    sessionProjections: { register(value) { projection = value }, stateOf() { return retryState } },
+    // Harness 0.2.2 audits the owning fiber before admitting a retry decision.
+    fiber: { uid: 1 },
+    sessionProjections: {
+      register(value) {
+        projection = value
+        return { stateOf() { return retryState } }
+      },
+      stateOf() { return retryState },
+    },
     on(_name, listener) { retryHandler = listener; return () => {} },
     effect(setup) { retryDisposers.push(setup()) },
   })

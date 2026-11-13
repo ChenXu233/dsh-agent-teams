@@ -1,11 +1,15 @@
 /**
- * The audited Harness 0.1.2 / 0.1.5 / 0.1.7 subagent boundary. Keep version-specific shapes
- * here: API presence alone is not a promise of support for future versions.
+ * The audited Harness 0.1.2 / 0.1.5 / 0.1.7 / 0.2.2 subagent boundary. Keep
+ * version-specific shapes here: API presence alone is not a promise of support
+ * for future versions.
  *
  * Alpha.2 owns followup/registerContinuableSetup; Alpha.5 and rc.1 own a
  * host-only FIFO queue; 0.1.5 uses a queue/steer deliverer. Both emit
  * synchronous agent/session-start with the explicit Agent. Their public
  * sendMessage instead steers a running Agent and must never carry team jobs.
+ * 0.2.2 retired the queue/deliver symbols: the same host-authored queue turn
+ * lives on the runtime's manager as deliverPrompt(childId, content, options),
+ * while the public facade keeps sendMessage for steering.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
@@ -35,10 +39,20 @@ type Followup = (parent: Agent, childId: SessionId, content: ContentBlock[], opt
 type Queue = (parent: Agent, childId: SessionId, content: ContentBlock[], source: MessageSource, signal: AbortSignal) => Promise<MessageId>
 type Deliver = (parent: Agent, childId: SessionId, content: ContentBlock[], source: MessageSource, signal: AbortSignal, delivery: 'queue' | 'steer') => Promise<MessageId>
 type Send = (sender: Agent, targetId: SessionId, content: ContentBlock[], options: { signal: AbortSignal }) => Promise<MessageId>
+/** 0.2.2 manager delivery: one prompt, addressed by child id, without a sender Agent. */
+type ManagedDeliver = (childId: SessionId, content: ContentBlock[], options: {
+  source: MessageSource
+  signal: AbortSignal
+  delivery: 'queue' | 'steer'
+}) => Promise<MessageId>
+interface ManagedBoundary {
+  deliverPrompt?: ManagedDeliver
+}
 interface RuntimeBoundary {
   followup?: Followup
   registerContinuableSetup?: (setup: LegacySetup) => () => void
   sendMessage?: Send
+  manager?: ManagedBoundary
   [hostPromptQueue]?: Queue
   [hostPromptDeliver]?: Deliver
 }
@@ -109,6 +123,22 @@ export function guardSubagentCreation(ctx: Context, check: (parent: Agent) => vo
 
 function boundary(runtime: Context['subagents']): RuntimeBoundary {
   return runtime as unknown as RuntimeBoundary
+}
+
+/**
+ * 0.2.2 host-authored queue/steer delivery, when this runtime exposes it.
+ *
+ * The public facade only ships sendMessage (steer), and the old
+ * queue/deliver symbols are gone. The manager's deliverPrompt is the same
+ * admission path the host's own browser prompt uses: it resolves the target's
+ * subagent tree root, resumes a cold member, and honours the queue/steer
+ * destination. The receiver stays the manager so its own locks and admission
+ * checks keep working.
+ */
+function managedDelivery(runtime: Context['subagents']): { manager: ManagedBoundary; deliver: ManagedDeliver } | undefined {
+  const manager = (runtime as unknown as RuntimeBoundary).manager
+  const deliver = manager?.deliverPrompt
+  return typeof deliver === 'function' ? { manager: manager!, deliver } : undefined
 }
 
 function unsupported(detail: string): never {
@@ -252,7 +282,8 @@ export function installContinuableMemberSetup(ctx: Context, setup: Setup): void 
     })
     return
   }
-  if ((typeof runtime[hostPromptQueue] !== 'function' && typeof runtime[hostPromptDeliver] !== 'function') || typeof runtime.sendMessage !== 'function') {
+  if ((typeof runtime[hostPromptQueue] !== 'function' && typeof runtime[hostPromptDeliver] !== 'function'
+    && managedDelivery(ctx.subagents) === undefined) || typeof runtime.sendMessage !== 'function') {
     return unsupported('missing continuable setup and modern host queue')
   }
   const installed = new WeakSet<Agent>()
@@ -321,6 +352,8 @@ export async function queueMemberPrompt(
   }
   const deliver = host[hostPromptDeliver]
   if (typeof deliver === 'function') return deliver.call(runtime, parent, childId, content, source, signal, 'queue')
+  const managed = managedDelivery(runtime)
+  if (managed !== undefined) return managed.deliver.call(managed.manager, childId, content, { source, signal, delivery: 'queue' })
   const queue = host[hostPromptQueue]
   if (typeof queue !== 'function') return unsupported('missing host FIFO delivery')
   return queue.call(runtime, parent, childId, content, source, signal)
@@ -335,6 +368,8 @@ export async function steerMemberPrompt(
   const source = agentTeamsSource({ kind: 'agent-teams' }, observedSessionFormatVersion(live ?? parent))
   const deliver = host[hostPromptDeliver]
   if (typeof deliver === 'function') return deliver.call(runtime, parent, childId, content, source, signal, 'steer')
+  const managed = managedDelivery(runtime)
+  if (managed !== undefined) return managed.deliver.call(managed.manager, childId, content, { source, signal, delivery: 'steer' })
   if (typeof host.sendMessage === 'function') return host.sendMessage.call(runtime, parent, childId, content, { signal })
   if (typeof host.followup === 'function') {
     if (live === undefined) return queueMemberPrompt(runtime, parent, childId, content, signal)
@@ -347,9 +382,15 @@ export async function steerMemberPrompt(
   return unsupported('missing step-boundary message delivery')
 }
 
-/** Guard all resumable delivery paths, preserving the native service receiver. */
+/**
+ * Guard all resumable delivery paths, preserving the native service receiver.
+ *
+ * The sender is absent on the 0.2.2 manager path (deliverPrompt addresses a
+ * child id, not a parent Agent), so the retirement check receives the target
+ * first and the sender only when the boundary has one.
+ */
 export function guardSubagentDelivery(
-  ctx: Context, isRetired: (sender: Agent, targetId: SessionId) => Promise<boolean>,
+  ctx: Context, isRetired: (targetId: SessionId, sender?: Agent) => Promise<boolean>,
 ): void {
   const runtime = ctx.subagents
   const host = boundary(runtime)
@@ -357,7 +398,9 @@ export function guardSubagentDelivery(
   const queue = host[hostPromptQueue]
   const deliver = host[hostPromptDeliver]
   const send = host.sendMessage
-  if (typeof legacy !== 'function' && ((typeof queue !== 'function' && typeof deliver !== 'function') || typeof send !== 'function')) {
+  const managed = managedDelivery(runtime)
+  const modernQueue = typeof queue === 'function' || typeof deliver === 'function' || managed !== undefined
+  if (typeof legacy !== 'function' && (!modernQueue || typeof send !== 'function')) {
     return unsupported('cannot install complete retired-member guard')
   }
   ctx.effect(() => {
@@ -367,46 +410,52 @@ export function guardSubagentDelivery(
       [hostPromptDeliver, Object.getOwnPropertyDescriptor(host, hostPromptDeliver)],
       ['sendMessage', Object.getOwnPropertyDescriptor(host, 'sendMessage')],
     ])
+    const managerDescriptor = managed === undefined ? undefined : Object.getOwnPropertyDescriptor(managed.manager, 'deliverPrompt')
     let active = true
-    const check = async (sender: Agent, targetId: SessionId): Promise<void> => {
-      if (active && await isRetired(sender, targetId)) {
+    const check = async (targetId: SessionId, sender?: Agent): Promise<void> => {
+      if (active && await isRetired(targetId, sender)) {
         throw new SubagentError(`AgentTeams member "${targetId}" was retired and cannot be resumed`, 'NOT_RESUMABLE')
       }
     }
     const guardedLegacy: Followup = async (parent, childId, content, options) => {
-      await check(parent, childId)
+      await check(childId, parent)
       return legacy!.call(runtime, parent, childId, content, options)
     }
     const guardedQueue: Queue = async (parent, childId, content, source, signal) => {
-      await check(parent, childId)
+      await check(childId, parent)
       return queue!.call(runtime, parent, childId, content, source, signal)
     }
     const guardedSend: Send = async (sender, targetId, content, options) => {
-      await check(sender, targetId)
+      await check(targetId, sender)
       return send!.call(runtime, sender, targetId, content, options)
     }
     const guardedDeliver: Deliver = async (parent, childId, content, source, signal, delivery) => {
-      await check(parent, childId)
+      await check(childId, parent)
       return deliver!.call(runtime, parent, childId, content, source, signal, delivery)
+    }
+    const guardedManaged: ManagedDeliver = async (childId, content, options) => {
+      await check(childId)
+      return managed!.deliver.call(managed!.manager, childId, content, options)
     }
     if (typeof legacy === 'function') host.followup = guardedLegacy
     if (typeof queue === 'function') host[hostPromptQueue] = guardedQueue
     if (typeof deliver === 'function') host[hostPromptDeliver] = guardedDeliver
     if (typeof send === 'function') host.sendMessage = guardedSend
+    if (managed !== undefined) managed.manager.deliverPrompt = guardedManaged
     // Cordis wraps method reads in fresh Proxies. Compare the actual own
     // descriptor to restore only our contribution, including prototype methods.
-    const restore = (key: PropertyKey, installed: unknown): void => {
-      if (Object.getOwnPropertyDescriptor(host, key)?.value !== installed) return
-      const original = descriptors.get(key)
-      if (original === undefined) Reflect.deleteProperty(host, key)
-      else Object.defineProperty(host, key, original)
+    const restore = (target: object, key: PropertyKey, installed: unknown, original: PropertyDescriptor | undefined): void => {
+      if (Object.getOwnPropertyDescriptor(target, key)?.value !== installed) return
+      if (original === undefined) Reflect.deleteProperty(target, key)
+      else Object.defineProperty(target, key, original)
     }
     return () => {
       active = false
-      if (typeof legacy === 'function') restore('followup', guardedLegacy)
-      if (typeof queue === 'function') restore(hostPromptQueue, guardedQueue)
-      if (typeof deliver === 'function') restore(hostPromptDeliver, guardedDeliver)
-      if (typeof send === 'function') restore('sendMessage', guardedSend)
+      if (typeof legacy === 'function') restore(host, 'followup', guardedLegacy, descriptors.get('followup'))
+      if (typeof queue === 'function') restore(host, hostPromptQueue, guardedQueue, descriptors.get(hostPromptQueue))
+      if (typeof deliver === 'function') restore(host, hostPromptDeliver, guardedDeliver, descriptors.get(hostPromptDeliver))
+      if (typeof send === 'function') restore(host, 'sendMessage', guardedSend, descriptors.get('sendMessage'))
+      if (managed !== undefined) restore(managed.manager, 'deliverPrompt', guardedManaged, managerDescriptor)
     }
   }, 'agent-teams: retired member guard')
 }
@@ -517,8 +566,18 @@ export async function drainMemberChildren(runtime: Context['subagents'], parent:
   const host = runtime as unknown as {
     drainChildren?: (parent: Agent, ids: readonly SessionId[]) => Promise<void>
     drainContinuableChildren?: (parent: Agent, ids: readonly SessionId[]) => Promise<void>
+    interrupt?: (targetSessionId: SessionId, authority: { kind: 'ancestor'; agent: Agent }) => void
   }
   const drain = host.drainChildren ?? host.drainContinuableChildren
-  if (typeof drain !== 'function') return unsupported('missing targeted child drain')
-  await drain.call(runtime, parent, ids)
+  if (typeof drain === 'function') {
+    await drain.call(runtime, parent, ids)
+    return
+  }
+  // 0.2.2 dropped the targeted drain for a whole-tree drainDescendants(). Do
+  // not take that trade: it would also stop the captain's unrelated subagents.
+  // Interrupting the exact ids stops their current turn, and the retired-member
+  // deny-list above already blocks the next delivery, so a removed member stays
+  // parked instead of being resumed.
+  if (typeof host.interrupt !== 'function') return unsupported('missing targeted child drain')
+  for (const id of ids) host.interrupt.call(runtime, id, { kind: 'ancestor', agent: parent })
 }

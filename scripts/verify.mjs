@@ -1536,18 +1536,20 @@ function fakeChildContext({ label, parentSessionId, cwd, agentProvider, agentMod
     const run = (index) => index >= list.length ? inner() : list[index](...args, () => run(index + 1))
     return run(0)
   }
+  const agent = {
+    session: {
+      header: { parentSession: parentSessionId, cwd, seedLength: 0 },
+      events: [descriptorEvent(label, agentProvider, agentModel)],
+    },
+    // Harness 0.2.2 owns the step route on Agent.model; the plugin writes the
+    // member's selection there instead of through a request listener.
+    modelSelection: undefined,
+    model: { select(selection) { agent.modelSelection = selection } },
+  }
   return {
     listeners,
     waterfall,
-    context: {
-      agent: {
-        session: {
-          header: { parentSession: parentSessionId, cwd, seedLength: 0 },
-          events: [descriptorEvent(label, agentProvider, agentModel)],
-        },
-      },
-      on,
-    },
+    context: { agent, on },
   }
 }
 
@@ -1585,10 +1587,12 @@ await selectionRuntime.withPending(
 )
 const freshRoute = await routedConfig(freshChild)
 check(
-  'fresh child request leaves an unpinned effort to the model default',
-  freshRoute.provider === 'other-provider'
-    && freshRoute.model === 'other-model'
-    && freshRoute.reasoningEffort === undefined,
+  'fresh child route selection leaves an unpinned effort to the model default',
+  freshChild.context.agent.modelSelection?.provider === 'other-provider'
+    && freshChild.context.agent.modelSelection?.model === 'other-model'
+    && freshChild.context.agent.modelSelection?.reasoningEffort === undefined
+    && freshRoute.provider === 'other-provider'
+    && freshRoute.model === 'other-model',
 )
 disposeFresh()
 

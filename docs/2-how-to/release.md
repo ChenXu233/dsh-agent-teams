@@ -92,7 +92,7 @@ runner 为 `scripts/harness-runtime-verify.mjs --host-version <exact> --artifact
 
 CI 仅上传报告、日志和 fixture 状态，不上传 runtime 的 node_modules、缓存、隔离 HOME 或整份 profile 存储。报告保留 14 天；发布维护者应将关键版本、摘要、结果和限制归档到发布记录，不能只留下会过期的临时目录。
 
-当前自动矩阵只有下限宿主 `0.2.1-rc.2` 的 Ubuntu 与 Windows 两个目标；需要覆盖新宿主时用 `workflow_dispatch` 的 `host` 输入显式指定。真实模型 API、原生 Desktop 交互和用户数据迁移仍需要额外证据。UI 改动按 Ego Lite 规则验证真实宿主挂载和交互；有凭据的 provider 验证记录结果，不在仓库保存凭据。跳过、不适用和失败应分别记录，不能统一写“全部通过”。
+当前自动矩阵只跑下限宿主 `0.2.2-rc.3` 的 Ubuntu 与 Windows 两个目标；需要覆盖新宿主时用 `workflow_dispatch` 的 `host` 输入显式指定。真实模型 API、原生 Desktop 交互和用户数据迁移仍需要额外证据。UI 改动按 Ego Lite 规则验证真实宿主挂载和交互；有凭据的 provider 验证记录结果，不在仓库保存凭据。跳过、不适用和失败应分别记录，不能统一写“全部通过”。
 
 ## 发布同一份验收产物
 

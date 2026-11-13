@@ -64,6 +64,16 @@ export declare function sessionStoreOf(ctx: Context): SessionStoreView | undefin
  */
 export declare function liveSessionIds(store: SessionStoreView | undefined, limit?: number): readonly string[];
 /**
+ * Workspace roots the host knows about.
+ *
+ * A cold subagent transcript is displayed from its durable log without
+ * attaching the session, so `sessions.get()` has no cwd to offer. The workspace
+ * registry is the host's own answer to "which directories exist", and the team
+ * state under each root names its members by child session id.
+ */
+/** Workspace roots the host knows about; exported for callers that must resolve a cold target. */
+export declare function workspaceRootsOf(ctx: Context): readonly string[];
+/**
  * Resolve one durable member address without resuming anything.
  * @param ctx - plugin context carrying the live Agent registry.
  * @param address - captain + member session ids.

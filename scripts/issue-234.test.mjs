@@ -31,8 +31,22 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import { apply as applyNativeExecutor, inject as nativeExecutorInject, name as nativeExecutorName } from '@deepseek-ai/dsh-tool-executor-native'
 import { registerAgentTeamsTools } from '../lib/tools.js'
 import { readTeam, sanitizeKey, writeTeam } from '../lib/state.js'
+
+/** 0.2.2 dispatches batches; tests still assert one call's outcome. */
+async function executeOneTool(host, { name, arguments: args = {}, callId, agent, signal = new AbortController().signal }) {
+  const batch = await host.tools.execute({
+    calls: [{ id: callId, name, arguments: JSON.stringify(args) }],
+    signal,
+    agent,
+  })
+  const entry = batch.results[0]
+  if (entry === undefined) throw new Error(`tool batch omitted ${name}`)
+  return entry.result
+}
+
 
 const requireTools = createRequire(import.meta.resolve('@deepseek-ai/dsh-tools'))
 const { createScope } = await import(pathToFileURL(requireTools.resolve('@deepseek-ai/dsh-scope')).href)
@@ -65,8 +79,11 @@ async function mount() {
   const host = new Context()
   const prompt = host.plugin(SystemPrompt, { includeHarnessIdentity: false })
   await prompt.await()
-  const runtime = host.plugin(ToolRuntime, { mode: 'native' })
+  const runtime = host.plugin(ToolRuntime)
   await runtime.await()
+  // 0.2.2 moved execution out of the registry: a composition needs an executor.
+  const executor = host.plugin({ name: nativeExecutorName, inject: nativeExecutorInject, apply: applyNativeExecutor })
+  await executor.await()
   const definitions = []
   const agents = []
   const noop = () => {}
@@ -113,20 +130,18 @@ async function mount() {
     agents.push(agent)
     return agent
   }
-  const execute = (agent, args) => host.tools.execute({
+  const execute = (agent, args) => executeOneTool(host, {
     name: 'agent_teams_create',
     arguments: args,
     callId: `issue-234-${++seq}`,
     agent,
-    signal: new AbortController().signal,
   })
   /** Dispatch any registered tool through the same real runtime path. */
-  const executeTool = (agent, name, args) => host.tools.execute({
+  const executeTool = (agent, name, args) => executeOneTool(host, {
     name,
     arguments: args,
     callId: `issue-234-${name}-${++seq}`,
     agent,
-    signal: new AbortController().signal,
   })
   const stateRoot = join(workspace, '.agent-teams')
   const loadTeam = teamId => readTeam(stateRoot, teamId)

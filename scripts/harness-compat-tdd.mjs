@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { SubagentRuntime } from '@deepseek-ai/dsh-subagent'
-import { guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, sessionOwnEvents } from '../lib/harness-compat.js'
+import { guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, sessionOwnEvents, steerMemberPrompt } from '../lib/harness-compat.js'
 import { installMemberSelectionRuntime, spawnMember } from '../lib/members.js'
 import { createTeamDir } from '../lib/state.js'
 import { CAPTAIN_TOOL_NAMES } from '../lib/tool-names.js'
@@ -50,8 +50,13 @@ function child({ workspace = process.cwd(), effort, inherited = false } = {}) {
   } }
   const agent = {
     id: 'member-id', status: 'idle', whenIdle: async () => {},
+    cancel() {},
+    followup() {},
     options: { provider: 'primary', model: 'model', reasoningEffort: effort },
     session: { header: { cwd: workspace, parentSession: 'captain' }, ownEvents: () => inherited ? [] : [descriptor] },
+    // Harness 0.2.2 owns the step route on Agent.model.
+    modelSelection: undefined,
+    model: { select(value) { agent.modelSelection = value } },
   }
   agent.ctx = scope() // Harness 0.1.5 no longer exposes Context.agent.
   return agent
@@ -61,7 +66,9 @@ async function selection(agent) {
   for (const assemble of agent.ctx.listeners.get('system-prompt/assemble') ?? []) {
     await assemble({}, {}, async () => ({ variables: {} }))
   }
-  return requestSelection(agent)
+  // 0.2.2 writes the route through Agent.model.select(); the request listener
+  // chain only re-asserts it against blanket policies.
+  return agent.modelSelection ?? requestSelection(agent)
 }
 
 async function requestSelection(agent) {
@@ -73,46 +80,22 @@ async function requestSelection(agent) {
   return config
 }
 
-await test('native SubagentRuntime keeps its receiver through FIFO delivery and retirement guard', async t => {
+await test('native SubagentRuntime exposes the 0.2.2 manager delivery and retirement guard', async t => {
   const host = new Context()
   host.provide('workingDirectory', {})
+  host.provide('sessionProjections', { register: async () => ({ stateOf: () => ({}) }) })
+  host.provide('agents', { get: () => undefined, list: () => [] })
   const fiber = host.plugin(SubagentRuntime)
   t.after(() => fiber.dispose())
   await fiber.await()
   const runtime = host.subagents
   assert.ok(runtime)
-  if (typeof runtime.registerContinuableSetup === 'function') {
-    // The real implementation reads this.ctx and this.setupRegistry. Its
-    // internal ctx.effect must belong to the caller plugin, not the service.
-    let installed = 0
-    let disposed = 0
-    const caller = host.plugin({ inject: ['subagents'], apply(ctx) {
-      installContinuableMemberSetup(ctx, () => { installed++; return () => { disposed++ } })
-    } })
-    t.after(() => caller.dispose())
-    await caller.await()
-    const firstChild = scope({ agent: { id: 'first' } })
-    runtime.setupRegistry.apply(firstChild).commit()
-    assert.deepEqual({ installed, disposed }, { installed: 1, disposed: 0 })
-    await caller.dispose()
-    assert.deepEqual({ installed, disposed }, { installed: 1, disposed: 1 })
-    const laterChild = scope({ agent: { id: 'later' } })
-    runtime.setupRegistry.apply(laterChild).commit()
-    assert.equal(installed, 1)
-    firstChild.dispose()
-    laterChild.dispose()
-    assert.equal(disposed, 1)
-  }
+  assert.equal(typeof runtime.startActivation, 'function')
   const accepted = []
   const manager = {
-    async followup(parent, id, body, options) {
+    async deliverPrompt(id, body, options) {
       assert.equal(this, manager)
-      accepted.push({ path: 'followup', parent, id, body, source: options.source })
-      return 'accepted'
-    },
-    async queuePrompt(parent, id, body, provenance) {
-      assert.equal(this, manager)
-      accepted.push({ path: 'queue', parent, id, body, source: provenance })
+      accepted.push({ path: 'deliver', id, body, source: options.source, delivery: options.delivery })
       return 'accepted'
     },
     async sendMessage(parent, id, body) {
@@ -121,25 +104,21 @@ await test('native SubagentRuntime keeps its receiver through FIFO delivery and 
       return 'steered'
     },
   }
-  // Only the downstream continuation manager is replaced. The real Cordis
-  // service method still executes this.requireContinuations(), unlike old fakes.
-  if (typeof runtime.startActivation === 'function') runtime.manager = manager
-  else runtime.continuations = manager
+  // Replace only the downstream manager; the real service methods keep their receiver.
+  runtime.manager = manager
   const captain = { id: 'captain', session: { header: {} } }
   const ctx = scope({ subagents: runtime })
-  const methodKey = typeof runtime.followup === 'function' ? 'followup' : typeof runtime[deliverKey] === 'function' ? deliverKey : queueKey
-  const before = Object.getOwnPropertyDescriptor(runtime, methodKey)
-  guardSubagentDelivery(ctx, async (_sender, id) => id === 'retired')
+  const beforeManager = Object.getOwnPropertyDescriptor(manager, 'deliverPrompt')
+  const beforeSend = Object.getOwnPropertyDescriptor(runtime, 'sendMessage')
+  guardSubagentDelivery(ctx, async id => id === 'retired')
   assert.equal(await queueMemberPrompt(runtime, captain, 'active', content, signal), 'accepted')
-  assert.deepEqual(accepted[0].source, source)
-  assert.notEqual(accepted[0].path, 'steer')
+  assert.deepEqual(accepted[0], { path: 'deliver', id: 'active', body: content, source, delivery: 'queue' })
   await assert.rejects(queueMemberPrompt(runtime, captain, 'retired', content, signal), { code: 'NOT_RESUMABLE' })
-  if (typeof runtime.sendMessage === 'function') {
-    await assert.rejects(runtime.sendMessage(captain, 'retired', content, { signal }), { code: 'NOT_RESUMABLE' })
-    assert.equal(await runtime.sendMessage(captain, 'unrelated', content, { signal }), 'steered')
-  }
+  await assert.rejects(runtime.sendMessage(captain, 'retired', content, { signal }), { code: 'NOT_RESUMABLE' })
+  assert.equal(await runtime.sendMessage(captain, 'unrelated', content, { signal }), 'steered')
   ctx.dispose()
-  assert.deepEqual(Object.getOwnPropertyDescriptor(runtime, methodKey), before)
+  assert.deepEqual(Object.getOwnPropertyDescriptor(manager, 'deliverPrompt'), beforeManager)
+  assert.deepEqual(Object.getOwnPropertyDescriptor(runtime, 'sendMessage'), beforeSend)
   assert.equal(await queueMemberPrompt(runtime, captain, 'retired', content, signal), 'accepted')
 })
 
@@ -152,8 +131,8 @@ await test('modern queue and public messaging are both guarded, including nested
   const captain = { id: 'captain' }
   const first = scope({ subagents: runtime })
   const second = scope({ subagents: runtime })
-  guardSubagentDelivery(first, async (_sender, id) => id === 'retired-first')
-  guardSubagentDelivery(second, async (_sender, id) => id === 'retired-second')
+  guardSubagentDelivery(first, async id => id === 'retired-first')
+  guardSubagentDelivery(second, async id => id === 'retired-second')
   await assert.rejects(queueMemberPrompt(runtime, captain, 'retired-first', content, signal), { code: 'NOT_RESUMABLE' })
   await assert.rejects(runtime.sendMessage(captain, 'retired-second', content, { signal }), { code: 'NOT_RESUMABLE' })
   first.dispose()
@@ -187,12 +166,12 @@ await test('synchronous modern setup selects the first request, deduplicates eve
     provider: 'selected', model: 'selected-model', reasoningEffort: 'high',
   }, async () => {
     ctx.emit('agent/session-start', { agent, source: 'startup' })
-    // Two request listeners: the host's model-selection install plus this
-    // plugin's prepended route guard that keeps a pinned effort winning over a
-    // deployment-wide subagent effort policy.
-    assert.equal(agent.ctx.listeners.get('agent/request').size, 2)
+    // One request listener: this plugin's prepended route guard that keeps a
+    // pinned effort winning over a deployment-wide subagent effort policy.
+    // Harness 0.2.2 installs only a pre-step switch notice.
+    assert.equal(agent.ctx.listeners.get('agent/request').size, 1)
     ctx.emit('agent/session-start', { agent, source: 'compact' })
-    assert.equal(agent.ctx.listeners.get('agent/request').size, 2)
+    assert.equal(agent.ctx.listeners.get('agent/request').size, 1)
     assert.deepEqual(await selection(agent), { provider: 'selected', model: 'selected-model', reasoningEffort: 'high' })
   })
   ctx.dispose()
@@ -272,10 +251,9 @@ for (const fallbackActive of [false, true]) {
       assert.equal(delegated, 1)
     } else {
       const handler = [...agent.ctx.listeners.get('agent/request-error')][0]
-      assert.deepEqual(await handler({ agent, signal, failure: { code: 'AUTH' } }, async () => undefined), { kind: 'retry' })
-      // Harness retries inside the SAME step, without assembling the prompt
-      // again. The accepted fallback must replace the captured request route.
-      assert.deepEqual(await requestSelection(agent), { provider: 'backup', model: 'backup-model' })
+      // Modern recovery closes the prepared step instead of retrying it.
+      assert.deepEqual(await handler({ agent, signal, failure: { code: 'AUTH' } }, async () => undefined), undefined)
+      assert.deepEqual(agent.modelSelection, { provider: 'backup', model: 'backup-model' })
     }
   })
 }
@@ -347,8 +325,8 @@ await test('0.1.5 delivery queues team jobs and guards both host modes across HM
   const original = Object.getOwnPropertyDescriptor(runtime, deliverKey)
   const captain = { id: 'captain' }
   const first = scope({ subagents: runtime }), second = scope({ subagents: runtime })
-  guardSubagentDelivery(first, async (_sender, id) => id === 'retired-first')
-  guardSubagentDelivery(second, async (_sender, id) => id === 'retired-second')
+  guardSubagentDelivery(first, async id => id === 'retired-first')
+  guardSubagentDelivery(second, async id => id === 'retired-second')
   assert.equal(await queueMemberPrompt(runtime, captain, 'active', content, signal), 'accepted')
   assert.deepEqual(calls[0], [captain, 'active', content, source, signal, 'queue'])
   for (const id of ['retired-first', 'retired-second']) {
@@ -369,6 +347,43 @@ await test('0.1.5 delivery queues team jobs and guards both host modes across HM
   clean.dispose()
   assert.equal(await queueMemberPrompt(runtime, captain, 'active', content, signal), 'accepted')
   assert.equal(typeof original.value, 'function')
+})
+
+await test('0.2.2 manager delivery carries queue/steer and guards every resume path', async () => {
+  const calls = []
+  const manager = {
+    async deliverPrompt(id, body, options) { assert.equal(this, manager); calls.push(['deliver', id, body, options]); return 'accepted' },
+  }
+  const runtime = {
+    manager,
+    sendMessage(...args) { assert.equal(this, runtime); calls.push(['steer', ...args]); return Promise.resolve('steered') },
+  }
+  const captain = { id: 'captain', session: { header: {} } }
+  const ctx = scope({ subagents: runtime })
+  guardSubagentDelivery(ctx, async id => id === 'retired')
+  assert.equal(await queueMemberPrompt(runtime, captain, 'active', content, signal), 'accepted')
+  assert.deepEqual(calls[0], ['deliver', 'active', content, { source, signal, delivery: 'queue' }])
+  await assert.rejects(manager.deliverPrompt('retired', content, { source, signal, delivery: 'queue' }), { code: 'NOT_RESUMABLE' })
+  await assert.rejects(runtime.sendMessage(captain, 'retired', content, { signal }), { code: 'NOT_RESUMABLE' })
+  assert.equal(await steerMemberPrompt(runtime, captain, 'active', content, signal), 'accepted')
+  assert.equal(calls.at(-1)[3].delivery, 'steer')
+  // The modern queue alone satisfies the continuable-setup capability check.
+  const setupCtx = scope({ subagents: runtime })
+  installContinuableMemberSetup(setupCtx, () => () => {})
+  setupCtx.dispose()
+  ctx.dispose()
+  assert.equal(await manager.deliverPrompt('retired', content, { source, signal, delivery: 'queue' }), 'accepted')
+})
+
+await test('a host without a targeted drain interrupts the exact removed members', async () => {
+  const { drainMemberChildren } = await import('../lib/harness-compat.js')
+  const interrupted = []
+  const runtime = {
+    interrupt(id, authority) { interrupted.push([id, authority.kind, authority.agent.id]) },
+  }
+  const captain = { id: 'captain' }
+  await drainMemberChildren(runtime, captain, ['one', 'two'])
+  assert.deepEqual(interrupted, [['one', 'ancestor', 'captain'], ['two', 'ancestor', 'captain']])
 })
 
 await test('serial agent/created installs before first request, skips old early notification and cleans up', async () => {
