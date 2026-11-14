@@ -34,7 +34,7 @@
 
 这个分支尽量用 DSH 已经有的能力实现，而不是绕过去打补丁：
 
-- **一切皆插件。** 成员页控件是加法式槽位贡献（`conversation.input.right`）；不修改任何宿主服务，单所有者的 `conversation.input.model` 座位留给宿主。
+- **一切皆插件。** 成员页控件是加法式槽位贡献（`conversation.input.right`）；不修改任何宿主服务。`conversation.input.model` 座位通过 [`dsh-proton-adapter-dsh`](https://github.com/ChenXu233/dsh-proton) 接管：宿主那条条目照旧占座、照旧按优先级竞争，质子把胜出的那条重新渲染一遍，本插件只回答质子问的路由问题。没装质子的 profile 继续用插件自己的备用药丸。
 - **一个兼容下限。** [`compatibility.json`](./compatibility.json) 只声明 `minimumHost`；所有 DSH peer 保持 `*`，CI 只跑下限，Harness 发新版本不需要再发插件。
 - **一个验证入口。** `pnpm verify` 按顺序跑 25 个命名阶段，第一个失败就停。
 - **每个事实只有一个家。** 指南按读者分在 [`docs/`](./docs/README.md) 的三个目录里；同一个事实写两遍就是 bug，不是冗余。

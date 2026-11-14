@@ -66,6 +66,7 @@ export const phases = [
   ] },
   { name: 'unit: client harness', tests: [
     'scripts/client-harness-migration.test.mjs', 'scripts/workspace-activity.test.mjs', 'scripts/workspace-summary.test.mjs',
+    'scripts/verify-member-model-router.test.mjs',
   ] },
 ]
 

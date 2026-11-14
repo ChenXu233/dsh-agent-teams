@@ -239,5 +239,8 @@
   },
   "bin": {
     "dsh-agent-teams-doctor": "scripts/doctor.mjs"
+  },
+  "dependencies": {
+    "dsh-proton-adapter-dsh": "^0.1.5"
   }
 }

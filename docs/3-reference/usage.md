@@ -101,10 +101,13 @@
 
 | 控件 | 行为 |
 |---|---|
-| 模型药丸 | 目录来自插件自己的 `GET /member/models`（宿主 `ctx.llm` 的 provider 列表），切换走 `POST /member/model`；只作用于该成员**当前存活**的选择，冷成员与 halted 团队直接拒绝（不为了换模型唤醒成员） |
+| 模型药丸（备用） | 目录来自插件自己的 `GET /member/models`（宿主 `ctx.llm` 的 provider 列表），切换走 `POST /member/model`；只作用于该成员**当前存活**的选择，冷成员与 halted 团队直接拒绝（不为了换模型唤醒成员）。装了 `dsh-proton-adapter-dsh` 时这一项让位给下面的原生座位 |
 | `/` 启动器 | 菜单来自该成员**自己**的 `GET /member/commands?sessionId=`；选中后 `POST /member/relay`（`mode` 由 `/member/state` 决定：空闲排队、运行中 steer）。宿主自己的 `/` 菜单在成员页只列出命令、提交不执行，因此不用它 |
 | 停止 / 排队徽标 | `POST /member/stop`、`/member/state` 的待处理条数；驻留占位不算排队 |
 
+- **原生模型座位（`dsh-proton-adapter-dsh`）**：宿主那条 `conversation.input.model` 对寻址子代理会话是被围起来的——它的注入面回答 `available: false`，所以宿主自己的选择器在成员页整块渲染 `null`，`directory.load()` / `select()` 直接抛错。座位由质子接管（占座、把胜出的那条重新画一遍、kit 组装全在 `dsh-proton-adapter-dsh`，见该仓库的 `protonModelSeat`）；本插件只回答质子问的那个问题：**这个会话的选择去哪**。回答只含三个成员——`available: true`（不写它选择器根本不画）、`load`（空函数，两个 picker 打开时都会调，而被围起来的目录会抛）、`select`（转 `POST /member/model`）；`directory` 故意不动，模型分组与推理档位元数据继续用宿主那份。
+- **接管只在证明确是成员后发生**：客户端先读 `GET /member/membership` 的缓存，未命中就保持宿主行为——否则每个插件的子代理页都会冒出一个用不了的选择器。kit 按「条目 × 会话」组装一次，所以首次绘制时归属还没定的页面会一直用出厂路由，直到重新挂载；那种页面上的备用药丸会**不**让位，不会两边都空。
+- **安装**：`dsh plugin --profile <profile> add dsh-proton dsh-proton-adapter-dsh` 并重启 profile。适配包已经是本包的依赖（装上就有），但只有 profile 把这两个包都当作插件挂载，它们的客户端半边才会加载并提供 `ctx.protonModelSeat`；没挂载时 `ctx.inject(['protonModelSeat'], …)` 的回调根本不执行，插件回到备用药丸，其余功能不变。
 - **归档成员只读**：团队 halted 后控件仍在，但模型与命令入口按归档态禁用，历史可查看。
 - **不唤醒冷成员**：`/member/commands` 与 `/member/relay` 只读进程内已存在的 Agent，冷成员返回 409；只有发消息才会投递（并按其所在团队规则唤醒）。
 - **归属判定在插件侧**：客户端读不到团队状态，先向 `GET /member/membership?sessionId=` 探一次并缓存；未命中（非成员会话）三个控件都不渲染，交还宿主自带界面。

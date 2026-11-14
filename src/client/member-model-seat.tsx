@@ -9,11 +9,18 @@
  * Every value comes from this plugin's own routes. The host's per-session model
  * directory stays untouched (it is fenced for addressed subagent sessions).
  *
+ * This pill is the FALLBACK. When `dsh-proton-adapter-dsh` is in the
+ * composition, its model seat takes `conversation.input.model` and renders the
+ * host's own winning entry with this plugin's member routing swapped in; this
+ * component then renders nothing for that session, so a member page never shows
+ * two model controls.
+ *
  * @module dsh-agent-teams/client/member-model-seat
  */
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ensureMembership, membershipOf, type MemberMembership } from './member-membership.ts'
+import { memberSeatRouted, subscribeMemberSeat } from './member-model-router.ts'
 
 const STATE_URL = '/plugins/dsh-agent-teams/member/state'
 const MODELS_URL = '/plugins/dsh-agent-teams/member/models'
@@ -184,6 +191,12 @@ export function MemberModelSeat({ sessionId }: MemberModelSeatProps) {
     })()
   }, [busy, refresh, rows, sessionId])
 
+  // The proton takeover drives this session through the host's own seat. Two
+  // model pills on one page is the duplicate this module exists to remove, so
+  // this fallback stands down only where the native routing really reached the
+  // seat: a page painted before its membership settled keeps its pill.
+  const native = useSyncExternalStore(subscribeMemberSeat, () => memberSeatRouted(sessionId))
+  if (native) return null
   if (membership !== 'member' && membership !== 'member-archived') return null
   if (archived) {
     return <span style={{ ...pill, cursor: 'default', opacity: 0.7 }} data-agent-teams-member-model-seat={sessionId}>已归档</span>

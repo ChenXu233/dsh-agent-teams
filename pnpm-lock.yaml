@@ -316,6 +316,10 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      dsh-proton-adapter-dsh:
+        specifier: ^0.1.5
+        version: 0.1.5(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-client-store@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(react@18.3.1)
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.1.0
@@ -4149,6 +4153,22 @@ packages:
   diff@9.0.0:
     resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
     engines: {node: '>=0.3.1'}
+
+  dsh-proton-adapter-dsh@0.1.5:
+    resolution: {integrity: sha512-jfyzNkVKL0O6G0eXfmDAVQcEXfQyxShAiT7NBQcZF1fHX4RKF7lDhds7m3VC/lRsdr5kaWa35N9D5ymWBzaS0A==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.5
+      '@deepseek-ai/dsh-client-store': 0.2.2-rc.3
+      react: ^18.2.0
+
+  dsh-proton@0.1.5:
+    resolution: {integrity: sha512-W44hIGAwi/SoX5v53TDKTebk8dHgvhhrDNzHPLpjrCvBeqHMyZ+CyrWofayenNkPSR1WRu62gGJ+wf3YmLFgJg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.5
+      '@deepseek-ai/dsh-client-store': 0.2.2-rc.3
+      react: ^18.2.0
 
   dts-resolver@3.0.0:
     resolution: {integrity: sha512-1T1f+z+4tl9XD+m+0HBgWoL/nm0bOIffyWaUuUSBlFg/86IWvfx+wjNaO/ybU0AJzG9/Mi5hBUgGV6zCmWEN7Q==}
@@ -9721,6 +9741,19 @@ snapshots:
   dfa@1.2.0: {}
 
   diff@9.0.0: {}
+
+  dsh-proton-adapter-dsh@0.1.5(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-client-store@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(react@18.3.1):
+    dependencies:
+      '@deepseek-ai/cordis': 4.1.0(@deepseek-ai/cordis-plugin-include@1.1.0)(@deepseek-ai/cordis-plugin-loader@1.1.0)
+      '@deepseek-ai/dsh-client-store': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
+      dsh-proton: 0.1.5(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-client-store@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(react@18.3.1)
+      react: 18.3.1
+
+  dsh-proton@0.1.5(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-client-store@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(react@18.3.1):
+    dependencies:
+      '@deepseek-ai/cordis': 4.1.0(@deepseek-ai/cordis-plugin-include@1.1.0)(@deepseek-ai/cordis-plugin-loader@1.1.0)
+      '@deepseek-ai/dsh-client-store': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
+      react: 18.3.1
 
   dts-resolver@3.0.0: {}
 

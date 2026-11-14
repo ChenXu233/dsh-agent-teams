@@ -34,7 +34,7 @@ This repository is an independent design of that idea, maintained by [ChenXu233]
 
 The fork is built out of the DSH features that already exist instead of patching around them:
 
-- **Everything is a plugin.** Member-page controls are additive slot contributions (`conversation.input.right`); no host service is patched, and the single-owner `conversation.input.model` seat is left to the host.
+- **Everything is a plugin.** Member-page controls are additive slot contributions (`conversation.input.right`); no host service is patched. The `conversation.input.model` seat is taken over through [`dsh-proton-adapter-dsh`](https://github.com/ChenXu233/dsh-proton) — the shipped entry keeps the seat and its priority contest, proton re-renders whichever entry won it, and this plugin only answers proton's routing question for sessions it owns. Profiles without proton keep the fallback pill.
 - **One compatibility floor.** [`compatibility.json`](./compatibility.json) declares only `minimumHost`; every DSH peer stays `*`, CI exercises the floor, and a newer Harness release installs without a plugin release.
 - **One verification entry.** `pnpm verify` runs 25 named phases in order and stops at the first failure.
 - **One home per fact.** Guides live under [`docs/`](./docs/README.md) in three reader-oriented folders; a fact kept in two places is a bug, not redundancy.
