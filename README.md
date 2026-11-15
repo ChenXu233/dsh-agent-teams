@@ -42,7 +42,7 @@ The fork is built out of the DSH features that already exist instead of patching
 
 ## Releases
 
-[v0.2.5](./release-notes/v0.2.5.md) is the stable release on npm `latest`. A member conversation's model switcher is now the host's own `conversation.input.model` seat: it is taken over through `dsh-proton-adapter-dsh`, which re-renders whichever entry won that seat with this plugin's routing swapped in, so a picked model actually changes that member. Every other session keeps the shipped seat untouched, the previous additive pill becomes the fallback, and the install floor stays at `minimumHost: 0.2.2-rc.3`. The previous stable was [v0.2.4](./release-notes/v0.2.4.md). See the [floor declaration](./compatibility.json) and [verification scope](./docs/2-how-to/verify.md).
+[v0.2.6](./release-notes/v0.2.6.md) is the stable release on npm `latest`. It raises the proton floor to a build that mounts itself: `dsh-proton-adapter-dsh@^0.1.6` composes its own entry, so the member model seat is installed with one `dsh plugin add` instead of hand-written `cordis.patch.yml` rows. Nothing else moved — the member model router, the fallback pill that stands down when the native seat takes over, and the floor `minimumHost: 0.2.2-rc.3` are unchanged from v0.2.5. The previous stable was [v0.2.5](./release-notes/v0.2.5.md). See the [floor declaration](./compatibility.json) and [verification scope](./docs/2-how-to/verify.md).
 
 ## Why AgentTeams?
 
@@ -61,12 +61,12 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Supported pair: DeepSeek Harness `>=0.2.2-rc.3` + AgentTeams [v0.2.5](./release-notes/v0.2.5.md). The plugin declares one floor and nothing else.**
+**Supported pair: DeepSeek Harness `>=0.2.2-rc.3` + AgentTeams [v0.2.6](./release-notes/v0.2.6.md). The plugin declares one floor and nothing else.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| The floor (oldest supported host) | `0.2.2-rc.3` | [v0.2.5](./release-notes/v0.2.5.md) |
-| Any later RC, prerelease or stable release | `>=0.2.2-rc.3` | [v0.2.5](./release-notes/v0.2.5.md) |
+| The floor (oldest supported host) | `0.2.2-rc.3` | [v0.2.6](./release-notes/v0.2.6.md) |
+| Any later RC, prerelease or stable release | `>=0.2.2-rc.3` | [v0.2.6](./release-notes/v0.2.6.md) |
 
 There is no enumerated tested list to keep in sync. `engines.dsh` carries the floor and the host reads it before peers, so newer hosts install directly; CI exercises the floor, and everything above it is assumed compatible. A host below the floor is rejected by the installer.
 
@@ -78,7 +78,7 @@ In the app sidebar, open **Plugins → Add plugin**. You can install directly fr
 @chenxu233/dsh-agent-teams
 ```
 
-The package name resolves npm `latest`. To pin a plugin version, append `@0.2.5`, or the tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
+The package name resolves npm `latest`. To pin a plugin version, append `@0.2.6`, or the tag from the table above. Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
 
 The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile from `0.2.2-rc.3` on. Compare the embedded core with the floor `0.2.2-rc.3`: anything equal or newer installs, and no per-version exemption exists to maintain. See the [compatibility floor](./docs/3-reference/compatibility.md).
 

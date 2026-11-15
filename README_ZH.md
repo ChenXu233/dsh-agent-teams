@@ -42,7 +42,7 @@
 
 ## 版本更新
 
-[v0.2.5](./release-notes/v0.2.5.md) 是 npm `latest` 上的正式版本。成员会话的模型切换器改用宿主自己的 `conversation.input.model` 座位：这个座位由 `dsh-proton-adapter-dsh` 接管，把胜出的那条 entry 重新渲染一遍、只换进本插件的路由，所以选中的模型真的会作用到那个成员身上。其余会话的座位一个字节都不变，原来的加法式药丸降级为备用，安装下限仍是 `minimumHost: 0.2.2-rc.3`。上一版正式版为 [v0.2.4](./release-notes/v0.2.4.md)。下限声明见 [compatibility.json](./compatibility.json)，验收边界见[验证指南](./docs/2-how-to/verify.md)。
+[v0.2.6](./release-notes/v0.2.6.md) 是 npm `latest` 上的正式版本。这一版把质子下限抬到会自带挂载的构建：`dsh-proton-adapter-dsh@^0.1.6` 自己插入组合行，所以成员模型座位只要一条 `dsh plugin add`，不用再手写 `cordis.patch.yml`。其余都不动——成员模型 router、原生座位接管后让位的备用药丸、以及 `minimumHost: 0.2.2-rc.3` 都与 v0.2.5 一致。上一版正式版为 [v0.2.5](./release-notes/v0.2.5.md)。下限声明见 [compatibility.json](./compatibility.json)，验收边界见[验证指南](./docs/2-how-to/verify.md)。
 
 ## 为什么需要 AgentTeams？
 
@@ -60,12 +60,12 @@
 
 ## 安装与版本选择
 
-**支持组合：DeepSeek Harness `>=0.2.2-rc.3` + AgentTeams [v0.2.5](./release-notes/v0.2.5.md)。插件只声明一个下限，别的一概不列。**
+**支持组合：DeepSeek Harness `>=0.2.2-rc.3` + AgentTeams [v0.2.6](./release-notes/v0.2.6.md)。插件只声明一个下限，别的一概不列。**
 
 | 使用场景 | DeepSeek Harness | AgentTeams 插件 |
 | --- | --- | --- |
-| 下限（最老的受支持宿主） | `0.2.2-rc.3` | [v0.2.5](./release-notes/v0.2.5.md) |
-| 此后任何 RC / 预发布 / 正式版 | `>=0.2.2-rc.3` | [v0.2.5](./release-notes/v0.2.5.md) |
+| 下限（最老的受支持宿主） | `0.2.2-rc.3` | [v0.2.6](./release-notes/v0.2.6.md) |
+| 此后任何 RC / 预发布 / 正式版 | `>=0.2.2-rc.3` | [v0.2.6](./release-notes/v0.2.6.md) |
 
 这里没有需要同步的已测列表。宿主在读取 peer 之前先看 `engines.dsh` 这一个下限，所以更新的宿主可以直接安装；CI 只跑下限，比下限新的宿主按兼容处理。低于下限的宿主的会被安装器拒绝。
 
@@ -77,7 +77,7 @@
 @chenxu233/dsh-agent-teams
 ```
 
-不带版本号的包名会安装 npm `latest`；需要锁定插件版本时可追加 `@0.2.5`。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
+不带版本号的包名会安装 npm `latest`；需要锁定插件版本时可追加 `@0.2.6`。安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
 
 桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。判断标准只有一个：内嵌内核是否不低于下限 `0.2.2-rc.3`；等于或更高即可安装，不存在需要维护的分版本豁免。详见[兼容性下限](./docs/3-reference/compatibility.md)。
 

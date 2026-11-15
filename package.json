@@ -1,6 +1,6 @@
 {
   "name": "@chenxu233/dsh-agent-teams",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "AgentTeams for DeepSeek Harness: multi-agent team collaboration (captain, members, tasks with dependencies, messaging) driven by natural language, with a tree monitor in the web GUI",
   "type": "module",
   "main": "lib/index.js",
@@ -241,6 +241,6 @@
     "dsh-agent-teams-doctor": "scripts/doctor.mjs"
   },
   "dependencies": {
-    "dsh-proton-adapter-dsh": "^0.1.5"
+    "dsh-proton-adapter-dsh": "^0.1.6"
   }
 }
