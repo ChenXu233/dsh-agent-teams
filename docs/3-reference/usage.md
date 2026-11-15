@@ -107,7 +107,24 @@
 
 - **原生模型座位（`dsh-proton-adapter-dsh`）**：宿主那条 `conversation.input.model` 对寻址子代理会话是被围起来的——它的注入面回答 `available: false`，所以宿主自己的选择器在成员页整块渲染 `null`，`directory.load()` / `select()` 直接抛错。座位由质子接管（占座、把胜出的那条重新画一遍、kit 组装全在 `dsh-proton-adapter-dsh`，见该仓库的 `protonModelSeat`）；本插件只回答质子问的那个问题：**这个会话的选择去哪**。回答只含三个成员——`available: true`（不写它选择器根本不画）、`load`（空函数，两个 picker 打开时都会调，而被围起来的目录会抛）、`select`（转 `POST /member/model`）；`directory` 故意不动，模型分组与推理档位元数据继续用宿主那份。
 - **接管只在证明确是成员后发生**：客户端先读 `GET /member/membership` 的缓存，未命中就保持宿主行为——否则每个插件的子代理页都会冒出一个用不了的选择器。kit 按「条目 × 会话」组装一次，所以首次绘制时归属还没定的页面会一直用出厂路由，直到重新挂载；那种页面上的备用药丸会**不**让位，不会两边都空。
-- **安装**：`dsh plugin --profile <profile> add dsh-proton dsh-proton-adapter-dsh` 并重启 profile。适配包已经是本包的依赖（装上就有），但只有 profile 把这两个包都当作插件挂载，它们的客户端半边才会加载并提供 `ctx.protonModelSeat`；没挂载时 `ctx.inject(['protonModelSeat'], …)` 的回调根本不执行，插件回到备用药丸，其余功能不变。
+- **安装分两步：装包 + 挂行**。质子那几个包的 `cordis.patch.yml` 都是空数组——它们的契约是「由部署方的 profile patch 挂载」，所以 `dsh plugin add` 只把包装进 profile、把包加进 bundle 层，不会产生任何组合行：
+
+  ```sh
+  dsh plugin --profile <profile> add dsh-proton dsh-proton-adapter-dsh
+  ```
+
+  再在**该 profile 的** `cordis.patch.yml` 里追加（`id` 是行身份，`name` 必须等于包名，启动器按它 `require.resolve`）：
+
+  ```yaml
+  - insert:
+      - id: proton
+        name: dsh-proton
+      - id: proton-adapter-dsh
+        name: dsh-proton-adapter-dsh
+  ```
+
+  重启 profile 后 `ctx.protonModelSeat` 才存在。不装或不挂载时 `ctx.inject(['protonModelSeat'], …)` 的回调根本不执行，插件回到备用药丸，其余功能不变。
+- **为什么本插件的 YAML 不能代劳**：本包的 `cordis.patch.yml` 只能 `insert` 组合行，而行里的 `name` 由启动器从 **profile 根**解析。质子只是本包的普通依赖，pnpm 把它放在 `node_modules/.pnpm/dsh-proton@<版本>/` 下，profile 根解析不到（实测 `MODULE_NOT_FOUND`）；插一行不是「自动挂载」，是插一条加载不出来的插件。要让它自动，只有把质子提成本包的非可选 peer（让 profile 的 `auto-install-peers` 把它装到根上）再把行写进本包 patch——代价是每个装本插件的人都被装上质子三个包，且解析失败会让整个组合报错，所以默认不这么做。
 - **归档成员只读**：团队 halted 后控件仍在，但模型与命令入口按归档态禁用，历史可查看。
 - **不唤醒冷成员**：`/member/commands` 与 `/member/relay` 只读进程内已存在的 Agent，冷成员返回 409；只有发消息才会投递（并按其所在团队规则唤醒）。
 - **归属判定在插件侧**：客户端读不到团队状态，先向 `GET /member/membership?sessionId=` 探一次并缓存；未命中（非成员会话）三个控件都不渲染，交还宿主自带界面。
